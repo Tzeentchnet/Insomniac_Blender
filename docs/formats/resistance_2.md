@@ -76,11 +76,13 @@ u32 byte length
 | `0x1D1C0` | high mip payload | `highmips.dat` |
 | `0x1D200` | cubemap | `cubemaps.dat` |
 | `0x1D300` | Tie | `ties.dat` |
-| `0x1D400` | foliage | `foliage.dat` |
+| `0x1D400` | foliage | `foliages.dat` |
 | `0x1D500` | shrub | `shrubs.dat` |
 | `0x1D600` | Moby | `mobys.dat` |
 | `0x1D700` | animset | `animsets.dat` |
+| `0x1D800` | cinematic | `cinematics.dat` |
 | `0x1DA00` | zone | `zones.dat` |
+| `0x1DB00` | lighting | `lighting.dat` |
 
 Texture metadata is a parallel `0x1D140` section with four bytes per entry:
 format, mip count, log2 width, log2 height.
@@ -295,7 +297,7 @@ whole-disc survey.
 | Track-mask marker | InsomniaToolset asserts that bits 0..1 equal `2`. All 301,565 sampled masks use that marker; this importer now rejects invalid markers, kinds, components, and bone indices with a format error. | Match, with explicit validation |
 | Rotation reconstruction | Both seed partial quaternion tracks from the reference quaternion and normalize after replacing animated components. No negative adjacent quaternion dot products occurred in the 2,585 sampled clips, so no additional hemisphere rewrite is currently justified. | Match |
 | Position/scale component fallback | InsomniaToolset's GLTF decode path does not mark 16-bit position/scale components as present and initializes 8-bit-only tracks without their static reference components. In the sample that would lose 76 dynamic 16-bit position components, 909 static position components, and 4 static scale components; every affected value differs from bind. The importer tracks component presence for both widths and preserves static components. | Intentional difference; raw data favors this importer |
-| Additive composition | InsomniaToolset defines bind rotation multiplication, translation addition, and scale multiplication, but neither inspected GLTF loader calls that helper. This importer applies the same non-premultiplied bind/delta math for standalone Action playback. Runtime overlays can still require an unknown locomotion or idle base. | Toolset export gap; importer adaptation |
+| Additive composition | InsomniaToolset defines bind rotation multiplication, translation addition, and scale multiplication, but neither inspected GLTF loader calls that helper. The Resistance 2 profile retains the same non-premultiplied bind/delta math for standalone Action playback. Resistance 3 uses a separate decoded profile and matched base-layer bake rather than changing validated R2 clips. | Toolset export gap; game-specific importer adaptation |
 | Blend masks | Both treat zero as excluding an untracked static additive rotation. All 818 sampled additive clips use only `0` and `255`; the nonzero count equals the additive header subset count in every case, and no tracked bone has a zero mask. | Match |
 | Scale inheritance | InsomniaToolset splits scale from transform nodes for GLTF and propagates animated scale and scaled translations through inheriting descendants until a `DONT_INHERIT_SCALE` bone. Blender represents the flag directly. The importer now also removes ancestor scale while accumulating the source target matrix for such bones; 675 sampled clips exercise this boundary. | Equivalent Blender adaptation |
 | Timing | InsomniaToolset writes a final sample time of `(numFrames - 1) / frameRate`. Blender keys use the same duration mapped onto the scene FPS, and imported curves now use linear rather than Blender's default Bezier interpolation. | Match with Blender time mapping |
@@ -464,7 +466,7 @@ alpha override rather than weakening the mode-0 rule for unrelated shaders.
 Vector 0 is strongly supported as a base-color multiplier for standard
 materials: nearly all shaders use `(1,1,1,1)`, while non-default colors
 correlate with shields, energy, blood, metals, and character materials.
-Cycles-ready imports multiply albedo by vector 0 only when all components are
+Enhanced imports multiply albedo by vector 0 only when all components are
 finite and within `[0,1]`; otherwise they report the record and use neutral
 white.
 
@@ -527,12 +529,12 @@ The two previously questioned shaders both reference packed texture
 They must not emit. Their packed map still carries red/green gloss/specular
 data.
 
-Blender imports a packed map as Non-Color data only when its blue channel has
-content in standard mode, or when another verified channel is needed in
-Cycles-ready mode. A Separate Color node connects blue to Principled BSDF
-Emission Color with a conservative strength of `1.0`.
+Blender imports a packed map as Non-Color data when its blue channel has
+content or another verified flagged channel is needed. A Separate Color node
+connects blue to Principled BSDF Emission Color with a conservative strength
+of `1.0`.
 
-Cycles-ready mode additionally converts red gloss to roughness as
+The default material mode converts red gloss to roughness as
 `roughness = 1 - red` when flag `0x04` is set. Green would map to specular
 only when flag `0x02` is set, but that flag is absent from every shader in the
 whole-disc corpus, so no R2 material currently connects green. Authored
@@ -550,8 +552,8 @@ y = 1 - green * 2
 z = sqrt(max(0, 1 - x*x - y*y))
 ```
 
-Cycles-ready mode reconstructs an RGB tangent-space normal image with NumPy,
-marks it as Non-Color data, and connects it through a Normal Map node.
+The default material mode reconstructs an RGB tangent-space normal image with
+NumPy, marks it as Non-Color data, and connects it through a Normal Map node.
 Clamping the Z radicand is required because compression and effect maps can
 produce XY vectors slightly outside the unit circle.
 

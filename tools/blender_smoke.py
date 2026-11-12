@@ -81,7 +81,7 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument(
         "--cycles-materials",
         action="store_true",
-        help="Enable the default-off Cycles material Addon Preference",
+        help="Enable the default-off enhanced source material preference",
     )
     parser.add_argument(
         "--expected-cycles-material",
@@ -967,14 +967,15 @@ def _validate_cycles_materials(
         _require(material is not None, f"Missing material {material_name}")
         _require(
             material.get("insomniac_cycles_material") is False,
-            f"{material_name} unexpectedly uses Cycles processing",
+            f"{material_name} unexpectedly uses enhanced processing",
         )
         _require(
-            not any(
-                node.name.startswith(("Normal_", "Roughness_"))
-                for node in material.node_tree.nodes
-            ),
-            f"{material_name} has advanced nodes in standard mode",
+            material.get("insomniac_surface_material_channels") is True,
+            f"{material_name} does not enable standard surface channels",
+        )
+        _require(
+            material.get("insomniac_material_mode") == "R2_STANDARD",
+            f"{material_name} is not marked as an R2 standard material",
         )
 
     for value in alpha_materials:

@@ -60,6 +60,14 @@ def sync_active_action_range(
         _LAST_SYNC_KEY = key
         return False
 
+    if (
+        _ACTION_MARKER in action
+        and animation_data.action_slot is None
+        and len(action.slots) == 1
+        and action.slots[0].target_id_type == "OBJECT"
+    ):
+        animation_data.action_slot = action.slots[0]
+
     raw_start, raw_end = map(float, action.frame_range)
     key = (
         active_scene.as_pointer(),

@@ -19,9 +19,15 @@ except ModuleNotFoundError:
 
 
 if bpy is not None:
+    from insomniac_asset_io.blender.action_range import (
+        sync_active_action_range,
+    )
     from insomniac_asset_io.blender.importer import (
         _create_actions,
         _create_armature,
+    )
+    from insomniac_asset_io.games.resistance_2.animations import (
+        _compose_r3_overlays,
     )
     from insomniac_asset_io.games.resistance_2.formats import (
         Bone,
@@ -168,6 +174,171 @@ class BlenderRigTests(unittest.TestCase):
         )
         self.assertTrue(all(bone.select for bone in armature.pose.bones))
         self.assertIsNone(armature.animation_data.action)
+
+    def test_selected_action_with_missing_slot_moves_rig(self) -> None:
+        collection = self._collection()
+        bind = np.identity(4, dtype=np.float32)[None]
+        skeleton = Skeleton(
+            root_bone=0,
+            bones=(Bone(0, -1, 0xFFFF, 0xFFFF),),
+            bind_local=bind.copy(),
+            bind_world=bind.copy(),
+            bind_world_inverse=bind.copy(),
+            scale_shift=0,
+            translation_shift=0,
+        )
+        armature = _create_armature(
+            bpy.context,
+            "Slot_Rig",
+            skeleton,
+            collection,
+        )
+        clip = DecodedClip(
+            name="motion",
+            frame_rate=24.0,
+            looping=False,
+            additive=False,
+            translations=np.array(
+                [[[0.0, 0.0, 0.0]], [[2.0, 0.0, 0.0]]],
+                dtype=np.float32,
+            ),
+            rotations_xyzw=np.tile(
+                np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float32),
+                (2, 1, 1),
+            ),
+            scales=np.ones((2, 1, 3), dtype=np.float32),
+            animated_bones=np.ones(1, dtype=np.bool_),
+        )
+
+        self.assertEqual(
+            _create_actions(bpy.context, armature, skeleton, [clip]),
+            1,
+        )
+        action = bpy.data.actions["Slot_Rig_motion"]
+        bpy.context.view_layer.objects.active = armature
+        armature.animation_data.action = action
+        armature.animation_data.action_slot = None
+        bpy.context.scene.frame_set(2)
+        bpy.context.view_layer.update()
+        self.assertAlmostEqual(
+            armature.pose.bones["bone_000"].location.x,
+            0.0,
+            places=5,
+        )
+
+        self.assertTrue(sync_active_action_range())
+        self.assertEqual(
+            armature.animation_data.action_slot,
+            action.slots[0],
+        )
+        bpy.context.scene.frame_set(1)
+        bpy.context.view_layer.update()
+        first = armature.pose.bones["bone_000"].location.x
+        bpy.context.scene.frame_set(2)
+        bpy.context.view_layer.update()
+        second = armature.pose.bones["bone_000"].location.x
+
+        self.assertAlmostEqual(first, 0.0, places=5)
+        self.assertAlmostEqual(second, 2.0, places=5)
+
+    def test_baked_overlay_preserves_base_motion(self) -> None:
+        collection = self._collection()
+        bind = np.repeat(
+            np.identity(4, dtype=np.float32)[None], 2, axis=0
+        )
+        skeleton = Skeleton(
+            root_bone=0,
+            bones=(
+                Bone(0, -1, 0xFFFF, 0xFFFF),
+                Bone(0, -1, 0xFFFF, 0xFFFF),
+            ),
+            bind_local=bind.copy(),
+            bind_world=bind.copy(),
+            bind_world_inverse=bind.copy(),
+            scale_shift=0,
+            translation_shift=0,
+        )
+        armature = _create_armature(
+            bpy.context,
+            "Overlay_Rig",
+            skeleton,
+            collection,
+        )
+        mesh_object = self._weighted_vertex(
+            collection,
+            armature,
+            bone_name="bone_001",
+        )
+        identity = np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float32)
+        quarter_turn = np.array(
+            [0.0, 0.0, np.sqrt(0.5), np.sqrt(0.5)],
+            dtype=np.float32,
+        )
+        base_translations = np.zeros((2, 2, 3), dtype=np.float32)
+        base_translations[1, 0, 0] = 1.0
+        base = DecodedClip(
+            name="ravager_r3_idle_sighted",
+            frame_rate=float(bpy.context.scene.render.fps),
+            looping=True,
+            additive=False,
+            translations=base_translations,
+            rotations_xyzw=np.tile(identity, (2, 2, 1)),
+            scales=np.ones((2, 2, 3), dtype=np.float32),
+            animated_bones=np.array([True, False]),
+        )
+        overlay_rotations = np.tile(identity, (2, 2, 1))
+        overlay_rotations[1, 1] = quarter_turn
+        overlay = DecodedClip(
+            name="ravager_partial_aiming_horizontal",
+            frame_rate=float(bpy.context.scene.render.fps),
+            looping=False,
+            additive=True,
+            translations=np.zeros((2, 2, 3), dtype=np.float32),
+            rotations_xyzw=overlay_rotations,
+            scales=np.ones((2, 2, 3), dtype=np.float32),
+            animated_bones=np.array([False, True]),
+            source_flags=0x0202,
+            blend_weights=np.array([0, 255], dtype=np.uint8),
+            reference_rotations_xyzw=np.tile(identity, (2, 1)),
+            rotation_animated_bones=np.array([False, True]),
+            translation_components=np.zeros((2, 3), dtype=np.bool_),
+            scale_components=np.zeros((2, 3), dtype=np.bool_),
+        )
+        _compose_r3_overlays([base, overlay], skeleton)
+
+        self.assertEqual(
+            _create_actions(
+                bpy.context, armature, skeleton, [overlay]
+            ),
+            1,
+        )
+        action = bpy.data.actions[
+            "Overlay_Rig_ravager_partial_aiming_horizontal"
+        ]
+        self.assertTrue(action["insomniac_overlay_baked"])
+        self.assertEqual(
+            action["insomniac_overlay_base"],
+            "ravager_r3_idle_sighted",
+        )
+        armature.animation_data.action = action
+        armature.animation_data.action_slot = action.slots[0]
+        bpy.context.scene.frame_set(2)
+        bpy.context.view_layer.update()
+
+        self.assertAlmostEqual(
+            armature.pose.bones["bone_000"].location.x,
+            1.0,
+            places=5,
+        )
+        evaluated = mesh_object.evaluated_get(
+            bpy.context.evaluated_depsgraph_get()
+        )
+        self.assertAlmostEqual(
+            evaluated.data.vertices[0].co.x, 0.0, places=5
+        )
+        self.assertAlmostEqual(
+            evaluated.data.vertices[0].co.y, 1.0, places=5
+        )
 
     def test_bone_relations_preserve_length_and_scale_flags(self) -> None:
         collection = self._collection()

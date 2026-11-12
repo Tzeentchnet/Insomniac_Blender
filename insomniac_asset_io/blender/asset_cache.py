@@ -11,10 +11,9 @@ import uuid
 import bpy
 
 from ..core.errors import InsomniacError
-from ..core.iso import prepare_resistance_2_level
 from ..core.source import GameSource
+from ..games.registry import GameAdapter, get_game_adapter
 from ..games.resistance_2.formats import AssetKind
-from ..games.resistance_2.reader import Resistance2Reader
 from .importer import AssetImportOptions, import_moby, import_tie
 
 
@@ -81,6 +80,7 @@ def ensure_asset_library_registered(
 
 def run_asset_cache_worker(
     *,
+    game_id: str,
     iso_path: str | Path,
     level_name: str,
     cache_directory: str | Path,
@@ -99,6 +99,8 @@ def run_asset_cache_worker(
         "--python",
         str(worker),
         "--",
+        "--game",
+        game_id,
         "--iso",
         str(Path(iso_path).expanduser()),
         "--level",
@@ -126,6 +128,7 @@ def run_asset_cache_worker(
         command.extend(("--asset-limit", str(options.asset_limit)))
 
     try:
+        adapter = get_game_adapter(game_id)
         result = subprocess.run(
             command,
             check=False,
@@ -141,7 +144,7 @@ def run_asset_cache_worker(
             )
             detail = "\n".join(output.splitlines()[-20:])
             raise InsomniacError(
-                "Resistance 2 Asset Browser cache generation failed"
+                f"{adapter.label} Asset Browser cache generation failed"
                 + (f":\n{detail}" if detail else "")
             )
         if not report_path.is_file():
@@ -156,17 +159,19 @@ def run_asset_cache_worker(
         report_path.unlink(missing_ok=True)
 
 
-def generate_resistance_2_asset_library(
+def generate_asset_library(
     context: bpy.types.Context,
     *,
+    game_id: str,
     iso_path: str | Path,
     level_name: str,
     cache_directory: str | Path,
     options: AssetCacheOptions,
 ) -> dict[str, object]:
+    adapter = get_game_adapter(game_id)
     iso = Path(iso_path).expanduser().resolve()
     cache_root = Path(cache_directory).expanduser().resolve()
-    cached_level = prepare_resistance_2_level(iso, level_name, cache_root)
+    cached_level = adapter.prepare_level(iso, level_name, cache_root)
     library_root = asset_library_path(cache_root)
     level_parts = tuple(
         _safe_component(part)
@@ -176,7 +181,7 @@ def generate_resistance_2_asset_library(
     if not level_parts:
         raise InsomniacError("The Asset Browser cache level is empty")
 
-    relative_level = Path("resistance_2", *level_parts)
+    relative_level = Path(adapter.cache_key, *level_parts)
     final_level = library_root / relative_level
     staging_root = cache_root / f".asset-cache-staging-{uuid.uuid4().hex}"
     staged_level = staging_root / relative_level
@@ -187,13 +192,13 @@ def generate_resistance_2_asset_library(
     catalogs: dict[str, tuple[uuid.UUID, str]] = {}
     try:
         with GameSource.open(cached_level) as source:
-            reader = Resistance2Reader(source)
+            reader = adapter.create_reader(source)
             for kind in (AssetKind.MOBY, AssetKind.TIE):
                 pointers = reader.asset_pointers(kind)
                 if options.asset_limit:
                     pointers = pointers[: options.asset_limit]
                 catalog_path = (
-                    f"Resistance 2/{level_name.replace('\\', '/')}/"
+                    f"{adapter.label}/{level_name.replace('\\', '/')}/"
                     f"{'Mobys' if kind is AssetKind.MOBY else 'Ties'}"
                 )
                 catalog_id = uuid.uuid5(_CATALOG_NAMESPACE, catalog_path)
@@ -242,6 +247,7 @@ def generate_resistance_2_asset_library(
                             level_name=level_name,
                             catalog_id=catalog_id,
                             generate_preview=options.generate_previews,
+                            adapter=adapter,
                         )
                         filename = (
                             f"{kind.name.casefold()}_{pointer.tuid:016x}.blend"
@@ -278,7 +284,7 @@ def generate_resistance_2_asset_library(
 
         manifest = {
             "schema_version": ASSET_CACHE_SCHEMA_VERSION,
-            "game": "RESISTANCE_2",
+            "game": adapter.id,
             "level": level_name.replace("\\", "/"),
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "source": {
@@ -310,6 +316,7 @@ def generate_resistance_2_asset_library(
         raise
 
     return {
+        "game": adapter.id,
         "library": str(library_root),
         "level": level_name.replace("\\", "/"),
         "assets": len(assets),
@@ -344,9 +351,10 @@ def _mark_asset(
     level_name: str,
     catalog_id: uuid.UUID,
     generate_preview: bool,
+    adapter: GameAdapter,
 ) -> None:
     kind_label = "Moby" if kind is AssetKind.MOBY else "Tie"
-    collection["insomniac_game"] = "RESISTANCE_2"
+    collection["insomniac_game"] = adapter.id
     collection["insomniac_asset_kind"] = kind.name
     collection["insomniac_asset_tuid"] = f"0x{tuid:016X}"
     collection["insomniac_cache_level"] = level_name.replace("\\", "/")
@@ -354,9 +362,9 @@ def _mark_asset(
     metadata = collection.asset_data
     metadata.catalog_id = str(catalog_id)
     metadata.description = (
-        f"Resistance 2 {kind_label} 0x{tuid:016X} from {level_name}"
+        f"{adapter.label} {kind_label} 0x{tuid:016X} from {level_name}"
     )
-    metadata.tags.new("Resistance 2", skip_if_exists=True)
+    metadata.tags.new(adapter.label, skip_if_exists=True)
     metadata.tags.new(kind_label, skip_if_exists=True)
     metadata.tags.new(f"0x{tuid:016X}", skip_if_exists=True)
     if generate_preview:

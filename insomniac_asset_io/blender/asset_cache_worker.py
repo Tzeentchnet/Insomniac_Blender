@@ -14,6 +14,7 @@ def _arguments() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Generate an Insomniac Asset IO Blender Asset Browser cache"
     )
+    parser.add_argument("--game", required=True)
     parser.add_argument("--iso", type=Path, required=True)
     parser.add_argument("--level", required=True)
     parser.add_argument("--cache-directory", type=Path, required=True)
@@ -36,10 +37,10 @@ def _load_generator():
         sys.path.insert(0, root_text)
     from insomniac_asset_io.blender.asset_cache import (
         AssetCacheOptions,
-        generate_resistance_2_asset_library,
+        generate_asset_library,
     )
 
-    return AssetCacheOptions, generate_resistance_2_asset_library
+    return AssetCacheOptions, generate_asset_library
 
 
 def main() -> int:
@@ -48,6 +49,7 @@ def main() -> int:
     try:
         report = generate(
             bpy.context,
+            game_id=args.game,
             iso_path=args.iso,
             level_name=args.level,
             cache_directory=args.cache_directory,

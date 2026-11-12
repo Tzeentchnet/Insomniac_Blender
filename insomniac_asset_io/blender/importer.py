@@ -23,6 +23,7 @@ from ..games.resistance_2.formats import (
 )
 from ..games.resistance_2.materials import (
     EMISSIVE_CHANNEL_NAME,
+    can_reconstruct_normal_map,
     has_emissive_mask,
     reconstruct_normal_map,
 )
@@ -37,6 +38,22 @@ _LINEAR_INTERPOLATION = (
     .enum_items["LINEAR"]
     .value
 )
+
+
+def _reader_game_id(reader: object | None) -> str:
+    return str(getattr(reader, "game_id", "RESISTANCE_2"))
+
+
+def _reader_game_label(reader: object | None) -> str:
+    return str(getattr(reader, "game_label", "Resistance 2"))
+
+
+def _reader_engine_id(reader: object | None) -> str:
+    return str(getattr(reader, "engine_id", "V2"))
+
+
+def _reader_asset_prefix(reader: object | None) -> str:
+    return str(getattr(reader, "asset_prefix", "R2"))
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,6 +116,13 @@ class _MaterialFactory:
         self.enabled = enabled
         self.warnings = warnings
         self.cycles_materials = cycles_materials
+        self.surface_material_channels = cycles_materials or bool(
+            getattr(
+                reader,
+                "material_surface_channels_by_default",
+                False,
+            )
+        )
         self.materials: dict[int, bpy.types.Material] = {}
         self.images: dict[tuple[int, str], bpy.types.Image] = {}
 
@@ -106,7 +130,10 @@ class _MaterialFactory:
         cached = self.materials.get(shader_tuid)
         if cached is not None:
             return cached
-        name = f"R2_Shader_{shader_tuid:016X}"
+        name = (
+            f"{_reader_asset_prefix(self.reader)}_Shader_"
+            f"{shader_tuid:016X}"
+        )
         material = bpy.data.materials.get(name) or bpy.data.materials.new(name)
         material.use_nodes = True
         material["insomniac_shader_tuid"] = f"0x{shader_tuid:016X}"
@@ -131,11 +158,32 @@ class _MaterialFactory:
                         principled,
                         shader,
                     )
-                    self._add_diffuse(material, principled, shader)
-                    if self.cycles_materials:
+                    diffuse_color = self._add_diffuse(
+                        material,
+                        principled,
+                        shader,
+                    )
+                    if self.surface_material_channels:
                         self._add_normal(material, principled, shader)
-                    self._add_packed(material, principled, shader)
+                    self._add_packed(
+                        material,
+                        principled,
+                        shader,
+                        diffuse_color=diffuse_color,
+                    )
         material["insomniac_cycles_material"] = self.cycles_materials
+        material["insomniac_surface_material_channels"] = (
+            self.surface_material_channels
+        )
+        material["insomniac_material_mode"] = (
+            "ENHANCED"
+            if self.cycles_materials
+            else (
+                f"{_reader_asset_prefix(self.reader)}_STANDARD"
+                if self.surface_material_channels
+                else "STANDARD"
+            )
+        )
         self.materials[shader_tuid] = material
         return material
 
@@ -174,6 +222,18 @@ class _MaterialFactory:
                 for vector in shader.material_values
                 for value in vector
             ]
+        if shader.material_tail_values:
+            material["insomniac_material_tail_values"] = list(
+                shader.material_tail_values
+            )
+        if shader.texture_map_indices:
+            material["insomniac_texture_map_indices"] = list(
+                shader.texture_map_indices
+            )
+        if shader.material_pre_control_values:
+            material["insomniac_material_pre_control_values"] = list(
+                shader.material_pre_control_values
+            )
         texture_names = ("diffuse", "normal", "packed", "detail")
         texture_ids = (
             shader.albedo_texture_id,
@@ -181,17 +241,49 @@ class _MaterialFactory:
             shader.expensive_texture_id,
             shader.detail_texture_id,
         )
-        for texture_name, texture_id, texture_path in zip(
-            texture_names,
-            texture_ids,
-            shader.texture_lookup_paths,
+        for index, (texture_name, texture_id, texture_path) in enumerate(
+            zip(
+                texture_names,
+                texture_ids,
+                shader.texture_lookup_paths,
+            )
         ):
+            if index < len(shader.texture_map_indices):
+                material[f"insomniac_{texture_name}_map_index"] = (
+                    shader.texture_map_indices[index]
+                )
+                material[f"insomniac_{texture_name}_texture_bound"] = (
+                    shader.is_texture_slot_bound(index)
+                )
             if texture_id is not None:
                 material[f"insomniac_{texture_name}_texture_id"] = (
                     f"0x{texture_id:08X}"
                 )
             if texture_path is not None:
                 material[f"insomniac_{texture_name}_texture_path"] = (
+                    texture_path
+                )
+        for index, (texture_id, texture_path) in enumerate(
+            zip(
+                shader.extra_texture_ids,
+                shader.extra_texture_lookup_paths,
+            ),
+            start=1,
+        ):
+            slot = index + 3
+            if slot < len(shader.texture_map_indices):
+                material[f"insomniac_extra_{index}_map_index"] = (
+                    shader.texture_map_indices[slot]
+                )
+                material[f"insomniac_extra_{index}_texture_bound"] = (
+                    shader.is_texture_slot_bound(slot)
+                )
+            if texture_id is not None:
+                material[f"insomniac_extra_{index}_texture_id"] = (
+                    f"0x{texture_id:08X}"
+                )
+            if texture_path is not None:
+                material[f"insomniac_extra_{index}_texture_path"] = (
                     texture_path
                 )
 
@@ -208,7 +300,7 @@ class _MaterialFactory:
         if self.cycles_materials and not valid:
             self._warn(
                 f"Shader 0x{shader.tuid:016X} has an unsupported, "
-                "non-finite, or out-of-range base color factor; the Cycles "
+                "non-finite, or out-of-range base color factor; the enhanced "
                 "material uses neutral white"
             )
         if not self.cycles_materials:
@@ -237,10 +329,10 @@ class _MaterialFactory:
         material: bpy.types.Material,
         principled: bpy.types.Node,
         shader: ShaderInfo,
-    ) -> None:
+    ) -> bpy.types.NodeSocket | None:
         texture_id = shader.albedo_texture_id
-        if texture_id is None:
-            return
+        if texture_id is None or not shader.is_texture_slot_bound(0):
+            return None
         try:
             image = self.image(
                 texture_id,
@@ -250,13 +342,14 @@ class _MaterialFactory:
             self._warn(
                 f"Shader 0x{shader.tuid:016X} diffuse fallback: {exc}"
             )
-            return
+            return None
         node = material.node_tree.nodes.new("ShaderNodeTexImage")
         node.name = f"Diffuse_{texture_id:08X}"
         node.label = (
-            "Resistance 2 source placeholder: default pink"
+            f"{_reader_game_label(self.reader)} source placeholder: "
+            "default pink"
             if shader.source_placeholder_kind == "DEFAULT_PINK"
-            else "Resistance 2 diffuse"
+            else f"{_reader_game_label(self.reader)} diffuse"
         )
         node.image = image
         color_output = node.outputs["Color"]
@@ -264,7 +357,9 @@ class _MaterialFactory:
         if self.cycles_materials and factor[:3] != (1.0, 1.0, 1.0):
             tint = material.node_tree.nodes.new("ShaderNodeVectorMath")
             tint.name = f"Base_Color_Tint_{shader.tuid:016X}"
-            tint.label = "Resistance 2 base color multiplier"
+            tint.label = (
+                f"{_reader_game_label(self.reader)} base color multiplier"
+            )
             tint.operation = "MULTIPLY"
             tint.inputs[1].default_value = factor[:3]
             material.node_tree.links.new(color_output, tint.inputs[0])
@@ -275,6 +370,7 @@ class _MaterialFactory:
         )
 
         self._add_alpha(material, principled, node, shader)
+        return node.outputs["Color"]
 
     def _add_alpha(
         self,
@@ -287,10 +383,45 @@ class _MaterialFactory:
         if alpha_mode == "OPAQUE":
             return
         material.surface_render_method = "DITHERED"
+        if self._uses_luminance_alpha(shader):
+            coverage = material.node_tree.nodes.new("ShaderNodeRGBToBW")
+            coverage.name = f"Alpha_Coverage_{shader.tuid:016X}"
+            coverage.label = (
+                f"{_reader_game_label(self.reader)} albedo-luminance coverage"
+            )
+            strength = material.node_tree.nodes.new("ShaderNodeMath")
+            strength.name = f"Alpha_Strength_{shader.tuid:016X}"
+            strength.label = (
+                f"{_reader_game_label(self.reader)} authored overlay strength"
+            )
+            strength.operation = "MULTIPLY"
+            strength.use_clamp = True
+            alpha_factor = self._material_alpha_factor(shader)
+            strength.inputs[1].default_value = alpha_factor
+            material.node_tree.links.new(
+                texture_node.outputs["Color"],
+                coverage.inputs["Color"],
+            )
+            material.node_tree.links.new(
+                coverage.outputs["Val"],
+                strength.inputs[0],
+            )
+            material.node_tree.links.new(
+                strength.outputs["Value"],
+                principled.inputs["Alpha"],
+            )
+            material["insomniac_alpha_source"] = (
+                "ALBEDO_LUMINANCE_X_MATERIAL_ALPHA"
+            )
+            material["insomniac_alpha_approximation"] = (
+                "R3_MODE_1_BC1_LUMINANCE"
+            )
+            material["insomniac_alpha_factor"] = alpha_factor
+            return
         if alpha_mode == "MASK":
             clip = material.node_tree.nodes.new("ShaderNodeMath")
             clip.name = f"Alpha_Clip_{shader.tuid:016X}"
-            clip.label = "Resistance 2 alpha mask"
+            clip.label = f"{_reader_game_label(self.reader)} alpha mask"
             clip.operation = "GREATER_THAN"
             clip.inputs[1].default_value = 0.5
             material.node_tree.links.new(
@@ -308,6 +439,21 @@ class _MaterialFactory:
             principled.inputs["Alpha"],
         )
 
+    def _uses_luminance_alpha(self, shader: ShaderInfo) -> bool:
+        shader_tuids = getattr(
+            self.reader,
+            "material_luminance_alpha_shader_tuids",
+            (),
+        )
+        return shader.tuid in shader_tuids
+
+    @staticmethod
+    def _material_alpha_factor(shader: ShaderInfo) -> float:
+        factor = shader.base_color_factor[3]
+        if not math.isfinite(factor) or factor < 0.0:
+            return 1.0
+        return factor
+
     def _add_normal(
         self,
         material: bpy.types.Material,
@@ -315,9 +461,21 @@ class _MaterialFactory:
         shader: ShaderInfo,
     ) -> None:
         texture_id = shader.normal_texture_id
-        if texture_id is None:
+        if texture_id is None or not shader.is_texture_slot_bound(1):
             return
         try:
+            texture = self.reader.read_texture(
+                texture_id,
+                lookup_path=shader.texture_lookup_paths[1],
+            )
+            if not can_reconstruct_normal_map(texture):
+                material["insomniac_normal_map_supported"] = False
+                self._warn(
+                    f"Shader 0x{shader.tuid:016X} normal map uses "
+                    f"unsupported texture format "
+                    f"0x{texture.info.format_code:02X}"
+                )
+                return
             image = self.image(
                 texture_id,
                 role="normal",
@@ -328,13 +486,16 @@ class _MaterialFactory:
                 f"Shader 0x{shader.tuid:016X} normal map unavailable: {exc}"
             )
             return
+        material["insomniac_normal_map_supported"] = True
         texture_node = material.node_tree.nodes.new("ShaderNodeTexImage")
         texture_node.name = f"Normal_{texture_id:08X}"
-        texture_node.label = "Resistance 2 reconstructed normal"
+        texture_node.label = (
+            f"{_reader_game_label(self.reader)} reconstructed normal"
+        )
         texture_node.image = image
         normal = material.node_tree.nodes.new("ShaderNodeNormalMap")
         normal.name = f"Normal_Map_{texture_id:08X}"
-        normal.label = "Resistance 2 tangent normal"
+        normal.label = f"{_reader_game_label(self.reader)} tangent normal"
         normal.space = "TANGENT"
         material.node_tree.links.new(
             texture_node.outputs["Color"],
@@ -350,9 +511,12 @@ class _MaterialFactory:
         material: bpy.types.Material,
         principled: bpy.types.Node,
         shader: ShaderInfo,
+        *,
+        diffuse_color: bpy.types.NodeSocket | None = None,
     ) -> None:
         texture_id = shader.expensive_texture_id
-        if texture_id is None:
+        if texture_id is None or not shader.is_texture_slot_bound(2):
+            material["insomniac_emissive_mask"] = False
             material["insomniac_emissive"] = False
             return
         material["insomniac_packed_texture_id"] = f"0x{texture_id:08X}"
@@ -368,9 +532,26 @@ class _MaterialFactory:
                 f"Shader 0x{shader.tuid:016X} emission unavailable: {exc}"
             )
             return
-        emissive = has_emissive_mask(texture)
+        emissive_mask = has_emissive_mask(texture)
+        disabled_control_mask = int(
+            getattr(
+                self.reader,
+                "material_emission_disabled_control_mask",
+                0,
+            )
+        )
+        control_enabled = (
+            shader.material_word is None
+            or not (
+                (shader.material_unknown_1 or 0)
+                & disabled_control_mask
+            )
+        )
+        emissive = emissive_mask and control_enabled
+        material["insomniac_emissive_mask"] = emissive_mask
+        material["insomniac_emissive_control_enabled"] = control_enabled
         material["insomniac_emissive"] = emissive
-        use_surface_channels = self.cycles_materials and (
+        use_surface_channels = self.surface_material_channels and (
             shader.use_glossiness or shader.use_specular
         )
         if not emissive and not use_surface_channels:
@@ -383,7 +564,9 @@ class _MaterialFactory:
         )
         texture_node = material.node_tree.nodes.new("ShaderNodeTexImage")
         texture_node.name = f"Packed_{texture_id:08X}"
-        texture_node.label = "Resistance 2 packed material map"
+        texture_node.label = (
+            f"{_reader_game_label(self.reader)} packed material map"
+        )
         texture_node.image = image
         separate = material.node_tree.nodes.new("ShaderNodeSeparateColor")
         separate.name = f"Packed_Channels_{texture_id:08X}"
@@ -393,10 +576,12 @@ class _MaterialFactory:
             texture_node.outputs["Color"],
             separate.inputs["Color"],
         )
-        if self.cycles_materials and shader.use_glossiness:
+        if self.surface_material_channels and shader.use_glossiness:
             roughness = material.node_tree.nodes.new("ShaderNodeMath")
             roughness.name = f"Roughness_{texture_id:08X}"
-            roughness.label = "Resistance 2 inverted red gloss"
+            roughness.label = (
+                f"{_reader_game_label(self.reader)} inverted red gloss"
+            )
             roughness.operation = "SUBTRACT"
             roughness.use_clamp = True
             roughness.inputs[0].default_value = 1.0
@@ -408,18 +593,71 @@ class _MaterialFactory:
                 roughness.outputs["Value"],
                 principled.inputs["Roughness"],
             )
-        if self.cycles_materials and shader.use_specular:
+        if self.surface_material_channels and shader.use_specular:
             material.node_tree.links.new(
                 separate.outputs["Green"],
                 principled.inputs["Specular IOR Level"],
             )
         if emissive:
+            emission_color = separate.outputs[EMISSIVE_CHANNEL_NAME]
+            if bool(
+                getattr(
+                    self.reader,
+                    "material_emission_uses_albedo",
+                    False,
+                )
+            ):
+                emission_color = self._add_albedo_colored_emission(
+                    material,
+                    shader,
+                    diffuse_color,
+                    emission_color,
+                )
+                material["insomniac_emissive_color_source"] = (
+                    "ALBEDO_X_BASE_COLOR_FACTOR_X_PACKED_BLUE"
+                )
+            else:
+                material["insomniac_emissive_color_source"] = "PACKED_BLUE"
             material.node_tree.links.new(
-                separate.outputs[EMISSIVE_CHANNEL_NAME],
+                emission_color,
                 principled.inputs["Emission Color"],
             )
             principled.inputs["Emission Strength"].default_value = 1.0
             material["insomniac_emissive_strength"] = 1.0
+
+    def _add_albedo_colored_emission(
+        self,
+        material: bpy.types.Material,
+        shader: ShaderInfo,
+        diffuse_color: bpy.types.NodeSocket | None,
+        emissive_mask: bpy.types.NodeSocket,
+    ) -> bpy.types.NodeSocket:
+        factor = self._base_color_factor(shader)
+        color = diffuse_color
+        if color is not None and factor[:3] != (1.0, 1.0, 1.0):
+            tint = material.node_tree.nodes.new("ShaderNodeVectorMath")
+            tint.name = f"Emission_Tint_{shader.tuid:016X}"
+            tint.label = (
+                f"{_reader_game_label(self.reader)} emission color "
+                "multiplier"
+            )
+            tint.operation = "MULTIPLY"
+            tint.inputs[1].default_value = factor[:3]
+            material.node_tree.links.new(color, tint.inputs[0])
+            color = tint.outputs["Vector"]
+
+        combine = material.node_tree.nodes.new("ShaderNodeVectorMath")
+        combine.name = f"Emission_Color_{shader.tuid:016X}"
+        combine.label = (
+            f"{_reader_game_label(self.reader)} albedo-colored emission"
+        )
+        combine.operation = "MULTIPLY"
+        if color is None:
+            combine.inputs[0].default_value = factor[:3]
+        else:
+            material.node_tree.links.new(color, combine.inputs[0])
+        material.node_tree.links.new(emissive_mask, combine.inputs[1])
+        return combine.outputs["Vector"]
 
     def _warn(self, message: str) -> None:
         LOGGER.warning(message)
@@ -453,7 +691,10 @@ class _MaterialFactory:
             "packed": "_Packed",
         }
         suffix = suffixes.get(role, f"_{role.title()}")
-        name = f"R2_Texture_{texture_id:08X}{suffix}"
+        name = (
+            f"{_reader_asset_prefix(self.reader)}_Texture_"
+            f"{texture_id:08X}{suffix}"
+        )
         image = bpy.data.images.get(name)
         if image is not None and _IMAGE_HAS_ALPHA_KEY in image:
             # Built by an earlier import: reuse it without decoding again.
@@ -537,6 +778,7 @@ def import_moby(
         _safe_name(asset.name),
         options.convert_axes,
         source_path,
+        reader,
     )
     warnings: list[str] = []
     materials = _MaterialFactory(
@@ -578,6 +820,7 @@ def import_moby(
         root,
         armature,
         asset.skeleton,
+        _reader_game_label(reader),
     )
 
     optional_object_count = 0
@@ -625,6 +868,7 @@ def import_moby(
                 root,
                 armature,
                 asset.skeleton,
+                _reader_game_label(reader),
             )
             optional_object_count += 1
 
@@ -643,6 +887,7 @@ def import_moby(
             armature,
             asset.skeleton,
             warnings,
+            _reader_game_label(reader),
         )
 
     action_count = 0
@@ -677,13 +922,14 @@ def _bind_moby_mesh(
     root: bpy.types.Object,
     armature: bpy.types.Object | None,
     skeleton: Skeleton | None,
+    game_label: str,
 ) -> None:
     if armature is None or skeleton is None:
         mesh_object.parent = root
         return
     mesh_object.parent = armature
     modifier = mesh_object.modifiers.new(
-        name="Resistance 2 Armature",
+        name=f"{game_label} Armature",
         type="ARMATURE",
     )
     modifier.object = armature
@@ -702,6 +948,7 @@ def _import_collision_geometry(
     armature: bpy.types.Object | None,
     skeleton: Skeleton | None,
     warnings: list[str],
+    game_label: str,
 ) -> int:
     object_count = 0
     kind_names = {4: "Box", 5: "Sphere", 6: "Capsule"}
@@ -735,6 +982,7 @@ def _import_collision_geometry(
             armature,
             skeleton,
             primitive.bone_index,
+            game_label,
         )
         object_count += 1
 
@@ -773,6 +1021,7 @@ def _bind_collision_object(
     armature: bpy.types.Object | None,
     skeleton: Skeleton | None,
     bone_index: int | None,
+    game_label: str,
 ) -> None:
     if (
         bone_index is None
@@ -796,6 +1045,7 @@ def _bind_collision_object(
         root,
         armature,
         skeleton,
+        game_label,
     )
 
 
@@ -1012,9 +1262,15 @@ def import_tie(
     source_path: str,
 ) -> ImportResult:
     asset = reader.read_tie(tuid)
-    name = f"R2_Tie_{tuid:016X}"
+    name = f"{_reader_asset_prefix(reader)}_Tie_{tuid:016X}"
     collection = _new_collection(context, name)
-    root = _create_root(collection, name, options.convert_axes, source_path)
+    root = _create_root(
+        collection,
+        name,
+        options.convert_axes,
+        source_path,
+        reader,
+    )
     warnings: list[str] = []
     materials = _MaterialFactory(
         reader,
@@ -1051,12 +1307,16 @@ def import_level(
     source_path: str,
 ) -> ImportResult:
     level_name = PureName(reader.resource_prefix.split("/")[-1] or "Level")
-    collection = _new_collection(context, f"R2_{level_name}")
+    collection = _new_collection(
+        context,
+        f"{_reader_asset_prefix(reader)}_{level_name}",
+    )
     root = _create_root(
         collection,
-        f"R2_{level_name}",
+        f"{_reader_asset_prefix(reader)}_{level_name}",
         options.convert_axes,
         source_path,
+        reader,
     )
     root["insomniac_level_prefix"] = reader.resource_prefix
     warnings: list[str] = []
@@ -1235,13 +1495,14 @@ def _create_root(
     name: str,
     convert_axes: bool,
     source_path: str,
+    reader: Resistance2Reader,
 ) -> bpy.types.Object:
     root = bpy.data.objects.new(f"{name}_Root", None)
     collection.objects.link(root)
     if convert_axes:
         root.rotation_euler[0] = math.radians(90.0)
-    root["insomniac_game"] = "RESISTANCE_2"
-    root["insomniac_engine"] = "V2"
+    root["insomniac_game"] = _reader_game_id(reader)
+    root["insomniac_engine"] = _reader_engine_id(reader)
     root["insomniac_source"] = source_path
     return root
 
@@ -1464,6 +1725,9 @@ def _create_actions(
         action["insomniac_frame_rate"] = clip.frame_rate
         action["insomniac_looping"] = clip.looping
         action["insomniac_additive_source"] = clip.additive
+        if clip.overlay_base_name is not None:
+            action["insomniac_overlay_baked"] = True
+            action["insomniac_overlay_base"] = clip.overlay_base_name
         slot = action.slots.new("OBJECT", armature.name)
         action.slots.active = slot
         layer = action.layers.new("Animation")

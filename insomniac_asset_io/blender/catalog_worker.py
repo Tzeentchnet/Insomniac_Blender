@@ -10,8 +10,9 @@ import traceback
 def _arguments() -> argparse.Namespace:
     arguments = sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else []
     parser = argparse.ArgumentParser(
-        description="Generate a Resistance 2 import metadata catalog"
+        description="Generate an Insomniac game import metadata catalog"
     )
+    parser.add_argument("--game", required=True)
     parser.add_argument("--iso", type=Path, required=True)
     parser.add_argument("--cache-directory", type=Path, required=True)
     parser.add_argument("--report", type=Path, required=True)
@@ -23,7 +24,7 @@ def _load_builder():
     root_text = str(extension_root)
     if root_text not in sys.path:
         sys.path.insert(0, root_text)
-    from insomniac_asset_io.games.resistance_2.catalog import (
+    from insomniac_asset_io.games.catalog import (
         build_catalog_from_iso,
         local_catalog_path,
     )
@@ -41,7 +42,8 @@ def main() -> int:
     try:
         report = build_catalog(
             args.iso,
-            catalog_path(args.cache_directory),
+            catalog_path(args.cache_directory, args.game),
+            game_id=args.game,
             region="Custom",
             work_directory=args.cache_directory,
             progress=progress,

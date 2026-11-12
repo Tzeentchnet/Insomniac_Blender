@@ -17,6 +17,7 @@ EXCLUDED_PARTS = {
     ".git",
     ".github",
     ".pytest_cache",
+    ".ruff_cache",
     "__pycache__",
     "dist",
     "tests",

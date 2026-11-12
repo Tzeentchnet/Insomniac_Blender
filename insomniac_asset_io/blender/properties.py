@@ -10,12 +10,13 @@ from bpy.app.handlers import persistent
 
 from ..core.errors import MissingResourceError
 from ..core.iso import DEFAULT_CACHE_DIRECTORY
-from ..games.resistance_2.catalog import (
+from ..games.catalog import (
     CatalogAsset,
-    Resistance2Catalog,
+    GameCatalog,
     filter_catalog_assets,
     load_catalog,
 )
+from ..games.registry import GAME_ADAPTERS
 from ..games.resistance_2.formats import AssetKind
 
 
@@ -134,6 +135,20 @@ def _selector_preferences(
     )
 
 
+def _game_id(settings: bpy.types.PropertyGroup | None) -> str:
+    if settings is None:
+        return "RESISTANCE_2"
+    value = getattr(settings, "game", "RESISTANCE_2")
+    return value if value in GAME_ADAPTERS else "RESISTANCE_2"
+
+
+def _catalog(
+    settings: bpy.types.PropertyGroup | None,
+    context: bpy.types.Context | None,
+) -> GameCatalog:
+    return load_catalog(_cache_directory(context), _game_id(settings))
+
+
 def _kind_filter(settings: bpy.types.PropertyGroup) -> AssetKind | None:
     value = settings.asset_kind_filter
     if value == "MOBY":
@@ -145,7 +160,7 @@ def _kind_filter(settings: bpy.types.PropertyGroup) -> AssetKind | None:
 
 def _level_filter(
     settings: bpy.types.PropertyGroup,
-    catalog: Resistance2Catalog,
+    catalog: GameCatalog,
 ) -> str | None:
     # A dynamic enum reads back as "" when its stored index no longer exists
     # (for example after the catalog was regenerated); treat that as no filter.
@@ -157,7 +172,7 @@ def _level_filter(
 
 @lru_cache(maxsize=64)
 def _build_asset_items(
-    catalog: Resistance2Catalog,
+    catalog: GameCatalog,
     query: str,
     kind: AssetKind | None,
     level: str | None,
@@ -215,7 +230,7 @@ def asset_selector_state(
     settings: bpy.types.PropertyGroup,
     context: bpy.types.Context | None,
 ) -> AssetSelectorState:
-    catalog = load_catalog(_cache_directory(context))
+    catalog = _catalog(settings, context)
     hide_duplicates, show_tuids, show_owner_levels = _selector_preferences(
         context
     )
@@ -305,7 +320,7 @@ def ensure_asset_selection(
     settings: bpy.types.PropertyGroup,
     context: bpy.types.Context,
 ) -> str:
-    catalog = load_catalog(_cache_directory(context))
+    catalog = _catalog(settings, context)
     try:
         catalog.asset(settings.asset_tuid)
     except MissingResourceError:
@@ -314,11 +329,11 @@ def ensure_asset_selection(
 
 
 def _level_filter_items(
-    _settings: bpy.types.PropertyGroup,
+    settings: bpy.types.PropertyGroup,
     context: bpy.types.Context | None,
 ) -> list[tuple[str, str, str]]:
     global _LEVEL_FILTER_ITEMS
-    catalog = load_catalog(_cache_directory(context))
+    catalog = _catalog(settings, context)
     _LEVEL_FILTER_ITEMS = [
         (ALL_LEVELS, "All Levels", "Do not filter assets by level"),
         *(
@@ -330,20 +345,34 @@ def _level_filter_items(
 
 
 def _level_items(
-    _settings: bpy.types.PropertyGroup,
+    settings: bpy.types.PropertyGroup,
     context: bpy.types.Context | None,
 ) -> list[tuple[str, str, str]]:
     global _LEVEL_ITEMS
-    catalog = load_catalog(_cache_directory(context))
+    catalog = _catalog(settings, context)
     _LEVEL_ITEMS = [
         (
             level,
             level,
-            f"Resistance 2 level {level} from the {catalog.region} catalog",
+            f"{catalog.game_label} level {level} from the "
+            f"{catalog.region} catalog",
         )
         for level in catalog.levels
     ]
     return _LEVEL_ITEMS
+
+
+def _update_game(
+    settings: bpy.types.PropertyGroup,
+    context: bpy.types.Context,
+) -> None:
+    catalog = _catalog(settings, context)
+    settings.source_path = ""
+    settings.source_summary = ""
+    settings.last_message = ""
+    clear_asset_filters(settings)
+    set_asset_selection(settings, catalog.assets[0].identifier)
+    settings.level_id = catalog.levels[0]
 
 
 class InsomniacAssetPickerItem(bpy.types.PropertyGroup):
@@ -359,18 +388,20 @@ class InsomniacSceneSettings(bpy.types.PropertyGroup):
         name="Game",
         items=[
             (
-                "RESISTANCE_2",
-                "Resistance 2",
-                "Insomniac Engine v2, PlayStation 3",
+                adapter.id,
+                adapter.label,
+                adapter.engine,
             )
+            for adapter in GAME_ADAPTERS.values()
         ],
         default="RESISTANCE_2",
+        update=_update_game,
     )
     source_path: bpy.props.StringProperty(
         name="Source",
         description=(
-            "A Resistance 2 ISO, extracted assetlookup.dat, level PSARC, or "
-            "folder containing one ISO or extracted level resources"
+            "A decrypted game ISO, extracted assetlookup.dat, level PSARC, "
+            "or folder containing one ISO or extracted level resources"
         ),
         subtype="FILE_PATH",
     )

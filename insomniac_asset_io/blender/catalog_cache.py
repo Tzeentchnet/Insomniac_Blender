@@ -8,11 +8,13 @@ import uuid
 import bpy
 
 from ..core.errors import InsomniacError
-from ..games.resistance_2.catalog import local_catalog_path
+from ..games.catalog import local_catalog_path
+from ..games.registry import get_game_adapter
 
 
 def run_catalog_worker(
     *,
+    game_id: str,
     iso_path: str | Path,
     cache_directory: str | Path,
 ) -> dict[str, object]:
@@ -29,6 +31,8 @@ def run_catalog_worker(
         "--python",
         str(worker),
         "--",
+        "--game",
+        game_id,
         "--iso",
         str(Path(iso_path).expanduser()),
         "--cache-directory",
@@ -37,6 +41,7 @@ def run_catalog_worker(
         str(report_path),
     ]
     try:
+        adapter = get_game_adapter(game_id)
         result = subprocess.run(
             command,
             check=False,
@@ -52,7 +57,7 @@ def run_catalog_worker(
             )
             detail = "\n".join(output.splitlines()[-20:])
             raise InsomniacError(
-                "Resistance 2 import catalog generation failed"
+                f"{adapter.label} import catalog generation failed"
                 + (f":\n{detail}" if detail else "")
             )
         if not report_path.is_file():
@@ -62,7 +67,7 @@ def run_catalog_worker(
         report = json.loads(report_path.read_text(encoding="utf-8"))
         if not isinstance(report, dict):
             raise InsomniacError("The import catalog report is invalid")
-        catalog = local_catalog_path(cache_root)
+        catalog = local_catalog_path(cache_root, game_id)
         if not catalog.is_file():
             raise InsomniacError(
                 f"The import catalog worker did not create {catalog}"

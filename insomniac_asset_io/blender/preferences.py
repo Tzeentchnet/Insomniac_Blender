@@ -3,6 +3,7 @@ from __future__ import annotations
 import bpy
 
 from ..core.iso import DEFAULT_CACHE_DIRECTORY
+from ..games.registry import GAME_ADAPTERS
 
 
 _INTERNAL_PACKAGE_SUFFIX = ".insomniac_asset_io.blender"
@@ -24,18 +25,27 @@ class InsomniacAddonPreferences(bpy.types.AddonPreferences):
     bl_idname = ADDON_MODULE
 
     cycles_materials: bpy.props.BoolProperty(
-        name="Cycles-ready Resistance 2 materials",
+        name="Enhanced source materials",
         description=(
-            "Build richer Principled materials with reconstructed normal "
-            "maps, packed gloss, source color tint, and shader alpha modes"
+            "Apply source color multipliers; verified R2 and R3 normal and "
+            "gloss nodes are built by default, and this option does not "
+            "change the active render engine"
         ),
         default=False,
     )
     resistance_2_iso_path: bpy.props.StringProperty(
         name="Resistance 2 ISO",
         description=(
-            "A legally obtained decrypted Resistance 2 ISO used to generate "
-            "the local Asset Browser cache"
+            "A legally obtained decrypted Resistance 2 ISO used for imports "
+            "and local cache generation"
+        ),
+        subtype="FILE_PATH",
+    )
+    resistance_3_iso_path: bpy.props.StringProperty(
+        name="Resistance 3 ISO",
+        description=(
+            "A legally obtained decrypted Resistance 3 ISO used for imports "
+            "and local cache generation"
         ),
         subtype="FILE_PATH",
     )
@@ -47,6 +57,17 @@ class InsomniacAddonPreferences(bpy.types.AddonPreferences):
         ),
         subtype="DIR_PATH",
         default=str(DEFAULT_CACHE_DIRECTORY),
+    )
+    asset_cache_game: bpy.props.EnumProperty(
+        name="Catalog / Asset Browser game",
+        description=(
+            "Game used by catalog regeneration and Asset Browser cache tools"
+        ),
+        items=[
+            (adapter.id, adapter.label, adapter.engine)
+            for adapter in GAME_ADAPTERS.values()
+        ],
+        default="RESISTANCE_2",
     )
     asset_cache_level: bpy.props.StringProperty(
         name="Cached level",
@@ -155,16 +176,18 @@ class InsomniacAddonPreferences(bpy.types.AddonPreferences):
     def draw(self, _context):
         layout = self.layout
         source = layout.box()
-        source.label(text="Resistance 2 source and extraction", icon="DISC")
+        source.label(text="Game sources and extraction", icon="DISC")
         source.prop(self, "resistance_2_iso_path")
+        source.prop(self, "resistance_3_iso_path")
         source.prop(self, "asset_cache_directory")
+        source.prop(self, "asset_cache_game")
         source.operator(
             "insomniac.rebuild_import_catalog",
             text="Regenerate Import Catalog from ISO",
             icon="FILE_REFRESH",
         )
         source.label(
-            text="The bundled USA catalog provides 4,130 assets and 27 levels",
+            text="Bundled USA catalogs are used until regenerated locally",
             icon="INFO",
         )
 
@@ -192,7 +215,7 @@ class InsomniacAddonPreferences(bpy.types.AddonPreferences):
         level.prop(self, "level_convert_axes")
 
         materials = layout.box()
-        materials.label(text="Resistance 2 materials", icon="MATERIAL")
+        materials.label(text="Material processing", icon="MATERIAL")
         materials.prop(self, "cycles_materials")
         materials.label(
             text="Applies to future imports and generated caches only",
@@ -200,7 +223,7 @@ class InsomniacAddonPreferences(bpy.types.AddonPreferences):
         )
 
         cache = layout.box()
-        cache.label(text="Resistance 2 Asset Browser", icon="ASSET_MANAGER")
+        cache.label(text="Asset Browser", icon="ASSET_MANAGER")
         cache.prop(self, "asset_cache_level")
         cache.prop(self, "asset_cache_materials")
         cache.prop(self, "asset_cache_animations")

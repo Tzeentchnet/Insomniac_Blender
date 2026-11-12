@@ -38,7 +38,7 @@ class BlenderSettingsTests(unittest.TestCase):
         action = bpy.data.actions.new("Range_Action")
         action["insomniac_frame_rate"] = 60.0
         action.frame_range = (5.25, 42.2)
-        action.slots.new("OBJECT", armature.name)
+        slot = action.slots.new("OBJECT", armature.name)
         armature.animation_data_create()
 
         try:
@@ -54,6 +54,10 @@ class BlenderSettingsTests(unittest.TestCase):
             armature.animation_data.action = action
             bpy.context.view_layer.update()
 
+            armature.animation_data.action_slot = None
+            bpy.context.view_layer.update()
+
+            self.assertEqual(armature.animation_data.action_slot, slot)
             self.assertEqual(scene.frame_start, 5)
             self.assertEqual(scene.frame_end, 43)
             self.assertEqual(scene.frame_preview_start, 5)
@@ -73,6 +77,7 @@ class BlenderSettingsTests(unittest.TestCase):
         original_scene = bpy.context.scene
         original_scene_pointer = original_scene.as_pointer()
         settings = original_scene.insomniac_asset_io
+        settings.game = "RESISTANCE_2"
         settings.source_path = r"E:\Tests\resistance_2.iso"
         settings.asset_filter = "vtol approach"
         settings.asset_kind_filter = "MOBY"
@@ -93,6 +98,7 @@ class BlenderSettingsTests(unittest.TestCase):
             bpy.context.scene.as_pointer(),
         )
         restored = bpy.context.scene.insomniac_asset_io
+        self.assertEqual(restored.game, "RESISTANCE_2")
         self.assertEqual(
             restored.source_path,
             r"E:\Tests\resistance_2.iso",
@@ -108,6 +114,20 @@ class BlenderSettingsTests(unittest.TestCase):
         self.assertEqual(restored.source_summary, "")
         self.assertFalse(restored.source_inspection_busy)
         self.assertEqual(restored.last_message, "")
+
+    def test_switching_games_resets_game_specific_scene_choices(self) -> None:
+        settings = bpy.context.scene.insomniac_asset_io
+        settings.source_path = r"E:\Tests\resistance_2.iso"
+        settings.asset_filter = "vtol"
+        settings.asset_kind_filter = "MOBY"
+
+        settings.game = "RESISTANCE_3"
+
+        self.assertEqual(settings.source_path, "")
+        self.assertEqual(settings.asset_filter, "")
+        self.assertEqual(settings.asset_kind_filter, "ALL")
+        self.assertTrue(settings.asset_tuid.startswith(("MOBY:", "TIE:")))
+        self.assertEqual(settings.level_id, "lobby")
 
 
 if __name__ == "__main__":

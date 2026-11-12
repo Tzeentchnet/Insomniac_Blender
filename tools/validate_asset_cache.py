@@ -113,8 +113,11 @@ def main() -> int:
     library = args.library.resolve()
     catalog = library / "blender_assets.cats.txt"
     _require(catalog.is_file(), f"Asset catalog is missing: {catalog}")
-    manifests = sorted(library.glob("resistance_2/**/manifest.json"))
-    _require(manifests, f"No Resistance 2 cache manifests found under {library}")
+    manifests = sorted(library.glob("resistance_*/**/manifest.json"))
+    _require(
+        manifests,
+        f"No Insomniac Asset IO cache manifests found under {library}",
+    )
 
     assets: list[dict[str, Any]] = []
     for manifest_path in manifests:

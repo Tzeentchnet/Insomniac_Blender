@@ -6,8 +6,8 @@ generations through one parser. Each supported game owns its archive,
 resource, geometry, animation, material, and level-placement chain behind a
 shared Blender-facing interface.
 
-The first adapter targets **Resistance 2 (PlayStation 3 / Insomniac Engine
-v2)**.
+The extension currently supports **Resistance 2** and **Resistance 3** on
+PlayStation 3 through separate game readers and a shared Blender workflow.
 
 ## Resistance 2 support
 
@@ -25,7 +25,7 @@ v2)**.
 | USA model/level import catalog | 4,130 named assets and 27 levels bundled as metadata |
 | Blender Asset Browser library | Locally generated Moby/Tie Collection assets |
 | Diffuse textures and packed blue-channel emission masks | Supported |
-| Reconstructed normals and packed red-channel gloss | Optional Cycles-ready material mode |
+| Reconstructed normals and packed red-channel gloss | Supported in the default material mode |
 | DXT1/3/5 and common uncompressed textures | Supported |
 | Zone Tie placement | Supported with linked mesh data |
 | Zone terrain (`UFrag`) | Supported |
@@ -35,6 +35,28 @@ v2)**.
 
 See [Resistance 2 formats](docs/formats/resistance_2.md) and
 [known issues](docs/known_issues.md) for precise layouts and caveats.
+
+## Resistance 3 support
+
+| Feature | Status |
+|---|---|
+| Hybrid ISO9660/UDF decrypted ISO sources | Supported without external extraction tools |
+| PS3 zlib PSARC reading | Supported, including random entry slices |
+| `assetlookup.dat` discovery | Supported |
+| Moby models, skeletons, skin weights, and animations | Supported, including the R3 playback profile and standalone baking for matched runtime overlays |
+| Moby damage permutations and collision geometry | Optional; disabled by default |
+| Tie static meshes | Supported |
+| USA model/level import catalog | 5,820 named assets and 27 levels bundled as metadata |
+| Diffuse, reconstructed normal, packed red-gloss response, albedo-colored packed-blue emission, and the Goliath wet-leg overlay | Supported in the default material mode |
+| Detail and additional shader references | Preserved as metadata; runtime composition is not yet proven |
+| DXT and common uncompressed textures | Supported, including global texture bundles |
+| Zone Tie placement and terrain (`UFrag`) | Supported |
+| Gameplay Moby placement | Supported as linked static mesh instances |
+| Shrub and foliage geometry | Not yet implemented |
+| Lighting, level collision, VFX, and cubemaps | Not yet implemented |
+
+See [Resistance 3 formats](docs/formats/resistance_3.md) for the verified
+layout differences from Resistance 2.
 
 ## Install
 
@@ -52,7 +74,7 @@ See [Resistance 2 formats](docs/formats/resistance_2.md) and
 
 2. In Blender, open **Edit > Preferences > Get Extensions**.
 3. Use **Install from Disk** and choose
-   `dist\insomniac_asset_io-0.3.4.zip`.
+   `dist\insomniac_asset_io-0.4.3.zip`.
 4. Open the **Insomniac** tab in the 3D View sidebar.
 
 Blender includes NumPy; no external Python package is required at runtime.
@@ -61,7 +83,8 @@ Blender includes NumPy; no external Python package is required at runtime.
 
 ### Import a model or static mesh
 
-1. In Add-on Preferences, select a decrypted Resistance 2 ISO and local
+1. Select **Resistance 2** or **Resistance 3** in the sidebar. In Add-on
+   Preferences, select the corresponding decrypted ISO and a local
    extraction-cache directory.
 2. In the **Insomniac** sidebar, click the asset button to open a scrollable
    chooser listing every asset alphabetically. Use its search field to find
@@ -86,11 +109,12 @@ for the Blender session when creating or opening another file, including with
 **File > New** (`Ctrl+N`). Transient progress and result messages reset with
 the file.
 
-The bundled USA catalog contains 4,130 unique importable TUIDs across all 27
-disc levels. The importer reuses an extracted owner level when available and
-otherwise extracts that level's cached/uncached and global archive pairs from
-the configured ISO on demand. A manually selected PSARC or ISO remains an
-optional source override.
+The bundled USA catalogs contain 4,130 Resistance 2 assets and 5,820
+Resistance 3 assets, each across 27 disc levels. The importer reuses an
+extracted owner level when available and otherwise extracts that level's
+cached/uncached and global archive pairs from the selected game's configured
+ISO on demand. A manually selected PSARC or ISO remains an optional source
+override.
 
 Moby imports create the intact/base mesh, armature, weights, materials, and
 every decoded animset clip as a persistent Blender Action by default. The rig
@@ -98,9 +122,16 @@ opens in its neutral rest pose; choose an Action when animation playback is
 wanted. Actions retain their source-derived playback ranges, and the imported
 pose bones start selected so Blender's default **Only Show Selected** filter
 shows their keyframes immediately in the Action Editor. Selecting an imported
-Action also updates the scene playback range, and the preview range when it is
-enabled, to that clip's bounds. Sampled transform keys use linear interpolation
-and respect source scale-inheritance flags.
+Action automatically binds its compatible armature slot and updates the scene
+playback range, and the preview range when it is enabled, to that clip's
+bounds. Sampled transform keys use linear interpolation and respect source
+scale-inheritance flags.
+
+Matched Resistance 3 partial/additive clips are baked over a compatible idle
+clip so each imported Action is useful without recreating the game's runtime
+animation layers. These Actions retain
+`insomniac_additive_source = true` and identify the baked base through the
+`insomniac_overlay_baked` and `insomniac_overlay_base` custom properties.
 
 Damage permutations and collision geometry are independently disabled by
 default. Enabling them in Add-on Preferences puts each damage segment in the
@@ -111,34 +142,37 @@ excluded from renders.
 
 ### Import a level
 
-Choose one of the 27 entries in the sidebar's **Level** list and click
-**Import Level**. The extraction cache is checked first and the selected level
-is extracted from the configured ISO when needed. Terrain is created per
-zone. Tie and gameplay placements share mesh datablocks instead of duplicating
-geometry.
+Choose an entry in the sidebar's **Level** list and click **Import Level**.
+The list follows the active game's catalog. The extraction cache is checked
+first and the selected level is extracted from that game's configured ISO
+when needed. Terrain is created per zone. Tie and gameplay placements share
+mesh datablocks instead of duplicating geometry.
 
 Gameplay Mobys are intentionally placed as static linked meshes during a
 level import. Import an individual Moby to edit its rig and animations.
 
 ### Use an ISO directly
 
-The ISO source path calls a libarchive-compatible `tar` executable without
-using a shell. Configure the default ISO in Add-on Preferences or select an
-ISO as the optional sidebar source override, then use the catalog selectors.
-The sidebar source also accepts a directory containing exactly one `.iso`
-file. The importer extracts only the required level pair and global pair.
-Complete existing extractions are reused. **Extract Selected Level Now**
-remains available when an explicit PSARC path is useful for external tools.
-When **Inspect Source** needs ISO extraction, the sidebar and status bar show
-a busy message before processing starts; preparing the archives can take
-several minutes.
+The ISO source path uses a bounded internal ISO9660 reader, with a
+libarchive-compatible `tar` executable as a fallback for other valid image
+variants. This handles Resistance 3's hybrid image and duplicated layer files
+without mounting the disc. Configure each game's default ISO in Add-on
+Preferences or select an ISO as the optional sidebar source override, then use
+the catalog selectors. The sidebar source also accepts a directory containing
+exactly one `.iso` file. The importer extracts only the required level pair
+and global pair. Complete existing extractions are reused. **Extract Selected
+Level Now** remains available when an explicit PSARC path is useful for
+external tools. When **Inspect Source** needs ISO extraction, the sidebar and
+status bar show a busy message before processing starts; preparing the
+archives can take several minutes.
 
 The extension never modifies the ISO.
 
 ### Import defaults and catalog regeneration
 
-Model/static-mesh and level options live in Add-on Preferences rather than
-the sidebar:
+Model/static-mesh, selector, material, and level options are shared between
+the games and live in Add-on Preferences rather than the sidebar. ISO paths
+and generated catalogs remain game-specific:
 
 - model materials, Moby animations, animation limit, axis conversion, and
   default-off damage-permutation and collision-geometry import;
@@ -146,66 +180,69 @@ the sidebar:
   visibility;
 - level materials, terrain, static props, gameplay instances, and axis
   conversion;
-- default-off Cycles-ready material processing.
+- default-off enhanced source-material processing.
 
 Asset labels show only the readable source name by default, such as
 `Mp Scientist Head`. **Hide duplicate asset names** defaults on and collapses
 matching display basenames after the path filter is applied. TUIDs and owner
 levels remain in tooltips and can be restored to labels in Add-on Preferences.
 
-The extension ships a metadata-only USA catalog containing source entity
+The extension ships metadata-only USA catalogs containing source entity
 paths, level ownership, and TUIDs, not models, textures, or other game
-payloads. **Regenerate Import Catalog from ISO** scans another legally
-obtained disc into the local extraction cache and replaces the active
-selector catalog. Catalog generation reads only IGHW headers, section tables,
-and bounded name sections; it does not decode every mesh.
+payloads. Choose **Catalog / Asset Browser game** before using **Regenerate
+Import Catalog from ISO**. It scans that game's legally obtained disc into the
+local extraction cache and replaces only that game's selector catalog.
+Catalog generation reads only IGHW headers, section tables, and bounded name
+sections; it does not decode every mesh.
 
 ### Build the local Asset Browser cache
 
 The extension registers an **Insomniac Assets** library with Blender's Asset
-Browser. The library is initially empty because Resistance 2 models and
-textures are copyrighted game data and are not distributed with the
-extension.
+Browser. The library is initially empty because game models and textures are
+copyrighted data and are not distributed with the extension.
 
 To populate or regenerate it:
 
 1. Open **Edit > Preferences > Add-ons > Insomniac Asset IO**.
-2. Select your legally obtained decrypted Resistance 2 ISO.
-3. Choose the local cache directory and disc level. `lobby` is the compact
-   default cache.
+2. Select your legally obtained decrypted ISO and choose **Catalog / Asset
+   Browser game**.
+3. Choose the local cache directory and a level from that game. `lobby` is the
+   compact default cache.
 4. Choose whether to cache materials, Moby animations, and previews.
 5. Click **Regenerate Selected Level Cache**.
 
 Generation runs in an isolated background Blender process, so it does not
 alter the open scene. Each Moby or Tie becomes a marked Collection asset in
 its own compressed `.blend` file under the local cache. Assets are cataloged
-as `Resistance 2/<level>/Mobys` and `Resistance 2/<level>/Ties`, and the
-library uses Blender's **Append** import mode. Rebuilding a level is
-transactional: a failed generation leaves its previous cache intact.
+under `<game>/<level>/Mobys` and `<game>/<level>/Ties`, and the library uses
+Blender's **Append** import mode. Rebuilding a level is transactional: a
+failed generation leaves its previous cache intact.
 
 Animations are off by default to keep the browser cache compact. Direct Moby
 import continues to include every decoded Action by default.
 
-### Choose the Resistance 2 material mode
+### Choose the material mode
 
-The extension has two material paths:
+The extension has a standard path plus one shared enhancement preference:
 
-- **Standard**, the default, imports diffuse color and verified blue-channel
-  emission masks with a small node graph.
-- **Cycles-ready** additionally applies the source base-color multiplier,
-  reconstructs tangent-space normal maps, converts packed red gloss to
-  roughness, and follows the source blend mode for alpha masking and blending.
-  It also recognizes the verified mode-zero `ch_hex_glass_glowy` exception
-  and uses its authored albedo alpha.
+- **Standard**, the default, imports diffuse color, source alpha modes, and
+  verified blue-channel emission masks. Both games reconstruct flagged BC3/RG8
+  tangent normals and convert flagged packed-red gloss to Principled roughness
+  in Eevee and Cycles. R3 also preserves the base legs under its opaque-BC1
+  Goliath wet overlay. The standard path recognizes the verified R2 mode-zero
+  `ch_hex_glass_glowy` alpha exception as well.
+- **Enhanced source materials** additionally applies the source base-color
+  multiplier while keeping the same normal, packed-map, and alpha behavior.
 
-To enable the advanced path, open **Edit > Preferences > Add-ons**, expand
-**Insomniac Asset IO**, and enable **Cycles-ready Resistance 2 materials**.
-The preference defaults to off and affects future imports only. It does not
+To enable the enhanced path, open **Edit > Preferences > Add-ons**, expand
+**Insomniac Asset IO**, and enable **Enhanced source materials**. The
+preference defaults to off and affects future imports only. It does not
 rebuild existing materials or change the active scene render engine.
 
 Packed green remains disconnected because the corresponding R2 specular flag
-is absent from every shader in the current whole-disc corpus. Detail maps are
-also preserved as metadata rather than connected speculatively.
+is absent from every shader in both current whole-disc corpora. Neither game
+provides a verified metalness channel. Detail maps and R3 effect-overlay slots
+are preserved as metadata rather than connected speculatively.
 
 ## Project layout
 
@@ -213,7 +250,8 @@ also preserved as metadata rather than connected speculatively.
 insomniac_asset_io/
   core/                   Archive, source overlay, binary, and ISO helpers
   games/
-    resistance_2/         Engine-v2 formats and decoders
+    resistance_2/         Resistance 2 reader and bundled catalog
+    resistance_3/         Resistance 3 reader and bundled catalog
   blender/                Operators, importer, and Asset Browser cache worker
 docs/                     Format and contributor documentation
 tests/                    Pure-Python unit and optional real-asset tests
@@ -232,6 +270,7 @@ Run a real extracted level smoke test:
 
 ```powershell
 python tools\smoke_r2.py "C:\path\to\level_cached.psarc"
+python tools\smoke_r3.py "C:\path\to\level_cached.psarc"
 ```
 
 The smoke test reports resource counts and decodes one Moby, skeleton,
@@ -251,12 +290,13 @@ magenta texture is real source data, not Blender's missing-image indicator.
 The importer preserves it and marks the Blender material with
 `insomniac_source_placeholder = true` and placeholder kind `DEFAULT_PINK`.
 
-Resistance 2's third shader texture is packed material data, not a full-color
-emissive image. Its blue channel is connected as emission only when that
-channel contains nonzero texels. In Cycles-ready mode its red channel is
-inverted into roughness when the shader enables gloss. Authored emission tint,
-authored emission strength, packed green, and detail-map composition remain
-under research.
+The third shader texture is packed material data, not a full-color emissive
+image. Its blue channel is connected as emission only when that channel
+contains nonzero texels. Its red channel is inverted into roughness when the
+shader enables gloss in either game. Packed green connects to Principled
+specular only when the corresponding shader flag is present; that flag is
+absent from the current R2 corpus. Authored emission tint, authored emission
+strength, packed alpha, and detail-map composition remain under research.
 
 Analyze one extracted cached archive, or every cached level archive in an ISO:
 
@@ -314,11 +354,14 @@ The current implementation was validated in Blender 5.2.2 LTS with:
 - `chicxulub_multiplayer`, containing a combined 34,879-vertex UFrag terrain
   mesh, 585 Tie instances, 69 gameplay Moby instances, and 32 detected
   emissive materials among the 83 shaders used by the imported scene;
-- a Cycles-ready `chicxulub_multiplayer` import containing 656 objects, 62
+- an enhanced `chicxulub_multiplayer` import containing 656 objects, 62
   mesh datablocks, 83 materials, and 189 images, saved and reopened
   without warnings;
 - all 27 cached level archives on the tested disc: 17,497 shader references,
   3,355 unique shader payloads, and no mismatched duplicate payloads.
+- all 27 R3 cached level archives: 33,860 shader references, 4,579 unique
+  shader payloads, exact normal-flag/binding agreement, and no mismatched
+  duplicate payloads.
 
 ## Research and attribution
 
@@ -326,6 +369,7 @@ This project builds on public Insomniac-engine research, especially:
 
 - [InsomniaToolset](https://github.com/PredatorCZ/InsomniaToolset)
 - [ReChimera](https://github.com/Mrroboto9819/ReChimera)
+- [Resistance3Port](https://github.com/miroslavdanutalexandru-alt/Resistance3Port)
 - [Insomniac Engine AllExtractor](https://lukascone.wordpress.com/2017/12/03/insomniac-engine-allextractor/)
 - [WebWorksTools](https://github.com/okangel12345/WebWorksTools)
 - [Luna Engine IO Tools](https://github.com/Pcniado/luna_engine_io_tools)

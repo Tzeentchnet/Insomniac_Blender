@@ -2,9 +2,10 @@
 
 Insomniac Asset IO is licensed under GPL-3.0-or-later.
 
-The Resistance 2 implementation was independently written in Python from
-publicly documented structures and behavior. It incorporates format knowledge
-published by GPL-licensed projects, primarily:
+The Resistance 2 and Resistance 3 implementations were independently written
+in Python from publicly documented structures, observed behavior, and
+bounded analysis of legally obtained game data. They incorporate format
+knowledge published by GPL-licensed projects, primarily:
 
 - **InsomniaToolset**, PredatorCZ and contributors  
   <https://github.com/PredatorCZ/InsomniaToolset>
@@ -13,6 +14,7 @@ published by GPL-licensed projects, primarily:
 
 Additional architectural and community references:
 
+- Resistance3Port, miroslavdanutalexandru-alt and contributors
 - Insomniac Engine AllExtractor, Lukas Cone
 - WebWorksTools, okangel12345 and contributors
 - Luna Engine IO Tools, Pcniado and contributors

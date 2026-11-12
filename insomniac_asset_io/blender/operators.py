@@ -6,15 +6,11 @@ import bpy
 from bpy_extras.io_utils import ImportHelper
 
 from ..core.errors import InsomniacError
-from ..core.iso import (
-    find_resistance_2_iso,
-    prepare_resistance_2_level,
-    resistance_2_cached_level_path,
-)
+from ..core.iso import find_iso
 from ..core.source import GameSource
-from ..games.resistance_2.catalog import CatalogAsset, load_catalog
+from ..games.catalog import CatalogAsset, load_catalog
+from ..games.registry import get_game_adapter
 from ..games.resistance_2.formats import AssetKind
-from ..games.resistance_2.reader import Resistance2Reader
 from .asset_cache import (
     AssetCacheOptions,
     ensure_asset_library_registered,
@@ -39,9 +35,6 @@ from .properties import (
 
 
 LOGGER = logging.getLogger(__name__)
-SOURCE_INSPECTION_STATUS = (
-    "Inspecting Resistance 2 source; ISO extraction may take several minutes"
-)
 
 
 def _settings(context: bpy.types.Context):
@@ -57,36 +50,42 @@ def _preferences(context: bpy.types.Context):
     return preferences
 
 
+def _adapter(context: bpy.types.Context):
+    return get_game_adapter(_settings(context).game)
+
+
 def _cache_directory(context: bpy.types.Context) -> str:
     return bpy.path.abspath(_preferences(context).asset_cache_directory)
 
 
 def _configured_iso(context: bpy.types.Context) -> str:
     settings = _settings(context)
+    adapter = _adapter(context)
     if settings.source_path:
         source = bpy.path.abspath(settings.source_path)
-        iso = find_resistance_2_iso(source)
+        iso = find_iso(source)
         if iso is not None:
             return str(iso)
     configured = bpy.path.abspath(
-        _preferences(context).resistance_2_iso_path
+        getattr(_preferences(context), adapter.iso_preference_name)
     )
     if not configured:
         return ""
-    iso = find_resistance_2_iso(configured)
+    iso = find_iso(configured)
     return str(iso) if iso is not None else configured
 
 
 def _catalog(context: bpy.types.Context):
-    return load_catalog(_cache_directory(context))
+    return load_catalog(_cache_directory(context), _settings(context).game)
 
 
 def _source_contains_asset(
+    adapter,
     source_path: str,
     asset: CatalogAsset,
 ) -> bool:
     with GameSource.open(source_path) as source:
-        reader = Resistance2Reader(source)
+        reader = adapter.create_reader(source)
         return any(
             pointer.tuid == asset.tuid
             for pointer in reader.asset_pointers(asset.kind)
@@ -98,45 +97,50 @@ def _resolved_asset_source(
     asset: CatalogAsset,
 ) -> tuple[str, str]:
     settings = _settings(context)
+    adapter = _adapter(context)
     cache_directory = _cache_directory(context)
     manual = (
         bpy.path.abspath(settings.source_path)
         if settings.source_path
         else ""
     )
-    manual_iso = find_resistance_2_iso(manual) if manual else None
+    manual_iso = find_iso(manual) if manual else None
     if manual_iso is not None:
-        cached = prepare_resistance_2_level(
+        cached = adapter.prepare_level(
             manual_iso,
             asset.levels[0],
             cache_directory,
         )
         return str(cached), str(manual_iso)
-    if manual and _source_contains_asset(manual, asset):
+    if manual and _source_contains_asset(adapter, manual, asset):
         return manual, manual
 
     for level in asset.levels:
-        cached = resistance_2_cached_level_path(cache_directory, level)
+        cached = adapter.cached_level_path(cache_directory, level)
         if cached.is_file():
             return str(cached), str(cached)
 
     iso = _configured_iso(context)
     if iso:
-        cached = prepare_resistance_2_level(
+        cached = adapter.prepare_level(
             iso,
             asset.levels[0],
             cache_directory,
         )
         return str(cached), iso
     raise InsomniacError(
-        f"{asset.label} is not extracted. Configure a Resistance 2 ISO in "
-        "Add-on Preferences or select an ISO as the source."
+        f"{asset.label} is not extracted. Configure a {adapter.label} ISO "
+        "in Add-on Preferences or select an ISO as the source."
     )
 
 
-def _source_matches_level(source_path: str, level_name: str) -> bool:
+def _source_matches_level(
+    adapter,
+    source_path: str,
+    level_name: str,
+) -> bool:
     with GameSource.open(source_path) as source:
-        reader = Resistance2Reader(source)
+        reader = adapter.create_reader(source)
         normalized = reader.resource_prefix.replace("\\", "/").casefold()
         return normalized.endswith(f"/levels/{level_name.casefold()}")
 
@@ -146,38 +150,40 @@ def _resolved_level_source(
     level_name: str,
 ) -> tuple[str, str]:
     settings = _settings(context)
+    adapter = _adapter(context)
     cache_directory = _cache_directory(context)
     manual = (
         bpy.path.abspath(settings.source_path)
         if settings.source_path
         else ""
     )
-    manual_iso = find_resistance_2_iso(manual) if manual else None
+    manual_iso = find_iso(manual) if manual else None
     if manual_iso is not None:
-        cached = prepare_resistance_2_level(
+        cached = adapter.prepare_level(
             manual_iso,
             level_name,
             cache_directory,
         )
         return str(cached), str(manual_iso)
-    if manual and _source_matches_level(manual, level_name):
+    if manual and _source_matches_level(adapter, manual, level_name):
         return manual, manual
 
-    cached = resistance_2_cached_level_path(cache_directory, level_name)
+    cached = adapter.cached_level_path(cache_directory, level_name)
     if cached.is_file():
         return str(cached), str(cached)
 
     iso = _configured_iso(context)
     if iso:
-        cached = prepare_resistance_2_level(
+        cached = adapter.prepare_level(
             iso,
             level_name,
             cache_directory,
         )
         return str(cached), iso
     raise InsomniacError(
-        f"Level {level_name!r} is not extracted. Configure a Resistance 2 "
-        "ISO in Add-on Preferences or select an ISO as the source."
+        f"Level {level_name!r} is not extracted. Configure a "
+        f"{adapter.label} ISO in Add-on Preferences or select an ISO as "
+        "the source."
     )
 
 
@@ -185,11 +191,12 @@ def _resolved_inspection_source(
     context: bpy.types.Context,
 ) -> tuple[str, str]:
     settings = _settings(context)
+    adapter = _adapter(context)
     original = bpy.path.abspath(settings.source_path)
-    iso = find_resistance_2_iso(original)
+    iso = find_iso(original)
     if iso is None:
         return original, original
-    cached = prepare_resistance_2_level(
+    cached = adapter.prepare_level(
         iso,
         settings.level_id,
         _cache_directory(context),
@@ -197,7 +204,7 @@ def _resolved_inspection_source(
     return str(cached), str(iso)
 
 
-def _summary(reader: Resistance2Reader) -> str:
+def _summary(reader) -> str:
     summary = reader.inspect()
     counts = summary.counts
     return (
@@ -223,7 +230,7 @@ class INSOMNIAC_OT_select_source(bpy.types.Operator, ImportHelper):
     bl_idname = "insomniac.select_source"
     bl_label = "Select Insomniac Source"
     bl_description = (
-        "Select a Resistance 2 ISO, assetlookup.dat, or level PSARC"
+        "Select an ISO, assetlookup.dat, or level PSARC for the active game"
     )
     bl_options = {"REGISTER", "UNDO"}
 
@@ -235,14 +242,19 @@ class INSOMNIAC_OT_select_source(bpy.types.Operator, ImportHelper):
 
     def execute(self, context):
         settings = _settings(context)
-        iso = find_resistance_2_iso(self.filepath)
+        adapter = _adapter(context)
+        iso = find_iso(self.filepath)
         settings.source_path = (
             str(iso) if iso is not None else self.filepath
         )
         if iso is not None:
             preferences = addon_preferences(context)
             if preferences is not None:
-                preferences.resistance_2_iso_path = str(iso)
+                setattr(
+                    preferences,
+                    adapter.iso_preference_name,
+                    str(iso),
+                )
         result = bpy.ops.insomniac.inspect_source()
         return {"CANCELLED"} if "CANCELLED" in result else {"FINISHED"}
 
@@ -251,7 +263,7 @@ class INSOMNIAC_OT_inspect_source(bpy.types.Operator):
     bl_idname = "insomniac.inspect_source"
     bl_label = "Inspect Source"
     bl_description = (
-        "Validate the source and count Resistance 2 assets; ISO extraction "
+        "Validate the source and count game assets; ISO extraction "
         "may take several minutes"
     )
     bl_options = {"REGISTER"}
@@ -302,8 +314,14 @@ def _set_source_inspection_busy(
     if context.window is not None:
         context.window.cursor_set("WAIT" if busy else "DEFAULT")
     if context.workspace is not None:
+        adapter = _adapter(context)
         context.workspace.status_text_set(
-            SOURCE_INSPECTION_STATUS if busy else None
+            (
+                f"Inspecting {adapter.label} source; ISO extraction may "
+                "take several minutes"
+                if busy
+                else None
+            )
         )
     if context.area is not None:
         context.area.tag_redraw()
@@ -325,9 +343,10 @@ def _inspect_source(operator: bpy.types.Operator, context):
         operator.report({"ERROR"}, "Choose a source first")
         return {"CANCELLED"}
     try:
+        adapter = _adapter(context)
         source_path, _original_path = _resolved_inspection_source(context)
         with GameSource.open(source_path) as source:
-            reader = Resistance2Reader(source)
+            reader = adapter.create_reader(source)
             settings.source_summary = _summary(reader)
             settings.last_message = (
                 f"Validated {reader.resource_prefix}: {settings.source_summary}"
@@ -519,12 +538,13 @@ class INSOMNIAC_OT_clear_asset_filters(bpy.types.Operator):
 class INSOMNIAC_OT_import_asset(bpy.types.Operator):
     bl_idname = "insomniac.import_asset"
     bl_label = "Import Asset"
-    bl_description = "Import the selected Resistance 2 Moby or Tie"
+    bl_description = "Import the selected Moby or Tie for the active game"
     bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):
         settings = _settings(context)
         try:
+            adapter = _adapter(context)
             asset = _catalog(context).asset(
                 ensure_asset_selection(settings, context)
             )
@@ -534,7 +554,7 @@ class INSOMNIAC_OT_import_asset(bpy.types.Operator):
             )
             preferences = _preferences(context)
             with GameSource.open(source_path) as source:
-                reader = Resistance2Reader(source)
+                reader = adapter.create_reader(source)
                 if not any(
                     pointer.tuid == asset.tuid
                     for pointer in reader.asset_pointers(asset.kind)
@@ -583,7 +603,7 @@ class INSOMNIAC_OT_import_asset(bpy.types.Operator):
             return {"CANCELLED"}
         except Exception as exc:
             LOGGER.error(
-                "Unexpected Resistance 2 asset import failure:\n%s",
+                "Unexpected game asset import failure:\n%s",
                 traceback.format_exc(),
             )
             settings.last_message = f"Unexpected import error: {exc}"
@@ -594,12 +614,13 @@ class INSOMNIAC_OT_import_asset(bpy.types.Operator):
 class INSOMNIAC_OT_import_level(bpy.types.Operator):
     bl_idname = "insomniac.import_level"
     bl_label = "Import Level"
-    bl_description = "Import Resistance 2 terrain and placed asset instances"
+    bl_description = "Import terrain and placed instances for the active game"
     bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):
         settings = _settings(context)
         try:
+            adapter = _adapter(context)
             level_name = settings.level_id
             if level_name not in _catalog(context).levels:
                 raise InsomniacError(
@@ -611,7 +632,7 @@ class INSOMNIAC_OT_import_level(bpy.types.Operator):
             )
             preferences = _preferences(context)
             with GameSource.open(source_path) as source:
-                reader = Resistance2Reader(source)
+                reader = adapter.create_reader(source)
                 result = import_level(
                     context,
                     reader,
@@ -635,7 +656,7 @@ class INSOMNIAC_OT_import_level(bpy.types.Operator):
             return {"CANCELLED"}
         except Exception as exc:
             LOGGER.error(
-                "Unexpected Resistance 2 level import failure:\n%s",
+                "Unexpected game level import failure:\n%s",
                 traceback.format_exc(),
             )
             settings.last_message = f"Unexpected level import error: {exc}"
@@ -647,20 +668,21 @@ class INSOMNIAC_OT_prepare_iso(bpy.types.Operator):
     bl_idname = "insomniac.prepare_iso"
     bl_label = "Prepare Level Archives"
     bl_description = (
-        "Extract the selected Resistance 2 level and global PSARCs to a cache"
+        "Extract the selected level and global PSARCs to a local cache"
     )
     bl_options = {"REGISTER"}
 
     def execute(self, context):
         settings = _settings(context)
         try:
+            adapter = _adapter(context)
             iso = _configured_iso(context)
             if not iso:
                 raise InsomniacError(
-                    "Configure a Resistance 2 ISO in Add-on Preferences or "
-                    "select an ISO as the source"
+                    f"Configure a {adapter.label} ISO in Add-on Preferences "
+                    "or select an ISO as the source"
                 )
-            cached_level = prepare_resistance_2_level(
+            cached_level = adapter.prepare_level(
                 iso,
                 settings.level_id,
                 _cache_directory(context),
@@ -682,7 +704,7 @@ class INSOMNIAC_OT_prepare_iso(bpy.types.Operator):
 
 class INSOMNIAC_OT_rebuild_import_catalog(bpy.types.Operator):
     bl_idname = "insomniac.rebuild_import_catalog"
-    bl_label = "Regenerate Resistance 2 Import Catalog"
+    bl_label = "Regenerate Import Catalog"
     bl_description = (
         "Scan the configured ISO for importable Moby, Tie, and level IDs and "
         "write a local metadata catalog"
@@ -694,8 +716,16 @@ class INSOMNIAC_OT_rebuild_import_catalog(bpy.types.Operator):
         if preferences is None:
             self.report({"ERROR"}, "Insomniac Asset IO preferences are unavailable")
             return {"CANCELLED"}
-        if not preferences.resistance_2_iso_path:
-            self.report({"ERROR"}, "Choose a Resistance 2 ISO first")
+        adapter = get_game_adapter(preferences.asset_cache_game)
+        configured_iso = getattr(
+            preferences,
+            adapter.iso_preference_name,
+        )
+        if not configured_iso:
+            self.report(
+                {"ERROR"},
+                f"Choose a {adapter.label} ISO first",
+            )
             return {"CANCELLED"}
 
         window = context.window
@@ -703,25 +733,28 @@ class INSOMNIAC_OT_rebuild_import_catalog(bpy.types.Operator):
             window.cursor_set("WAIT")
         try:
             report = run_catalog_worker(
-                iso_path=bpy.path.abspath(
-                    preferences.resistance_2_iso_path
-                ),
+                game_id=adapter.id,
+                iso_path=bpy.path.abspath(configured_iso),
                 cache_directory=bpy.path.abspath(
                     preferences.asset_cache_directory
                 ),
             )
-            catalog = _catalog(context)
+            catalog = load_catalog(
+                _cache_directory(context),
+                adapter.id,
+            )
             settings = _settings(context)
-            asset_identifiers = {
-                asset.identifier for asset in catalog.assets
-            }
-            if settings.asset_tuid not in asset_identifiers:
-                set_asset_selection(
-                    settings,
-                    catalog.assets[0].identifier,
-                )
-            if settings.level_id not in catalog.levels:
-                settings.level_id = catalog.levels[0]
+            if settings.game == adapter.id:
+                asset_identifiers = {
+                    asset.identifier for asset in catalog.assets
+                }
+                if settings.asset_tuid not in asset_identifiers:
+                    set_asset_selection(
+                        settings,
+                        catalog.assets[0].identifier,
+                    )
+                if settings.level_id not in catalog.levels:
+                    settings.level_id = catalog.levels[0]
             self.report(
                 {"INFO"},
                 f"Cataloged {report['unique_assets']} unique assets across "
@@ -742,10 +775,10 @@ class INSOMNIAC_OT_rebuild_import_catalog(bpy.types.Operator):
 
 class INSOMNIAC_OT_rebuild_asset_library(bpy.types.Operator):
     bl_idname = "insomniac.rebuild_asset_library"
-    bl_label = "Regenerate Resistance 2 Asset Cache"
+    bl_label = "Regenerate Asset Cache"
     bl_description = (
         "Generate a local Blender Asset Browser library from the selected "
-        "Resistance 2 ISO and level"
+        "game ISO and level"
     )
     bl_options = {"REGISTER"}
 
@@ -754,8 +787,16 @@ class INSOMNIAC_OT_rebuild_asset_library(bpy.types.Operator):
         if preferences is None:
             self.report({"ERROR"}, "Insomniac Asset IO preferences are unavailable")
             return {"CANCELLED"}
-        if not preferences.resistance_2_iso_path:
-            self.report({"ERROR"}, "Choose a Resistance 2 ISO first")
+        adapter = get_game_adapter(preferences.asset_cache_game)
+        configured_iso = getattr(
+            preferences,
+            adapter.iso_preference_name,
+        )
+        if not configured_iso:
+            self.report(
+                {"ERROR"},
+                f"Choose a {adapter.label} ISO first",
+            )
             return {"CANCELLED"}
 
         window = context.window
@@ -763,9 +804,8 @@ class INSOMNIAC_OT_rebuild_asset_library(bpy.types.Operator):
             window.cursor_set("WAIT")
         try:
             report = run_asset_cache_worker(
-                iso_path=bpy.path.abspath(
-                    preferences.resistance_2_iso_path
-                ),
+                game_id=adapter.id,
+                iso_path=bpy.path.abspath(configured_iso),
                 level_name=preferences.asset_cache_level,
                 cache_directory=bpy.path.abspath(
                     preferences.asset_cache_directory

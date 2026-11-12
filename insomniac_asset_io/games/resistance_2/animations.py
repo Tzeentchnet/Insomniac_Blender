@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 
 import numpy as np
 
@@ -16,6 +17,11 @@ from .formats import (
 
 
 SECT_ANIMATION = 0xF000
+
+
+class AnimationProfile(Enum):
+    RESISTANCE_2 = "RESISTANCE_2"
+    RESISTANCE_3 = "RESISTANCE_3"
 
 
 @dataclass(slots=True)
@@ -58,6 +64,7 @@ def _read_header(ighw: IghwFile, offset: int) -> AnimationHeader:
         frame_rate=ighw.f32(offset + 0x18),
         control_offset=ighw.u32(offset + 0x20),
         frames_offset=ighw.u32(offset + 0x24),
+        frame_map_offset=ighw.u32(offset + 0x0C),
         frame_stride=frame_stride,
         reference_value_count=ighw.u16(offset + 0x34),
         track16_count=ighw.u16(offset + 0x36),
@@ -315,10 +322,83 @@ def _quat_multiply(left: np.ndarray, right: np.ndarray) -> np.ndarray:
     return (result / lengths).astype(np.float32)
 
 
+def _normalize_quaternions(values: np.ndarray) -> np.ndarray:
+    result = np.asarray(values, dtype=np.float32).copy()
+    lengths = np.linalg.norm(result, axis=-1, keepdims=True)
+    invalid = lengths[..., 0] <= 1e-12
+    lengths[invalid] = 1.0
+    result /= lengths
+    result[invalid] = (0.0, 0.0, 0.0, 1.0)
+    return result
+
+
+def _quat_inverse(values: np.ndarray) -> np.ndarray:
+    result = np.asarray(values, dtype=np.float32).copy()
+    result[..., :3] *= -1.0
+    lengths_squared = np.sum(result * result, axis=-1, keepdims=True)
+    lengths_squared[lengths_squared <= 1e-12] = 1.0
+    return result / lengths_squared
+
+
+def _quat_slerp(
+    start: np.ndarray,
+    end: np.ndarray,
+    factor: np.ndarray,
+) -> np.ndarray:
+    start = np.asarray(start, dtype=np.float32)
+    end = np.asarray(end, dtype=np.float32)
+    dots = np.sum(start * end, axis=-1, keepdims=True)
+    end = np.where(dots < 0.0, -end, end)
+    dots = np.abs(dots)
+    angles = np.arccos(np.clip(dots, -1.0, 1.0))
+    sine = np.sin(angles)
+    linear = start + (end - start) * factor
+    spherical = (
+        np.sin((1.0 - factor) * angles) * start
+        + np.sin(factor * angles) * end
+    ) / np.maximum(sine, 1e-8)
+    result = np.where(sine < 1e-5, linear, spherical)
+    lengths = np.linalg.norm(result, axis=-1, keepdims=True)
+    lengths[lengths <= 1e-12] = 1.0
+    return (result / lengths).astype(np.float32)
+
+
+def _stabilize_quaternions(values: np.ndarray) -> None:
+    for frame in range(1, values.shape[0]):
+        flips = np.sum(values[frame - 1] * values[frame], axis=-1) < 0.0
+        values[frame, flips] *= -1.0
+
+
+def _wrap_i16(base: int, delta: int) -> int:
+    return ((base + delta + 0x8000) & 0xFFFF) - 0x8000
+
+
+def _stored_frame_index(
+    ighw: IghwFile,
+    header: AnimationHeader,
+    frame: int,
+    profile: AnimationProfile,
+) -> int:
+    if (
+        profile is not AnimationProfile.RESISTANCE_3
+        or not header.frame_map_offset
+        or not header.frames_offset
+    ):
+        return frame
+    table_size = header.frame_count * 2
+    gap = header.frames_offset - header.frame_map_offset
+    if gap < table_size or gap >= table_size + 0x80:
+        return frame
+    mapped = ighw.u16(header.frame_map_offset + frame * 2)
+    return mapped if mapped < header.frame_count else frame
+
+
 def _decode_clip(
     ighw: IghwFile,
     header: AnimationHeader,
     skeleton: Skeleton,
+    *,
+    profile: AnimationProfile = AnimationProfile.RESISTANCE_2,
 ) -> DecodedClip:
     frame_count = header.frame_count
     bone_count = skeleton.bone_count
@@ -356,6 +436,8 @@ def _decode_clip(
 
     position_raw = np.zeros((frame_count, bone_count, 3), dtype=np.int16)
     position_mask = np.zeros((frame_count, bone_count, 3), dtype=np.bool_)
+    position_reference_raw = np.zeros((bone_count, 3), dtype=np.int16)
+    position_reference_mask = np.zeros((bone_count, 3), dtype=np.bool_)
     scale_raw = np.zeros((frame_count, bone_count, 3), dtype=np.int16)
     scale_mask = np.zeros((frame_count, bone_count, 3), dtype=np.bool_)
 
@@ -369,13 +451,31 @@ def _decode_clip(
         elif mask.kind is TrackKind.POSITION:
             position_raw[:, mask.bone_index, component] = value
             position_mask[:, mask.bone_index, component] = True
+            position_reference_raw[mask.bone_index, component] = value
+            position_reference_mask[mask.bone_index, component] = True
         elif mask.kind is TrackKind.SCALE:
             scale_raw[:, mask.bone_index, component] = value
             scale_mask[:, mask.bone_index, component] = True
 
     frame_8_offset = _pad(header.track16_count * 2, 16)
+    for index, mask in enumerate(control.track8_masks):
+        if (
+            mask.kind is TrackKind.POSITION
+            and not position_reference_mask[mask.bone_index, mask.component]
+        ):
+            base = (
+                int(control.track8_bases[index])
+                if index < len(control.track8_bases)
+                else 0
+            )
+            position_reference_raw[mask.bone_index, mask.component] = base
+            position_reference_mask[mask.bone_index, mask.component] = True
+
     for frame in range(frame_count):
-        frame_offset = header.frames_offset + frame * header.frame_stride
+        stored_frame = _stored_frame_index(ighw, header, frame, profile)
+        frame_offset = (
+            header.frames_offset + stored_frame * header.frame_stride
+        )
         values16 = _read_i16_array(
             ighw, frame_offset, header.track16_count
         )
@@ -412,7 +512,7 @@ def _decode_clip(
                 if index < len(control.track8_bases)
                 else 0
             )
-            value = np.int16(base + int(delta)).item()
+            value = _wrap_i16(base, int(delta))
             _assign_track(
                 frame,
                 value,
@@ -444,7 +544,27 @@ def _decode_clip(
     decoded_scales = scale_raw.astype(np.float32) * scale_scale
 
     delta_position_scale = bool(header.flags & 0x0200)
-    if header.additive or delta_position_scale:
+    rebase_positions = (
+        profile is AnimationProfile.RESISTANCE_3
+        and not header.additive
+        and not delta_position_scale
+    )
+    if rebase_positions:
+        translated = decoded_positions
+        rebased = (
+            bind_t[None, :, :]
+            + (
+                position_raw.astype(np.float32)
+                - position_reference_raw[None, :, :]
+            )
+            * position_scale
+        )
+        translated = np.where(
+            position_reference_mask[None, :, :],
+            rebased,
+            translated,
+        )
+    elif header.additive or delta_position_scale:
         translated = bind_t[None, :, :] + decoded_positions
     else:
         translated = decoded_positions
@@ -458,16 +578,30 @@ def _decode_clip(
         scaled = decoded_scales
     np.copyto(scales, scaled, where=scale_mask)
 
-    if header.additive:
+    if (
+        header.additive
+        and profile is AnimationProfile.RESISTANCE_2
+    ):
         rotations = _quat_multiply(bind_q[None, :, :], rotations)
         blend_enabled = np.ones(bone_count, dtype=np.bool_)
         copied = min(bone_count, len(control.blend_masks))
         blend_enabled[:copied] = control.blend_masks[:copied] != 0
         excluded = ~rotation_touched & ~blend_enabled
         rotations[:, excluded] = bind_q[excluded]
-    elif delta_position_scale:
+    elif header.additive or delta_position_scale:
         untouched = ~rotation_touched
         rotations[:, untouched] = bind_q[untouched]
+    if (
+        header.additive
+        and profile is AnimationProfile.RESISTANCE_3
+    ):
+        blend_enabled = np.ones(bone_count, dtype=np.bool_)
+        copied = min(bone_count, len(control.blend_masks))
+        blend_enabled[:copied] = control.blend_masks[:copied] != 0
+        excluded = ~blend_enabled
+        translations[:, excluded] = bind_t[excluded]
+        rotations[:, excluded] = bind_q[excluded]
+        scales[:, excluded] = bind_s[excluded]
 
     animated = (
         rotation_touched
@@ -484,6 +618,12 @@ def _decode_clip(
         rotations_xyzw=rotations.astype(np.float32),
         scales=scales.astype(np.float32),
         animated_bones=animated,
+        source_flags=header.flags,
+        blend_weights=control.blend_masks.astype(np.uint8, copy=True),
+        reference_rotations_xyzw=_normalize_quaternions(reference_q),
+        rotation_animated_bones=rotation_touched.copy(),
+        translation_components=position_mask.any(axis=0),
+        scale_components=scale_mask.any(axis=0),
     )
 
 
@@ -517,10 +657,304 @@ def _quantization_scale(shift: int) -> float:
     return 1.0 / float(0x8000 >> shift)
 
 
-def decode_animset(data: bytes, skeleton: Skeleton) -> list[DecodedClip]:
+def _resample_vectors(
+    values: np.ndarray,
+    source_rate: float,
+    target_count: int,
+    target_rate: float,
+    *,
+    looping: bool,
+) -> np.ndarray:
+    source_count = values.shape[0]
+    if source_count == 1:
+        return np.broadcast_to(
+            values, (target_count, *values.shape[1:])
+        ).copy()
+    source_frames = (
+        np.arange(target_count, dtype=np.float64)
+        * source_rate
+        / target_rate
+    )
+    lower = np.floor(source_frames).astype(np.int64)
+    factors = (source_frames - lower).astype(np.float32)
+    if looping:
+        lower %= source_count
+        upper = (lower + 1) % source_count
+    else:
+        lower = np.clip(lower, 0, source_count - 1)
+        upper = np.clip(lower + 1, 0, source_count - 1)
+    factor_shape = (target_count,) + (1,) * (values.ndim - 1)
+    factors = factors.reshape(factor_shape)
+    return (
+        values[lower] + (values[upper] - values[lower]) * factors
+    ).astype(np.float32)
+
+
+def _resample_quaternions(
+    values: np.ndarray,
+    source_rate: float,
+    target_count: int,
+    target_rate: float,
+    *,
+    looping: bool,
+) -> np.ndarray:
+    source_count = values.shape[0]
+    if source_count == 1:
+        return np.broadcast_to(
+            values, (target_count, *values.shape[1:])
+        ).copy()
+    source_frames = (
+        np.arange(target_count, dtype=np.float64)
+        * source_rate
+        / target_rate
+    )
+    lower = np.floor(source_frames).astype(np.int64)
+    factors = (source_frames - lower).astype(np.float32)
+    if looping:
+        lower %= source_count
+        upper = (lower + 1) % source_count
+    else:
+        lower = np.clip(lower, 0, source_count - 1)
+        upper = np.clip(lower + 1, 0, source_count - 1)
+    result = _quat_slerp(
+        values[lower],
+        values[upper],
+        factors[:, None, None],
+    )
+    _stabilize_quaternions(result)
+    return result
+
+
+def _common_prefix_length(left: str, right: str) -> int:
+    return next(
+        (
+            index
+            for index, pair in enumerate(zip(left, right, strict=False))
+            if pair[0] != pair[1]
+        ),
+        min(len(left), len(right)),
+    )
+
+
+def _select_overlay_base(
+    overlay: DecodedClip,
+    clips: list[DecodedClip],
+) -> DecodedClip | None:
+    name = overlay.name.casefold()
+    candidates: list[tuple[int, DecodedClip]] = []
+    if "_partial_aiming_" in name:
+        stem = name.split("_partial_aiming_", 1)[0]
+        for clip in clips:
+            candidate = clip.name.casefold()
+            if (
+                not clip.additive
+                and candidate.endswith("_idle_sighted")
+                and candidate.startswith(stem + "_")
+            ):
+                candidates.append(
+                    (_common_prefix_length(name, candidate), clip)
+                )
+    elif name in {"visemes", "head_visemes"} or (
+        name.startswith("exp_")
+        and name.endswith(("_lower", "_upper"))
+    ):
+        candidates.extend(
+            (100, clip)
+            for clip in clips
+            if not clip.additive and clip.name.casefold() == "head_idle"
+        )
+    else:
+        base_names: list[str] = []
+        for suffix in ("_alt_fire_p", "_fire_cycle_p", "_fire_p"):
+            if name.endswith(suffix):
+                base_names.append(name[: -len(suffix)] + "_idle_p")
+                break
+        if name.endswith("_p") and not name.endswith("_idle_p"):
+            base_names.append(name[:-2] + "_idle_p")
+        candidates.extend(
+            (100, clip)
+            for clip in clips
+            if not clip.additive and clip.name.casefold() in base_names
+        )
+    if not candidates and "_" in name:
+        family = name.split("_", 1)[0] + "_"
+        for clip in clips:
+            candidate = clip.name.casefold()
+            if (
+                not clip.additive
+                and candidate.startswith(family)
+                and candidate.endswith("_idle_sighted")
+            ):
+                candidates.append(
+                    (_common_prefix_length(name, candidate), clip)
+                )
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    if len(candidates) > 1 and candidates[0][0] == candidates[1][0]:
+        return None
+    return candidates[0][1]
+
+
+def _compose_overlay(
+    overlay: DecodedClip,
+    base: DecodedClip,
+    skeleton: Skeleton,
+) -> None:
+    frame_count = overlay.frame_count
+    base_t = _resample_vectors(
+        base.translations,
+        base.frame_rate,
+        frame_count,
+        overlay.frame_rate,
+        looping=base.looping,
+    )
+    base_q = _resample_quaternions(
+        base.rotations_xyzw,
+        base.frame_rate,
+        frame_count,
+        overlay.frame_rate,
+        looping=base.looping,
+    )
+    base_s = _resample_vectors(
+        base.scales,
+        base.frame_rate,
+        frame_count,
+        overlay.frame_rate,
+        looping=base.looping,
+    )
+    bind_t, _, bind_s = _bind_trs(skeleton)
+    blend = (
+        overlay.blend_weights.astype(np.float32) / 255.0
+        if overlay.blend_weights is not None
+        else np.ones(overlay.bone_count, dtype=np.float32)
+    )
+    rotation_animated = (
+        overlay.rotation_animated_bones
+        if overlay.rotation_animated_bones is not None
+        else overlay.animated_bones
+    )
+    reference_q = (
+        overlay.reference_rotations_xyzw
+        if overlay.reference_rotations_xyzw is not None
+        else np.broadcast_to(
+            np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float32),
+            (overlay.bone_count, 4),
+        )
+    )
+    rotation_delta = _quat_multiply(
+        overlay.rotations_xyzw,
+        _quat_inverse(reference_q)[None, :, :],
+    )
+    composed_q = _quat_multiply(base_q, rotation_delta)
+    rotation_weight = (
+        blend * rotation_animated.astype(np.float32)
+    )[None, :, None]
+    overlay.rotations_xyzw = _quat_slerp(
+        base_q, composed_q, rotation_weight
+    )
+    _stabilize_quaternions(overlay.rotations_xyzw)
+
+    translation_components = (
+        overlay.translation_components
+        if overlay.translation_components is not None
+        else np.broadcast_to(
+            overlay.animated_bones[:, None],
+            (overlay.bone_count, 3),
+        )
+    )
+    translation_weight = (
+        translation_components.astype(np.float32)
+        * blend[:, None]
+    )[None, :, :]
+    translation_delta = overlay.translations - bind_t[None, :, :]
+    overlay.translations = (
+        base_t + translation_delta * translation_weight
+    ).astype(np.float32)
+
+    scale_components = (
+        overlay.scale_components
+        if overlay.scale_components is not None
+        else np.broadcast_to(
+            overlay.animated_bones[:, None],
+            (overlay.bone_count, 3),
+        )
+    )
+    scale_weight = (
+        scale_components.astype(np.float32) * blend[:, None]
+    )[None, :, :]
+    if overlay.source_flags & 0x0200:
+        composed_s = base_s + (
+            overlay.scales - bind_s[None, :, :]
+        )
+    else:
+        safe_bind = np.where(np.abs(bind_s) > 1e-12, bind_s, 1.0)
+        composed_s = base_s * (
+            overlay.scales / safe_bind[None, :, :]
+        )
+    overlay.scales = (
+        base_s + (composed_s - base_s) * scale_weight
+    ).astype(np.float32)
+
+    base_rotation_animated = (
+        base.rotation_animated_bones
+        if base.rotation_animated_bones is not None
+        else base.animated_bones
+    )
+    overlay.rotation_animated_bones = (
+        base_rotation_animated | rotation_animated
+    )
+    base_translation_components = (
+        base.translation_components
+        if base.translation_components is not None
+        else np.broadcast_to(
+            base.animated_bones[:, None], (base.bone_count, 3)
+        )
+    )
+    overlay.translation_components = (
+        base_translation_components | translation_components
+    )
+    base_scale_components = (
+        base.scale_components
+        if base.scale_components is not None
+        else np.broadcast_to(
+            base.animated_bones[:, None], (base.bone_count, 3)
+        )
+    )
+    overlay.scale_components = base_scale_components | scale_components
+    overlay.animated_bones = (
+        overlay.rotation_animated_bones
+        | overlay.translation_components.any(axis=1)
+        | overlay.scale_components.any(axis=1)
+    )
+    overlay.overlay_base_name = base.name
+
+
+def _compose_r3_overlays(
+    clips: list[DecodedClip],
+    skeleton: Skeleton,
+) -> None:
+    for overlay in clips:
+        if not overlay.additive:
+            continue
+        base = _select_overlay_base(overlay, clips)
+        if base is not None:
+            _compose_overlay(overlay, base, skeleton)
+
+
+def decode_animset(
+    data: bytes,
+    skeleton: Skeleton,
+    *,
+    profile: AnimationProfile = AnimationProfile.RESISTANCE_2,
+) -> list[DecodedClip]:
     ighw = IghwFile(data, label="animset")
     clips: list[DecodedClip] = []
     for offset in animation_offsets(ighw):
         header = _read_header(ighw, offset)
-        clips.append(_decode_clip(ighw, header, skeleton))
+        clips.append(
+            _decode_clip(ighw, header, skeleton, profile=profile)
+        )
+    if profile is AnimationProfile.RESISTANCE_3:
+        _compose_r3_overlays(clips, skeleton)
     return clips

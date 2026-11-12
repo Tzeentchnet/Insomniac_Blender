@@ -7,6 +7,7 @@ from .formats import DecodedTexture, UInt8Array
 
 EMISSIVE_CHANNEL_INDEX = 2
 EMISSIVE_CHANNEL_NAME = "Blue"
+_SUPPORTED_NORMAL_FORMATS = frozenset({0x08, 0x0B, 0x88, 0x8B, 0xA8})
 
 
 def emissive_mask(texture: DecodedTexture) -> UInt8Array:
@@ -15,6 +16,10 @@ def emissive_mask(texture: DecodedTexture) -> UInt8Array:
 
 def has_emissive_mask(texture: DecodedTexture) -> bool:
     return bool(np.any(emissive_mask(texture)))
+
+
+def can_reconstruct_normal_map(texture: DecodedTexture) -> bool:
+    return texture.info.format_code in _SUPPORTED_NORMAL_FORMATS
 
 
 def reconstruct_normal_map(texture: DecodedTexture) -> UInt8Array:

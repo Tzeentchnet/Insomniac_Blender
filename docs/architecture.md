@@ -30,18 +30,19 @@ the standard disc hierarchy, the global pair. Global texture bundles are
 indexed by their resource hashes using bounded slice reads; large texel files
 are not loaded merely to build the index.
 
-Selecting a decrypted R2 ISO resolves through the same source path after the
-selected level/global archive pairs are extracted. A complete extraction is
-reused, so inspect and import operators can accept the ISO directly without
-repeating the copy.
+Selecting a decrypted R2 or R3 ISO resolves through the same source path after
+the selected level/global archive pairs are extracted. A bounded internal
+ISO9660 reader handles ordinary images and R3's hybrid image; `tar` remains a
+fallback. A complete game-specific extraction is reused, so inspect and
+import operators can accept the ISO directly without repeating the copy.
 
-The sidebar selectors are backed by a metadata-only disc catalog. The bundled
-USA catalog records level IDs and Moby/Tie TUID ownership, but no geometry,
-textures, or archive payloads. A selected asset first resolves against its
-manual source override, then extracted owner levels, then the configured ISO.
-Level selection follows the same cache-first resolution. A background catalog
-worker can replace the bundled catalog with a locally generated catalog for a
-different disc.
+The sidebar selectors are backed by per-game metadata-only disc catalogs. The
+bundled USA catalogs record level IDs, source names, and Moby/Tie TUID
+ownership, but no geometry, textures, or archive payloads. A selected asset
+first resolves against its manual source override, then extracted owner
+levels, then the active game's configured ISO. Level selection follows the
+same cache-first resolution. A background catalog worker can replace either
+bundled catalog with a locally generated catalog for a different disc.
 
 If a shader texture is absent from both domains, the R2 adapter lazily indexes
 already-extracted sibling `level_cached.psarc` files under the same
@@ -80,17 +81,22 @@ matrices.
 Meshes combine an asset's primitives into one datablock while retaining
 material indices. Level placements reference shared mesh datablocks.
 
-R2 materials retain their shader lookup paths, raw material control word, six
-parameter vectors, texture IDs, and texture paths as Blender custom
-properties. Diffuse images are color data. Reconstructed normal and packed
-auxiliary images are non-color data.
+Materials retain their shader lookup paths, raw material control word,
+parameter vectors, texture IDs, texture paths, and texture-map indices as
+Blender custom properties. The indices distinguish active bindings from stale
+or runtime-only reference fields. R3's two additional texture slots, two
+pre-control words, and three trailing material values are retained without
+assigning speculative rendering semantics. Diffuse images are color data.
+Reconstructed normal and packed auxiliary images are non-color data.
 
-The default material path remains lightweight: diffuse plus verified packed
-blue-channel emission. A default-off Addon Preference selects an advanced
-path for future imports. That path applies safe source color factors,
-reconstructs R2 normals with NumPy, converts verified red-channel gloss to
-roughness, and follows source alpha modes. It does not change the scene render
-engine. Unverified packed-green and detail-map semantics remain disconnected.
+Standard R2 and R3 materials reconstruct verified BC3/RG8 tangent normals with
+NumPy and convert flagged packed-red gloss to Principled roughness. These
+nodes work in Eevee and Cycles. A default-off **Enhanced source materials**
+preference additionally applies safe source color factors; it does not change
+the scene render engine. No metalness channel is inferred. Packed green is
+connected only when the shader's specular flag is present; that flag is absent
+from the current R2 corpus. Unverified packed-alpha, detail-map, and R3 overlay
+semantics remain disconnected.
 
 Moby skeletons use stable `bone_NNN` names because R2 does not provide a
 reliable bone-name table in this chain. The original index and flags are
@@ -101,7 +107,23 @@ to the armature in hierarchy order, and baked into Actions. Source matrix
 accumulation honors the skeleton's scale-inheritance flags, and sampled keys
 use linear interpolation. Source FPS, looping, and additive flags are stored
 on each Action. Blender 5.2 keyframe insertion creates one compatible Action
-slot for each imported Action.
+slot for each imported Action. The Action synchronization handler binds that
+slot when the user selects an imported clip, then updates the scene playback
+range to the clip bounds.
+
+## Resistance 3 adapter
+
+`Resistance3Reader` inherits the verified common PS3 geometry, animation,
+texture, zone, and placement chain while overriding exact game-specific
+constants. R3 shader records contain six texture references instead of four,
+shift the material control word and parameter vectors, and use an additional
+collision quantization marker. The R2 reader retains its original strict
+validation.
+
+The Blender bridge reads game identity, display labels, datablock prefixes,
+and engine metadata from the active adapter. Import options remain shared;
+ISO paths, extraction roots, local catalogs, and Asset Browser paths are
+separate per game.
 
 ## Asset Browser cache
 

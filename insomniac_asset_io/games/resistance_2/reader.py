@@ -15,7 +15,7 @@ from ...core.errors import (
     MissingResourceError,
 )
 from ...core.source import GameSource
-from .animations import decode_animset
+from .animations import AnimationProfile, decode_animset
 from .formats import (
     AssetKind,
     AssetPointer,
@@ -97,6 +97,22 @@ class _GlobalTextureLocation:
 class Resistance2Reader:
     """Direct reader for the Resistance 2 Insomniac Engine v2 chain."""
 
+    game_id = "RESISTANCE_2"
+    game_label = "Resistance 2"
+    engine_id = "V2"
+    asset_prefix = "R2"
+    shader_texture_slot_count = 4
+    shader_material_word_offset = 0x10
+    shader_material_values_offset = 0x20
+    shader_material_vector_count = 6
+    shader_material_tail_count = 0
+    material_surface_channels_by_default = True
+    material_emission_uses_albedo = False
+    material_emission_disabled_control_mask = 0
+    material_luminance_alpha_shader_tuids: frozenset[int] = frozenset()
+    collision_quantization_markers = (256,)
+    animation_profile = AnimationProfile.RESISTANCE_2
+
     def __init__(self, source: GameSource) -> None:
         self.source = source
         self.assetlookup_path = self._find_level_resource("assetlookup.dat")
@@ -128,7 +144,7 @@ class Resistance2Reader:
         ]
         if not candidates:
             raise MissingResourceError(
-                f"Resistance 2 source has no {filename}"
+                f"{self.game_label} source has no {filename}"
             )
         level_candidates = [
             path for path in candidates if "/levels/" in path.casefold()
@@ -139,7 +155,8 @@ class Resistance2Reader:
             return candidates[0]
         choices = ", ".join(candidates[:8])
         raise FormatError(
-            f"Resistance 2 source contains multiple {filename} resources: "
+            f"{self.game_label} source contains multiple {filename} "
+            f"resources: "
             f"{choices}. Open a specific level_cached.psarc instead."
         )
 
@@ -544,8 +561,9 @@ class Resistance2Reader:
             )
         return tuple(primitives)
 
-    @staticmethod
+    @classmethod
     def _read_collision_mesh(
+        cls,
         ighw: IghwFile,
         offset: int,
     ) -> CollisionMesh:
@@ -557,7 +575,11 @@ class Resistance2Reader:
         vertex_section_length = ighw.u16(offset + 0x88)
         total_data_length = ighw.u16(offset + 0x8C)
 
-        if vertex_group_width != 16 or quantization_scale != 256:
+        if (
+            vertex_group_width != 16
+            or quantization_scale
+            not in cls.collision_quantization_markers
+        ):
             raise FormatError(
                 f"{ighw.label}: unsupported collision mesh layout "
                 f"group_width={vertex_group_width}, "
@@ -875,62 +897,104 @@ class Resistance2Reader:
         data = self._asset_bytes(AssetKind.SHADER, tuid)
         ighw = IghwFile(data, label=f"shader 0x{tuid:016X}")
         section = ighw.section(SECT_SHADER_REFS)
-        if section is None or section.length < 0x20:
+        texture_id_end = 0x10 + self.shader_texture_slot_count * 4
+        texture_path_end = (
+            texture_id_end + self.shader_texture_slot_count * 4
+        )
+        if section is None or section.length < texture_id_end:
             shader = ShaderInfo(tuid, None, None, None, None)
         else:
-            base = section.offset + 0x10
+            texture_id_base = section.offset + 0x10
             texture_ids = [
-                ighw.u32(base + index * 4) for index in range(4)
+                ighw.u32(texture_id_base + index * 4)
+                for index in range(self.shader_texture_slot_count)
             ]
             lookup_pointer = ighw.u32(section.offset + 0x08)
             lookup_path = (
                 ighw.cstring(lookup_pointer) if lookup_pointer else None
             )
-            texture_paths: tuple[
-                str | None,
-                str | None,
-                str | None,
-                str | None,
-            ] = (None, None, None, None)
-            if section.length >= 0x30:
+            texture_paths = [None] * self.shader_texture_slot_count
+            if section.length >= texture_path_end:
                 pointers = [
-                    ighw.u32(section.offset + 0x20 + index * 4)
-                    for index in range(4)
+                    ighw.u32(
+                        section.offset + texture_id_end + index * 4
+                    )
+                    for index in range(self.shader_texture_slot_count)
                 ]
-                texture_paths = tuple(
+                texture_paths = [
                     ighw.cstring(pointer) if pointer else None
                     for pointer in pointers
-                )
+                ]
 
             material_word = None
+            texture_map_indices: tuple[int, ...] = ()
+            material_pre_control_values: tuple[int, ...] = ()
             material_values: tuple[
                 tuple[float, float, float, float],
                 ...,
             ] = ()
+            material_tail_values: tuple[float, ...] = ()
             material = ighw.section(SECT_SHADER_MATERIAL)
             if material is not None:
-                if material.length < 0x80:
+                map_index_length = self.shader_texture_slot_count * 4
+                pre_control_length = (
+                    self.shader_material_word_offset - map_index_length
+                )
+                if pre_control_length < 0 or pre_control_length % 4:
+                    raise FormatError(
+                        f"{ighw.label}: invalid configured material layout"
+                    )
+                required_material_length = max(
+                    self.shader_material_word_offset + 4,
+                    self.shader_material_values_offset
+                    + self.shader_material_vector_count * 0x10
+                    + self.shader_material_tail_count * 4,
+                )
+                if material.length < required_material_length:
                     raise FormatError(
                         f"{ighw.label}: material section is only "
                         f"{material.length:#x} bytes"
                     )
                 ighw.require(
                     material.offset,
-                    0x80,
+                    required_material_length,
                     purpose="shader material read",
                 )
-                material_word = ighw.u32(material.offset + 0x10)
+                texture_map_indices = tuple(
+                    ighw.i32(material.offset + index * 4)
+                    for index in range(self.shader_texture_slot_count)
+                )
+                material_pre_control_values = tuple(
+                    ighw.u32(
+                        material.offset + map_index_length + index * 4
+                    )
+                    for index in range(pre_control_length // 4)
+                )
+                material_word = ighw.u32(
+                    material.offset + self.shader_material_word_offset
+                )
                 material_values = tuple(
                     tuple(
                         ighw.f32(
                             material.offset
-                            + 0x20
+                            + self.shader_material_values_offset
                             + vector_index * 0x10
                             + component_index * 4
                         )
                         for component_index in range(4)
                     )
-                    for vector_index in range(6)
+                    for vector_index in range(
+                        self.shader_material_vector_count
+                    )
+                )
+                tail_offset = (
+                    material.offset
+                    + self.shader_material_values_offset
+                    + self.shader_material_vector_count * 0x10
+                )
+                material_tail_values = tuple(
+                    ighw.f32(tail_offset + index * 4)
+                    for index in range(self.shader_material_tail_count)
                 )
             shader = ShaderInfo(
                 tuid=tuid,
@@ -939,9 +1003,16 @@ class Resistance2Reader:
                 specular_texture_id=texture_ids[2] or None,
                 detail_texture_id=texture_ids[3] or None,
                 lookup_path=lookup_path,
-                texture_lookup_paths=texture_paths,
+                texture_lookup_paths=tuple(texture_paths[:4]),
+                extra_texture_ids=tuple(
+                    texture_id or None for texture_id in texture_ids[4:]
+                ),
+                extra_texture_lookup_paths=tuple(texture_paths[4:]),
+                texture_map_indices=texture_map_indices,
+                material_pre_control_values=material_pre_control_values,
                 material_word=material_word,
                 material_values=material_values,
+                material_tail_values=material_tail_values,
             )
         self._shader_cache[tuid] = shader
         return shader
@@ -1394,7 +1465,11 @@ class Resistance2Reader:
         if moby.skeleton is None or moby.animset_hash is None:
             return []
         data = self._asset_bytes(AssetKind.ANIMSET, moby.animset_hash)
-        return decode_animset(data, moby.skeleton)
+        return decode_animset(
+            data,
+            moby.skeleton,
+            profile=self.animation_profile,
+        )
 
     def read_zones(self) -> list[Zone]:
         zones: list[Zone] = []

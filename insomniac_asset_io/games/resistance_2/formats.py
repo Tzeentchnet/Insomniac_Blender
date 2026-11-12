@@ -19,13 +19,14 @@ class AssetKind(Enum):
     HIGH_MIP = (0x1D1C0, "highmips.dat")
     CUBEMAP = (0x1D200, "cubemaps.dat")
     TIE = (0x1D300, "ties.dat")
-    FOLIAGE = (0x1D400, "foliage.dat")
+    FOLIAGE = (0x1D400, "foliages.dat")
     SHRUB = (0x1D500, "shrubs.dat")
     MOBY = (0x1D600, "mobys.dat")
     ANIMSET = (0x1D700, "animsets.dat")
     CINEMATIC = (0x1D800, "cinematics.dat")
     ZONE = (0x1DA00, "zones.dat")
     LIGHTING = (0x1DB00, "lighting.dat")
+    HIGHLIGHT = (0x1DB80, "highlight.dat")
 
     @property
     def section_id(self) -> int:
@@ -151,12 +152,25 @@ class ShaderInfo:
         str | None,
         str | None,
     ] = (None, None, None, None)
+    extra_texture_ids: tuple[int | None, ...] = ()
+    extra_texture_lookup_paths: tuple[str | None, ...] = ()
+    texture_map_indices: tuple[int, ...] = ()
+    material_pre_control_values: tuple[int, ...] = ()
     material_word: int | None = None
     material_values: tuple[tuple[float, float, float, float], ...] = ()
+    material_tail_values: tuple[float, ...] = ()
 
     @property
     def expensive_texture_id(self) -> int | None:
         return self.specular_texture_id
+
+    def is_texture_slot_bound(self, index: int) -> bool:
+        if not self.texture_map_indices:
+            return True
+        return (
+            0 <= index < len(self.texture_map_indices)
+            and self.texture_map_indices[index] >= 0
+        )
 
     @property
     def material_flags(self) -> int | None:
@@ -317,6 +331,7 @@ class AnimationHeader:
     track8_count: int
     control_offset: int
     frames_offset: int
+    frame_map_offset: int = 0
 
     @property
     def looping(self) -> bool:
@@ -341,6 +356,13 @@ class DecodedClip:
     rotations_xyzw: FloatArray
     scales: FloatArray
     animated_bones: NDArray[np.bool_]
+    source_flags: int = 0
+    blend_weights: UInt8Array | None = None
+    reference_rotations_xyzw: FloatArray | None = None
+    rotation_animated_bones: NDArray[np.bool_] | None = None
+    translation_components: NDArray[np.bool_] | None = None
+    scale_components: NDArray[np.bool_] | None = None
+    overlay_base_name: str | None = None
 
     @property
     def frame_count(self) -> int:

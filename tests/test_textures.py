@@ -10,6 +10,7 @@ from insomniac_asset_io.games.resistance_2.formats import (
     TextureInfo,
 )
 from insomniac_asset_io.games.resistance_2.materials import (
+    can_reconstruct_normal_map,
     has_emissive_mask,
     reconstruct_normal_map,
 )
@@ -204,6 +205,29 @@ class TextureTests(unittest.TestCase):
 
         rgba[1, 0, 2] = 1
         self.assertTrue(has_emissive_mask(texture))
+
+    def test_accepts_only_verified_normal_texture_formats(self):
+        rgba = np.zeros((1, 1, 4), dtype=np.uint8)
+
+        def texture(format_code: int) -> DecodedTexture:
+            return DecodedTexture(
+                info=TextureInfo(
+                    id=format_code,
+                    tuid=format_code,
+                    format_code=format_code,
+                    mip_count=1,
+                    width=1,
+                    height=1,
+                    offset=0,
+                    length=0,
+                ),
+                rgba=rgba,
+            )
+
+        for format_code in (0x08, 0x0B, 0x88, 0x8B, 0xA8):
+            self.assertTrue(can_reconstruct_normal_map(texture(format_code)))
+        for format_code in (0x05, 0x06, 0x86, 0xA6):
+            self.assertFalse(can_reconstruct_normal_map(texture(format_code)))
 
     def test_reconstructs_normal_from_alpha_and_inverted_green(self):
         info = TextureInfo(

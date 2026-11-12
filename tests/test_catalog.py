@@ -3,6 +3,9 @@ from pathlib import Path
 import tempfile
 import unittest
 
+from insomniac_asset_io.games.catalog import (
+    load_catalog as load_game_catalog,
+)
 from insomniac_asset_io.games.resistance_2.catalog import (
     filter_catalog_assets,
     load_catalog,
@@ -222,6 +225,29 @@ class Resistance2CatalogTests(unittest.TestCase):
             asset.label,
             "Moby 0x0000000000001234 - legacy",
         )
+
+    def test_loads_bundled_resistance_3_usa_catalog(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            catalog = load_game_catalog(
+                Path(temporary),
+                "RESISTANCE_3",
+            )
+
+        self.assertEqual(catalog.game_id, "RESISTANCE_3")
+        self.assertEqual(catalog.game_label, "Resistance 3")
+        self.assertEqual(catalog.region, "USA")
+        self.assertEqual(len(catalog.levels), 27)
+        self.assertEqual(catalog.levels[0], "lobby")
+        self.assertEqual(len(catalog.assets), 5820)
+        self.assertEqual(
+            sum(asset.kind is AssetKind.MOBY for asset in catalog.assets),
+            969,
+        )
+        self.assertEqual(
+            sum(asset.kind is AssetKind.TIE for asset in catalog.assets),
+            4851,
+        )
+        self.assertIn("Resistance 3", catalog.assets[0].description)
 
 
 if __name__ == "__main__":

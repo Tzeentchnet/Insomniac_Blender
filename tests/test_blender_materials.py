@@ -4,6 +4,8 @@ from pathlib import Path
 import sys
 import unittest
 
+import numpy as np
+
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -18,7 +20,53 @@ except ModuleNotFoundError:
 
 if bpy is not None:
     from insomniac_asset_io.blender.importer import _MaterialFactory
-    from insomniac_asset_io.games.resistance_2.formats import ShaderInfo
+    from insomniac_asset_io.games.resistance_2.formats import (
+        DecodedTexture,
+        ShaderInfo,
+        TextureInfo,
+    )
+
+
+    class _MaterialReader:
+        def __init__(
+            self,
+            game_id: str,
+            shader: ShaderInfo,
+            textures: dict[int, DecodedTexture],
+        ) -> None:
+            self.game_id = game_id
+            self.game_label = (
+                "Resistance 3"
+                if game_id == "RESISTANCE_3"
+                else "Resistance 2"
+            )
+            self.asset_prefix = "R3" if game_id == "RESISTANCE_3" else "R2"
+            self.material_surface_channels_by_default = True
+            self.material_emission_uses_albedo = game_id == "RESISTANCE_3"
+            self.material_emission_disabled_control_mask = (
+                0x08 if game_id == "RESISTANCE_3" else 0
+            )
+            self.material_luminance_alpha_shader_tuids = (
+                frozenset({0x5966_249F_D0D6_149B})
+                if game_id == "RESISTANCE_3"
+                else frozenset()
+            )
+            self.shader = shader
+            self.textures = textures
+
+        def read_shader(self, _tuid: int) -> ShaderInfo:
+            return self.shader
+
+        def read_texture(
+            self,
+            texture_id: int,
+            *,
+            lookup_path: str | None = None,
+        ) -> DecodedTexture:
+            return self.textures[texture_id]
+
+        def clear_texture_cache(self) -> None:
+            pass
 
 
 @unittest.skipUnless(bpy is not None, "Blender Python is not available")
@@ -85,6 +133,512 @@ class BlenderMaterialTests(unittest.TestCase):
         _MaterialFactory._apply_colorspace(image, "color")
 
         self.assertEqual(image.alpha_mode, "CHANNEL_PACKED")
+
+    def test_r3_standard_material_builds_normal_and_gloss_nodes(self) -> None:
+        shader, textures = self._surface_fixture(0x100)
+        reader = _MaterialReader("RESISTANCE_3", shader, textures)
+        material = _MaterialFactory(reader, True, []).material(shader.tuid)
+        principled = material.node_tree.nodes["Principled BSDF"]
+        normal_texture = material.node_tree.nodes["Normal_00000200"]
+        normal_map = material.node_tree.nodes["Normal_Map_00000200"]
+        separate = material.node_tree.nodes["Packed_Channels_00000300"]
+        roughness = material.node_tree.nodes["Roughness_00000300"]
+
+        self.assertFalse(material["insomniac_cycles_material"])
+        self.assertTrue(material["insomniac_surface_material_channels"])
+        self.assertEqual(material["insomniac_material_mode"], "R3_STANDARD")
+        self.assertEqual(
+            normal_texture.image.colorspace_settings.name,
+            "Non-Color",
+        )
+        self.assertTrue(
+            self._has_link(
+                material,
+                normal_map,
+                principled,
+                "Normal",
+            )
+        )
+        self.assertTrue(
+            self._has_link(
+                material,
+                separate,
+                roughness,
+                1,
+                from_socket="Red",
+            )
+        )
+        self.assertTrue(
+            self._has_link(
+                material,
+                roughness,
+                principled,
+                "Roughness",
+            )
+        )
+        self.assertFalse(principled.inputs["Metallic"].is_linked)
+        self.assertEqual(principled.inputs["Metallic"].default_value, 0.0)
+
+    def test_r2_standard_material_builds_normal_and_packed_gloss(self) -> None:
+        shader, textures = self._surface_fixture(0x101)
+        reader = _MaterialReader("RESISTANCE_2", shader, textures)
+        material = _MaterialFactory(reader, True, []).material(shader.tuid)
+        principled = material.node_tree.nodes["Principled BSDF"]
+        normal_texture = material.node_tree.nodes["Normal_00000200"]
+        normal_map = material.node_tree.nodes["Normal_Map_00000200"]
+        packed = material.node_tree.nodes["Packed_00000300"]
+        separate = material.node_tree.nodes["Packed_Channels_00000300"]
+        roughness = material.node_tree.nodes["Roughness_00000300"]
+
+        self.assertFalse(material["insomniac_cycles_material"])
+        self.assertTrue(material["insomniac_surface_material_channels"])
+        self.assertEqual(material["insomniac_material_mode"], "R2_STANDARD")
+        self.assertEqual(
+            normal_texture.image.colorspace_settings.name,
+            "Non-Color",
+        )
+        self.assertEqual(separate.label, "R=gloss G=specular B=emission")
+        self.assertTrue(
+            self._has_link(
+                material,
+                normal_map,
+                principled,
+                "Normal",
+            )
+        )
+        self.assertTrue(
+            self._has_link(
+                material,
+                separate,
+                roughness,
+                1,
+                from_socket="Red",
+            )
+        )
+        self.assertTrue(
+            self._has_link(
+                material,
+                roughness,
+                principled,
+                "Roughness",
+            )
+        )
+        self.assertFalse(packed.outputs["Alpha"].is_linked)
+
+    def test_r2_standard_material_connects_flagged_packed_specular(self) -> None:
+        shader, textures = self._surface_fixture(
+            0x102,
+            material_word=0x0E00_0008,
+        )
+        reader = _MaterialReader("RESISTANCE_2", shader, textures)
+        material = _MaterialFactory(reader, True, []).material(shader.tuid)
+        principled = material.node_tree.nodes["Principled BSDF"]
+        separate = material.node_tree.nodes["Packed_Channels_00000300"]
+
+        self.assertTrue(
+            self._has_link(
+                material,
+                separate,
+                principled,
+                "Specular IOR Level",
+                from_socket="Green",
+            )
+        )
+
+    def test_r3_goliath_wet_overlay_uses_luminance_coverage(self) -> None:
+        shader, textures = self._alpha_fixture()
+        reader = _MaterialReader("RESISTANCE_3", shader, textures)
+        material = _MaterialFactory(reader, True, []).material(shader.tuid)
+        principled = material.node_tree.nodes["Principled BSDF"]
+        diffuse = material.node_tree.nodes["Diffuse_00000100"]
+        coverage = material.node_tree.nodes[
+            "Alpha_Coverage_5966249FD0D6149B"
+        ]
+        strength = material.node_tree.nodes[
+            "Alpha_Strength_5966249FD0D6149B"
+        ]
+
+        self.assertEqual(
+            material["insomniac_alpha_source"],
+            "ALBEDO_LUMINANCE_X_MATERIAL_ALPHA",
+        )
+        self.assertEqual(
+            material["insomniac_alpha_approximation"],
+            "R3_MODE_1_BC1_LUMINANCE",
+        )
+        self.assertAlmostEqual(
+            material["insomniac_alpha_factor"],
+            1.2744,
+            places=4,
+        )
+        self.assertFalse(material["insomniac_base_color_factor_valid"])
+        self.assertEqual(strength.operation, "MULTIPLY")
+        self.assertTrue(strength.use_clamp)
+        self.assertAlmostEqual(
+            strength.inputs[1].default_value,
+            1.2744,
+            places=4,
+        )
+        self.assertTrue(
+            self._has_link(
+                material,
+                diffuse,
+                coverage,
+                "Color",
+                from_socket="Color",
+            )
+        )
+        self.assertTrue(self._has_link(material, coverage, strength, 0))
+        self.assertTrue(
+            self._has_link(material, strength, principled, "Alpha")
+        )
+
+        r2_reader = _MaterialReader("RESISTANCE_2", shader, textures)
+        r2_material = _MaterialFactory(r2_reader, True, []).material(
+            shader.tuid
+        )
+        r2_principled = r2_material.node_tree.nodes["Principled BSDF"]
+        r2_diffuse = r2_material.node_tree.nodes["Diffuse_00000100"]
+
+        self.assertIsNone(
+            r2_material.node_tree.nodes.get(
+                "Alpha_Coverage_5966249FD0D6149B"
+            )
+        )
+        self.assertTrue(
+            self._has_link(
+                r2_material,
+                r2_diffuse,
+                r2_principled,
+                "Alpha",
+                from_socket="Alpha",
+            )
+        )
+
+    def test_unbound_r3_texture_references_remain_metadata_only(self) -> None:
+        shader, textures = self._surface_fixture(
+            0x102,
+            texture_map_indices=(0, -1, -1, -1, -1, -1),
+        )
+        reader = _MaterialReader("RESISTANCE_3", shader, textures)
+        material = _MaterialFactory(reader, True, []).material(shader.tuid)
+
+        self.assertEqual(material["insomniac_normal_map_index"], -1)
+        self.assertFalse(material["insomniac_normal_texture_bound"])
+        self.assertEqual(material["insomniac_packed_map_index"], -1)
+        self.assertFalse(material["insomniac_packed_texture_bound"])
+        self.assertIsNone(material.node_tree.nodes.get("Normal_00000200"))
+        self.assertIsNone(material.node_tree.nodes.get("Packed_00000300"))
+
+    def test_unsupported_normal_format_is_reported_and_skipped(self) -> None:
+        shader, textures = self._surface_fixture(
+            0x103,
+            normal_format=0x06,
+        )
+        warnings: list[str] = []
+        reader = _MaterialReader("RESISTANCE_3", shader, textures)
+        material = _MaterialFactory(reader, True, warnings).material(
+            shader.tuid
+        )
+
+        self.assertFalse(material["insomniac_normal_map_supported"])
+        self.assertIsNone(material.node_tree.nodes.get("Normal_00000200"))
+        self.assertTrue(
+            any("unsupported texture format 0x06" in item for item in warnings)
+        )
+
+    def test_r3_emission_uses_tinted_albedo_and_source_control(self) -> None:
+        shader, textures = self._emission_fixture(
+            0x104,
+            material_word=0x0400_0020,
+            base_color_factor=(1.0, 0.5, 0.25, 1.0),
+        )
+        reader = _MaterialReader("RESISTANCE_3", shader, textures)
+        material = _MaterialFactory(reader, True, []).material(shader.tuid)
+        principled = material.node_tree.nodes["Principled BSDF"]
+        diffuse = material.node_tree.nodes["Diffuse_00000100"]
+        separate = material.node_tree.nodes["Packed_Channels_00000300"]
+        tint = material.node_tree.nodes[
+            "Emission_Tint_0000000000000104"
+        ]
+        emission = material.node_tree.nodes[
+            "Emission_Color_0000000000000104"
+        ]
+
+        self.assertTrue(material["insomniac_emissive_mask"])
+        self.assertTrue(material["insomniac_emissive_control_enabled"])
+        self.assertTrue(material["insomniac_emissive"])
+        self.assertEqual(
+            material["insomniac_emissive_color_source"],
+            "ALBEDO_X_BASE_COLOR_FACTOR_X_PACKED_BLUE",
+        )
+        self.assertEqual(tuple(tint.inputs[1].default_value), (1.0, 0.5, 0.25))
+        self.assertTrue(
+            self._has_link(
+                material,
+                diffuse,
+                principled,
+                "Base Color",
+                from_socket="Color",
+            )
+        )
+        self.assertTrue(
+            self._has_link(
+                material,
+                diffuse,
+                tint,
+                0,
+                from_socket="Color",
+            )
+        )
+        self.assertTrue(self._has_link(material, tint, emission, 0))
+        self.assertTrue(
+            self._has_link(
+                material,
+                separate,
+                emission,
+                1,
+                from_socket="Blue",
+            )
+        )
+        self.assertTrue(
+            self._has_link(
+                material,
+                emission,
+                principled,
+                "Emission Color",
+            )
+        )
+        self.assertEqual(
+            principled.inputs["Emission Strength"].default_value,
+            1.0,
+        )
+
+    def test_r3_emission_control_disables_stale_blue_mask(self) -> None:
+        shader, textures = self._emission_fixture(
+            0x105,
+            material_word=0x0400_0028,
+        )
+        reader = _MaterialReader("RESISTANCE_3", shader, textures)
+        material = _MaterialFactory(reader, True, []).material(shader.tuid)
+        principled = material.node_tree.nodes["Principled BSDF"]
+
+        self.assertTrue(material["insomniac_emissive_mask"])
+        self.assertFalse(material["insomniac_emissive_control_enabled"])
+        self.assertFalse(material["insomniac_emissive"])
+        self.assertIsNotNone(
+            material.node_tree.nodes.get("Packed_00000300")
+        )
+        self.assertIsNone(
+            material.node_tree.nodes.get(
+                "Emission_Color_0000000000000105"
+            )
+        )
+        self.assertFalse(principled.inputs["Emission Color"].is_linked)
+
+    def test_r2_emission_keeps_legacy_grayscale_behavior(self) -> None:
+        shader, textures = self._emission_fixture(
+            0x106,
+            material_word=0x0400_0008,
+        )
+        reader = _MaterialReader("RESISTANCE_2", shader, textures)
+        material = _MaterialFactory(reader, True, []).material(shader.tuid)
+        principled = material.node_tree.nodes["Principled BSDF"]
+        separate = material.node_tree.nodes["Packed_Channels_00000300"]
+
+        self.assertTrue(material["insomniac_emissive"])
+        self.assertEqual(
+            material["insomniac_emissive_color_source"],
+            "PACKED_BLUE",
+        )
+        self.assertTrue(
+            self._has_link(
+                material,
+                separate,
+                principled,
+                "Emission Color",
+                from_socket="Blue",
+            )
+        )
+
+    @staticmethod
+    def _surface_fixture(
+        tuid: int,
+        *,
+        texture_map_indices: tuple[int, ...] = (0, 1, 2, -1, -1, -1),
+        normal_format: int = 0x08,
+        material_word: int = 0x0C00_0008,
+    ) -> tuple[ShaderInfo, dict[int, DecodedTexture]]:
+        normal_id = 0x200
+        packed_id = 0x300
+        normal_rgba = np.full((2, 2, 4), 128, dtype=np.uint8)
+        packed_rgba = np.zeros((2, 2, 4), dtype=np.uint8)
+        packed_rgba[..., 0] = np.array(((0, 64), (128, 255)))
+        packed_rgba[..., 3] = 255
+        textures = {
+            normal_id: DecodedTexture(
+                TextureInfo(
+                    id=normal_id,
+                    tuid=normal_id,
+                    format_code=normal_format,
+                    mip_count=1,
+                    width=2,
+                    height=2,
+                    offset=0,
+                    length=0,
+                ),
+                normal_rgba,
+            ),
+            packed_id: DecodedTexture(
+                TextureInfo(
+                    id=packed_id,
+                    tuid=packed_id,
+                    format_code=0x06,
+                    mip_count=1,
+                    width=2,
+                    height=2,
+                    offset=0,
+                    length=0,
+                ),
+                packed_rgba,
+            ),
+        }
+        shader = ShaderInfo(
+            tuid=tuid,
+            albedo_texture_id=None,
+            normal_texture_id=normal_id,
+            specular_texture_id=packed_id,
+            detail_texture_id=None,
+            texture_lookup_paths=(None, None, None, None),
+            extra_texture_ids=(0x400, 0x500),
+            extra_texture_lookup_paths=(None, None),
+            texture_map_indices=texture_map_indices,
+            material_pre_control_values=(0x1111, 0x2222),
+            material_word=material_word,
+        )
+        return shader, textures
+
+    @staticmethod
+    def _emission_fixture(
+        tuid: int,
+        *,
+        material_word: int,
+        base_color_factor: tuple[float, float, float, float] = (
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+        ),
+    ) -> tuple[ShaderInfo, dict[int, DecodedTexture]]:
+        albedo_id = 0x100
+        packed_id = 0x300
+        albedo_rgba = np.full((2, 2, 4), 255, dtype=np.uint8)
+        albedo_rgba[..., :3] = (192, 128, 32)
+        packed_rgba = np.zeros((2, 2, 4), dtype=np.uint8)
+        packed_rgba[..., 0] = 128
+        packed_rgba[..., 2] = 255
+        packed_rgba[..., 3] = 255
+        textures = {
+            albedo_id: DecodedTexture(
+                TextureInfo(
+                    id=albedo_id,
+                    tuid=albedo_id,
+                    format_code=0x06,
+                    mip_count=1,
+                    width=2,
+                    height=2,
+                    offset=0,
+                    length=0,
+                ),
+                albedo_rgba,
+            ),
+            packed_id: DecodedTexture(
+                TextureInfo(
+                    id=packed_id,
+                    tuid=packed_id,
+                    format_code=0x06,
+                    mip_count=1,
+                    width=2,
+                    height=2,
+                    offset=0,
+                    length=0,
+                ),
+                packed_rgba,
+            ),
+        }
+        shader = ShaderInfo(
+            tuid=tuid,
+            albedo_texture_id=albedo_id,
+            normal_texture_id=None,
+            specular_texture_id=packed_id,
+            detail_texture_id=None,
+            texture_lookup_paths=(None, None, None, None),
+            texture_map_indices=(0, -1, 1, -1, -1, -1),
+            material_word=material_word,
+            material_values=(base_color_factor,),
+        )
+        return shader, textures
+
+    @staticmethod
+    def _alpha_fixture() -> tuple[
+        ShaderInfo,
+        dict[int, DecodedTexture],
+    ]:
+        albedo_id = 0x100
+        albedo_rgba = np.full((2, 2, 4), 255, dtype=np.uint8)
+        albedo_rgba[..., :3] = np.array(
+            (
+                ((0, 0, 0), (64, 64, 64)),
+                ((128, 128, 128), (192, 192, 192)),
+            ),
+            dtype=np.uint8,
+        )
+        texture = DecodedTexture(
+            TextureInfo(
+                id=albedo_id,
+                tuid=albedo_id,
+                format_code=0x06,
+                mip_count=1,
+                width=2,
+                height=2,
+                offset=0,
+                length=0,
+            ),
+            albedo_rgba,
+        )
+        shader = ShaderInfo(
+            tuid=0x5966_249F_D0D6_149B,
+            albedo_texture_id=albedo_id,
+            normal_texture_id=None,
+            specular_texture_id=None,
+            detail_texture_id=None,
+            texture_lookup_paths=(None, None, None, None),
+            texture_map_indices=(0, -1, -1, -1, -1, -1),
+            material_word=0x1C01_0008,
+            material_values=((1.0, 1.0, 1.0, 1.2744),),
+        )
+        return shader, {albedo_id: texture}
+
+    @staticmethod
+    def _has_link(
+        material,
+        from_node,
+        to_node,
+        to_socket: str | int,
+        *,
+        from_socket: str | None = None,
+    ) -> bool:
+        target_socket = to_node.inputs[to_socket]
+        return any(
+            link.from_node == from_node
+            and link.to_node == to_node
+            and link.to_socket == target_socket
+            and (
+                from_socket is None
+                or link.from_socket == from_node.outputs[from_socket]
+            )
+            for link in material.node_tree.links
+        )
 
     @staticmethod
     def _material(name: str):
