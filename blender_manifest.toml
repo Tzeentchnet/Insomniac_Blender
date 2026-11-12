@@ -1,0 +1,27 @@
+schema_version = "1.0.0"
+
+id = "insomniac_asset_io"
+version = "0.3.2"
+name = "Insomniac Asset IO"
+tagline = "Import Insomniac game assets through game-specific IO chains"
+maintainer = "Insomniac Asset IO contributors"
+type = "add-on"
+
+tags = ["Import-Export", "Game Engine", "Pipeline"]
+blender_version_min = "5.2.0"
+license = ["SPDX:GPL-3.0-or-later"]
+
+[permissions]
+files = "Read game archives and write extraction and Asset Browser caches"
+
+[build]
+paths_exclude_pattern = [
+  "__pycache__/",
+  "/.git/",
+  "/.github/",
+  "/tests/",
+  "/tools/",
+  "/dist/",
+  "*.log",
+  "*.pyc",
+]
