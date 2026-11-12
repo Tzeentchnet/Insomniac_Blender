@@ -3,8 +3,10 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass
 from functools import lru_cache
+import logging
 
 import bpy
+from bpy.app.handlers import persistent
 
 from ..core.errors import MissingResourceError
 from ..core.iso import DEFAULT_CACHE_DIRECTORY
@@ -26,6 +28,17 @@ _LEVEL_FILTER_ITEMS: list[tuple[str, str, str]] = []
 DEFAULT_ASSET_IDENTIFIER = "MOBY:00897CA26A876DEF"
 ALL_KINDS = "ALL"
 ALL_LEVELS = "__ALL__"
+LOGGER = logging.getLogger(__name__)
+_PERSISTENT_SETTING_NAMES = (
+    "game",
+    "source_path",
+    "asset_filter",
+    "asset_kind_filter",
+    "asset_level_filter",
+    "asset_tuid",
+    "level_id",
+)
+_SESSION_SETTINGS: dict[str, str] = {}
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,6 +52,58 @@ class AssetSelectorState:
     selected: CatalogAsset | None
     selected_label: str
     selection_matches_filter: bool
+
+
+def _current_scene_settings() -> bpy.types.PropertyGroup | None:
+    scene = getattr(bpy.context, "scene", None)
+    if scene is None or not hasattr(scene, "insomniac_asset_io"):
+        return None
+    return scene.insomniac_asset_io
+
+
+@persistent
+def _remember_scene_settings(_unused: object = None) -> None:
+    settings = _current_scene_settings()
+    if settings is None:
+        return
+    for name in _PERSISTENT_SETTING_NAMES:
+        _SESSION_SETTINGS[name] = getattr(settings, name)
+
+
+@persistent
+def _restore_scene_settings(_unused: object = None) -> None:
+    settings = _current_scene_settings()
+    if settings is None:
+        return
+    for name, value in _SESSION_SETTINGS.items():
+        try:
+            setattr(settings, name, value)
+        except (TypeError, ValueError) as exc:
+            LOGGER.warning(
+                "Could not restore Insomniac setting %s=%r: %s",
+                name,
+                value,
+                exc,
+            )
+
+
+def register_scene_settings_persistence() -> None:
+    if _SESSION_SETTINGS:
+        _restore_scene_settings()
+    else:
+        _remember_scene_settings()
+    if _remember_scene_settings not in bpy.app.handlers.load_pre:
+        bpy.app.handlers.load_pre.append(_remember_scene_settings)
+    if _restore_scene_settings not in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.append(_restore_scene_settings)
+
+
+def unregister_scene_settings_persistence() -> None:
+    _remember_scene_settings()
+    if _remember_scene_settings in bpy.app.handlers.load_pre:
+        bpy.app.handlers.load_pre.remove(_remember_scene_settings)
+    if _restore_scene_settings in bpy.app.handlers.load_post:
+        bpy.app.handlers.load_post.remove(_restore_scene_settings)
 
 
 def _cache_directory(context: bpy.types.Context | None) -> str:

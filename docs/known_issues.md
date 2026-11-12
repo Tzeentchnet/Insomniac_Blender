@@ -18,9 +18,19 @@ to edit its rig and animation set.
 ### Animation overlays
 
 Ordinary R2 clips, packed clips, quantization shifts, and additive composition
-are decoded. Some weapon/fire clips were authored for runtime layering over a
-base idle. A standalone Blender Action may not match the final in-game layered
-result until the corresponding base-clip association is documented.
+are decoded. Additive subset controls use the full skeleton layout, and blend
+masks keep bones outside an overlay at their underlying pose. Some weapon/fire
+and hit clips were authored for runtime layering over a locomotion or idle
+Action. They are composed over the bind pose for standalone Blender playback,
+so their upper-body pose may not match the final in-game layered result until
+base-clip associations are documented.
+
+### Root motion and animation metadata
+
+The animation header's root-motion pointer is not decoded. It is zero in the
+2,585 clips sampled from four available level caches, so no exercising R2
+asset is available for an independent implementation. Linear-speed metadata
+is present in many headers but is not applied or exposed on Blender Actions.
 
 ### Bone names
 
@@ -36,6 +46,10 @@ source color factors, reconstructs BC3 and RG8 tangent-space normals,
 converts flagged packed-red gloss to roughness, and follows source alpha
 modes. It affects future imports only and does not change the scene render
 engine.
+
+BC3 albedo alpha is sampled as an independent packed channel. This preserves
+RGB under zero-alpha texels for opaque materials while still exposing the
+same alpha channel to authored mask and blend modes.
 
 Packed green remains disconnected because the public `useSpecular` bit is
 absent from every shader in the whole-disc corpus. Detail maps are
@@ -53,6 +67,12 @@ Its magenta texture is present and correctly decoded, but the game data does
 not identify the materials the affected asset faces were intended to use.
 The importer preserves and labels it rather than applying a speculative
 global replacement.
+
+Some shaders contain stale texture IDs even though another shader references
+the intended payload through the same authored lookup path. The importer
+accepts that path fallback only when all available candidates decode
+identically; conflicting candidates are reported as ambiguous instead of
+being guessed.
 
 ### Cross-level texture references
 

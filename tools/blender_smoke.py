@@ -431,6 +431,42 @@ def _source_roots() -> list[bpy.types.Object]:
     ]
 
 
+def _validate_action_range_sync(
+    armature: bpy.types.Object,
+    actions: list[bpy.types.Action],
+) -> tuple[str, tuple[int, int]]:
+    action = max(
+        actions,
+        key=lambda candidate: (
+            candidate.frame_range[1] - candidate.frame_range[0]
+        ),
+    )
+    expected = (
+        math.floor(action.frame_range[0]),
+        math.ceil(action.frame_range[1]),
+    )
+    scene = bpy.context.scene
+    bpy.context.view_layer.objects.active = armature
+    armature.select_set(True)
+    scene.frame_start = expected[0]
+    scene.frame_end = expected[1] + 1
+    scene.frame_set(expected[1] + 1)
+
+    armature.animation_data.action = action
+    bpy.context.view_layer.update()
+    _require(
+        (scene.frame_start, scene.frame_end) == expected,
+        f"Selecting {action.name!r} did not synchronize the scene range",
+    )
+    _require(
+        expected[0] <= scene.frame_current <= expected[1],
+        f"Selecting {action.name!r} did not clamp the current frame",
+    )
+    armature.animation_data.action = None
+    bpy.context.view_layer.update()
+    return action.name, expected
+
+
 def _validate_moby(args: argparse.Namespace) -> dict[str, Any]:
     mesh_objects = [
         obj
@@ -475,10 +511,62 @@ def _validate_moby(args: argparse.Namespace) -> dict[str, Any]:
         f"Expected {args.expected_bones} bones, "
         f"found {len(armature.data.bones)}",
     )
+    _require(
+        armature.animation_data is None
+        or armature.animation_data.action is None,
+        "Moby armature did not open in its neutral rest pose",
+    )
+    _require(
+        all(
+            bone.inherit_scale
+            == ("NONE" if bone.get("insomniac_flags", 0) & 0x01 else "FULL")
+            for bone in armature.data.bones
+        ),
+        "Moby bone scale inheritance does not match source flags",
+    )
     _require(images, "Moby import created no decoded images")
     _require(
         all(len(action.slots) == 1 for action in actions),
         "Every imported Action must have exactly one Blender 5.2 slot",
+    )
+    _require(
+        all(action.slots.active == action.slots[0] for action in actions),
+        "Every imported Action must expose its Blender 5.2 slot",
+    )
+    _require(
+        all(
+            action.use_frame_range
+            and all(math.isfinite(frame) for frame in action.frame_range)
+            and action.frame_range[0] <= action.frame_range[1]
+            for action in actions
+        ),
+        "Every imported Action must have a finite source frame range",
+    )
+    _require(
+        all(
+            len(action.layers) == 1
+            and len(action.layers[0].strips) == 1
+            and len(action.layers[0].strips[0].channelbags) == 1
+            and all(
+                len(fcurve.keyframe_points) > 0
+                for fcurve in (
+                    action.layers[0]
+                    .strips[0]
+                    .channelbags[0]
+                    .fcurves
+                )
+            )
+            for action in actions
+        ),
+        "Every imported Action must expose keyed F-curves",
+    )
+    _require(
+        all(pose_bone.select for pose_bone in armature.pose.bones),
+        "Imported pose bones must be selected for Action Editor visibility",
+    )
+    synced_action, synced_action_range = _validate_action_range_sync(
+        armature,
+        actions,
     )
     _require(
         math.isclose(roots[0].rotation_euler.x, math.pi / 2.0, abs_tol=1e-5),
@@ -517,6 +605,18 @@ def _validate_moby(args: argparse.Namespace) -> dict[str, Any]:
         "vertex_groups": len(mesh_object.vertex_groups),
         "actions": len(actions),
         "action_slots": sum(len(action.slots) for action in actions),
+        "action_keyframes": sum(
+            len(fcurve.keyframe_points)
+            for action in actions
+            for fcurve in (
+                action.layers[0]
+                .strips[0]
+                .channelbags[0]
+                .fcurves
+            )
+        ),
+        "synced_action": synced_action,
+        "synced_action_range": list(synced_action_range),
         "verified_material_textures": _validate_material_textures(
             args.expected_material_texture,
         ),

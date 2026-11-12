@@ -97,9 +97,11 @@ reliable bone-name table in this chain. The original index and flags are
 stored as custom properties.
 
 Animations are decoded to local translation/quaternion/scale samples, applied
-to the armature in hierarchy order, and baked into Actions. Source FPS,
-looping, and additive flags are stored on each Action. Blender 5.2 keyframe
-insertion creates one compatible Action slot for each imported Action.
+to the armature in hierarchy order, and baked into Actions. Source matrix
+accumulation honors the skeleton's scale-inheritance flags, and sampled keys
+use linear interpolation. Source FPS, looping, and additive flags are stored
+on each Action. Blender 5.2 keyframe insertion creates one compatible Action
+slot for each imported Action.
 
 ## Asset Browser cache
 

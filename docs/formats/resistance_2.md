@@ -94,6 +94,8 @@ Important sections:
 | `0xD100` | MobyV2 header |
 | `0xD200` | null-terminated source entity path |
 | `0xD300` | skeleton |
+| `0xD900` | primitive collision prototype |
+| `0xDA00` | triangle collision prototype |
 | `0x5600` | shader TUID table |
 | `0xE100` | big-endian `u16` index buffer |
 | `0xE200` | vertex buffer |
@@ -109,15 +111,74 @@ MobyV2 fields used:
 |---:|---|---|
 | `0x00` | `f32[4]` | bounding sphere |
 | `0x10` | `i16` | bind-pose inverse offset |
-| `0x18` | `u16` | segment/bangle count |
+| `0x18` | `u16` | segment count |
 | `0x24` | `u32` | segment table pointer |
+| `0x30` | `u32` | primitive collision prototype pointer |
+| `0x34` | `u32` | triangle collision prototype pointer |
 | `0x50` | `u64` | animset TUID |
 | `0x70` | `f32` | quantized position scale |
+| `0x90` | `u32` | bangle count |
+| `0x98` | `u64` | default segment draw mask |
 | `0xB0` | `u64` | Moby TUID |
 
 A segment is `(u32 primitivePointer, u32 primitiveCount)`. A primitive is
 `0x40` bytes. Index offset is in `u16` elements; vertex offset is in bytes.
 The index count at `+0x10` is `u32`, not `u16`.
+
+Bits set in the default segment draw mask identify the intact/default model.
+Clear bits identify optional damage/bangle alternatives. A zero mask is
+treated as unspecified and keeps every segment in the default model. Ordinary
+Moby and gameplay imports use the default geometry. When explicitly enabled,
+Blender keeps each alternate segment as a separate object so mutually
+exclusive runtime permutations are not merged together.
+
+### Collision
+
+Moby collision prototypes are independent from render segments.
+
+Primitive collision begins with `0x20` bytes of bounds. Its header at `+0x80`
+contains a `u16` alignment value of `16` and a `u16` primitive count. Records
+start at `+0x90`, are `0x50` bytes each, and contain:
+
+```text
+u8 kind
+u8 unknown[2]
+u8 boneIndex             // 0xFF means no joint
+u8 unknown[12]
+f32 payload[4][4]
+```
+
+Observed primitive kinds are:
+
+- `4`, oriented box: payload rows 0-2 contain axis XYZ and half-extent W;
+  row 3 XYZ is the center;
+- `5`, sphere: row 0 is center XYZ and radius W;
+- `6`, capsule: row 0 is endpoint A XYZ and radius W; row 1 XYZ is endpoint B.
+
+Triangle collision also starts with `0x20` bytes of bounds. Its header at
+prototype `+0x80` contains:
+
+| Offset | Type | Meaning |
+|---:|---|---|
+| `0x00` | `u16` | vertex count, at most 512 |
+| `0x02` | `u16` | group-width marker, `16` |
+| `0x04` | `u16` | quantization marker, `256` |
+| `0x06` | `u16` | face count |
+| `0x08` | `u16` | vertex section length |
+| `0x0C` | `u16` | aligned total data length |
+
+The signed `i32[3]` base position is at prototype `+0x90`. Quantized vertices
+begin at `+0xA0` in groups of eight: eight X `u16` values, then eight Y, then
+eight Z, for 48 bytes per group. Position decoding is:
+
+```text
+position = (base + quantizedOffset) / 1024
+```
+
+The vertex section length is `0x20 + ceil(vertexCount / 8) * 0x30`, measured
+from the `+0x80` header. Face words immediately follow it. Each big-endian
+`u32` stores face type in bits 27-31 and three nine-bit vertex indices in bits
+18-26, 9-17, and 0-8.
 
 ### Vertices
 
@@ -161,6 +222,18 @@ Some roots use `parent == own index`; treat this as no parent. Local bind is:
 local[i] = inverseWorld[parent] @ world[i]
 ```
 
+Bone flag bit `0x01` disables parent-scale inheritance. Blender imports map
+that flag to the bone's `NONE` scale-inheritance mode. Because Blender rest
+bones cannot retain every scale component from the source matrices, animated
+poses are retargeted as `sourcePose @ inverseWorldBind @ blenderRest`; this
+keeps a bind-equivalent frame deformation-free. Each retargeted pose is
+converted to a local basis against the desired parent pose before keyframing,
+so Blender evaluation order cannot apply an ancestor transform twice.
+
+The unsigned child index uses zero as its terminal/no-child sentinel. Blender
+therefore gives those terminal bones a short display tail instead of extending
+them back to bone zero.
+
 The two shift fields were not byte-swapped by the original serializer. Values
 outside 0–15 are byte-swapped; remaining outliers use the x86 five-bit shift
 mask observed by public implementations.
@@ -198,6 +271,42 @@ stored stride. Translation and scale use:
 Flag `0x01` is looping, `0x02` additive, and `0x04` packed frames. Public
 research also identifies `0x0200` position/scale delta behavior in related V2
 data; the reader preserves that path for R2 overlays.
+
+For additive clips, the header bone count is the number of bones in the layer,
+not the control-buffer array length. Reference rotations, subsequent control
+offsets, and blend masks use the full skeleton bone count. A zero blend mask
+omits the static reference rotation for an untracked bone, leaving the
+underlying pose unchanged.
+
+### InsomniaToolset behavior comparison
+
+The animation path was compared with
+[InsomniaToolset revision `529729a`](https://github.com/PredatorCZ/InsomniaToolset/tree/529729af2db172607a39795277cb7406dfcbf139)
+as a behavioral reference. Its GPL implementation was not copied, and behavior
+was not accepted without checking the R2 bytes and Blender evaluation.
+
+The local evidence set contained 101 unique animsets and 2,585 clips available
+from the `axbridge_coop`, `badlands`, `bayou`, and `lobby` caches. It is not a
+whole-disc survey.
+
+| Area | Comparison and evidence | Classification |
+|---|---|---|
+| Header and control layout | Both paths use the stored packed stride, round non-packed strides to `0x80`, and treat additive header bone counts as subset counts while sizing control arrays from the full skeleton. | Match |
+| Track-mask marker | InsomniaToolset asserts that bits 0..1 equal `2`. All 301,565 sampled masks use that marker; this importer now rejects invalid markers, kinds, components, and bone indices with a format error. | Match, with explicit validation |
+| Rotation reconstruction | Both seed partial quaternion tracks from the reference quaternion and normalize after replacing animated components. No negative adjacent quaternion dot products occurred in the 2,585 sampled clips, so no additional hemisphere rewrite is currently justified. | Match |
+| Position/scale component fallback | InsomniaToolset's GLTF decode path does not mark 16-bit position/scale components as present and initializes 8-bit-only tracks without their static reference components. In the sample that would lose 76 dynamic 16-bit position components, 909 static position components, and 4 static scale components; every affected value differs from bind. The importer tracks component presence for both widths and preserves static components. | Intentional difference; raw data favors this importer |
+| Additive composition | InsomniaToolset defines bind rotation multiplication, translation addition, and scale multiplication, but neither inspected GLTF loader calls that helper. This importer applies the same non-premultiplied bind/delta math for standalone Action playback. Runtime overlays can still require an unknown locomotion or idle base. | Toolset export gap; importer adaptation |
+| Blend masks | Both treat zero as excluding an untracked static additive rotation. All 818 sampled additive clips use only `0` and `255`; the nonzero count equals the additive header subset count in every case, and no tracked bone has a zero mask. | Match |
+| Scale inheritance | InsomniaToolset splits scale from transform nodes for GLTF and propagates animated scale and scaled translations through inheriting descendants until a `DONT_INHERIT_SCALE` bone. Blender represents the flag directly. The importer now also removes ancestor scale while accumulating the source target matrix for such bones; 675 sampled clips exercise this boundary. | Equivalent Blender adaptation |
+| Timing | InsomniaToolset writes a final sample time of `(numFrames - 1) / frameRate`. Blender keys use the same duration mapped onto the scene FPS, and imported curves now use linear rather than Blender's default Bezier interpolation. | Match with Blender time mapping |
+| Root motion | InsomniaToolset reads the pointer at header offset `0x1C` and attempts to compose those frames onto skeleton roots. This importer currently skips it. None of the 2,585 sampled R2 clips has a nonzero pointer, and the Toolset's separate root-motion paths are internally inconsistent, so a future implementation must be validated independently against an exercising asset. | Unexercised gap |
+| Linear speed | The sampled headers contain 1,001 nonzero linear-speed values. Neither implementation applies that metadata to exported motion; this importer parses it but does not expose it on the Action. | Metadata gap |
+| Duplicate names | Six sampled animsets contain duplicate names. Some duplicates have different frame data or pair a full-body clip with an additive clip. One InsomniaToolset loader drops later duplicates while its other loader retains them; Blender retains every clip and applies its normal numeric Action suffix. | Intentional preservation |
+| Flag `0x0200` | InsomniaToolset does not interpret it. The importer's position/scale delta branch comes from related V2 research, but no sampled R2 clip sets the flag. | Unconfirmed R2 hypothesis |
+
+Eight sampled facial clips also set combinations of `0x0010`, `0x0020`, and
+`0x0400`. Both implementations currently decode their ordinary transform
+tracks without assigning additional meaning to those bits.
 
 ## Tie
 
@@ -276,6 +385,13 @@ Shader section `0x5D00` is a 48-byte `MaterialResourceNameLookup`:
 Most third-slot paths end in `_e`. Here `_e` identifies the engine's packed
 "expensive" map; it is not sufficient evidence that the whole RGB texture is
 emissive.
+
+Some shipped shaders retain a stale texture ID while another shader in the
+same level references an available payload through the identical authored
+lookup path. The Attackdrone body is one example. If direct, global, and
+sibling-ID lookup all fail, the reader indexes these paths and accepts a
+path-equivalent payload only when every available candidate decodes
+identically. Different payloads sharing a path remain an ambiguity error.
 
 Section `0x5000` is the 128-byte material parameter record:
 
@@ -532,7 +648,7 @@ Gameplay Euler values are composed in ZYX order.
   all 3,355 unique shaders in the current corpus.
 - Detail-map composition and exact use of vector 4.
 - Authored emission tint/strength and the remaining parameter-vector fields.
-- Lighting, collision, VFX, cubemap, and sky import.
+- Lighting, level collision, VFX, cubemap, and sky import.
 - Runtime-specific layered animation blending for every weapon overlay.
 
 ## References

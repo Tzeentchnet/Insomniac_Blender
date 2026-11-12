@@ -94,29 +94,69 @@ def _read_u16_masks(
     return tuple(TrackMask.unpack(int(value)) for value in values)
 
 
+def _validate_track_masks(
+    header: AnimationHeader,
+    masks: tuple[TrackMask, ...],
+    bone_count: int,
+    label: str,
+) -> None:
+    for index, mask in enumerate(masks):
+        prefix = (
+            f"Animation {header.name!r} {label} mask {index}"
+        )
+        if mask.marker != 2:
+            raise FormatError(
+                f"{prefix} has invalid marker {mask.marker}"
+            )
+        if mask.kind is TrackKind.UNKNOWN:
+            raise FormatError(f"{prefix} has an unknown track kind")
+        component_count = (
+            4 if mask.kind is TrackKind.ROTATION else 3
+        )
+        if mask.component >= component_count:
+            raise FormatError(
+                f"{prefix} has invalid component {mask.component}"
+            )
+        if mask.bone_index >= bone_count:
+            raise FormatError(
+                f"{prefix} references bone {mask.bone_index}, "
+                f"but the control contains {bone_count} bones"
+            )
+
+
 def _read_control(
     ighw: IghwFile,
     header: AnimationHeader,
+    *,
+    bone_count: int | None = None,
 ) -> _AnimationControl:
+    control_bone_count = (
+        header.bone_count if bone_count is None else bone_count
+    )
     if not header.control_offset:
         return _AnimationControl(
-            reference_rotations=np.zeros((header.bone_count, 4), dtype=np.int16),
+            reference_rotations=np.zeros(
+                (control_bone_count, 4),
+                dtype=np.int16,
+            ),
             reference_values=np.empty(0, dtype=np.int16),
             reference_masks=(),
             track16_masks=(),
             track8_masks=(),
             track8_bases=np.empty(0, dtype=np.int16),
-            blend_masks=np.ones(header.bone_count, dtype=np.uint8),
+            blend_masks=np.ones(control_bone_count, dtype=np.uint8),
         )
 
     base = header.control_offset
-    bone_count = header.bone_count
     reference_count = header.reference_value_count
     track16_count = header.track16_count
     track8_count = header.track8_count
 
     rotations_offset = 0
-    values_offset = _pad(rotations_offset + bone_count * 8, 16)
+    values_offset = _pad(
+        rotations_offset + control_bone_count * 8,
+        16,
+    )
     value_masks_offset = _pad(values_offset + reference_count * 2, 16)
     track16_masks_offset = _pad(
         value_masks_offset + reference_count * 2, 16
@@ -130,8 +170,10 @@ def _read_control(
     blend_offset = _pad(track8_bases_offset + track8_count * 2, 16)
 
     rotations = _read_i16_array(
-        ighw, base + rotations_offset, bone_count * 4
-    ).reshape(bone_count, 4)
+        ighw,
+        base + rotations_offset,
+        control_bone_count * 4,
+    ).reshape(control_bone_count, 4)
     values = _read_i16_array(ighw, base + values_offset, reference_count)
     reference_masks = _read_u16_masks(
         ighw, base + value_masks_offset, reference_count
@@ -145,14 +187,18 @@ def _read_control(
     track8_bases = _read_i16_array(
         ighw, base + track8_bases_offset, track8_count
     )
-    ighw.require(base + blend_offset, bone_count, purpose="animation blend masks")
+    ighw.require(
+        base + blend_offset,
+        control_bone_count,
+        purpose="animation blend masks",
+    )
     blend_masks = np.frombuffer(
         ighw.data,
         dtype=np.uint8,
-        count=bone_count,
+        count=control_bone_count,
         offset=base + blend_offset,
     ).copy()
-    return _AnimationControl(
+    control = _AnimationControl(
         reference_rotations=rotations,
         reference_values=values,
         reference_masks=reference_masks,
@@ -161,6 +207,25 @@ def _read_control(
         track8_bases=track8_bases,
         blend_masks=blend_masks,
     )
+    _validate_track_masks(
+        header,
+        control.reference_masks,
+        control_bone_count,
+        "reference",
+    )
+    _validate_track_masks(
+        header,
+        control.track16_masks,
+        control_bone_count,
+        "16-bit",
+    )
+    _validate_track_masks(
+        header,
+        control.track8_masks,
+        control_bone_count,
+        "8-bit",
+    )
+    return control
 
 
 def _matrix_quaternion_xyzw(matrix: np.ndarray) -> np.ndarray:
@@ -255,11 +320,29 @@ def _decode_clip(
     header: AnimationHeader,
     skeleton: Skeleton,
 ) -> DecodedClip:
-    control = _read_control(ighw, header)
     frame_count = header.frame_count
     bone_count = skeleton.bone_count
     if frame_count <= 0:
         raise FormatError(f"Animation {header.name!r} has no frames")
+    if header.additive:
+        if header.bone_count > bone_count:
+            raise FormatError(
+                f"Animation {header.name!r} layer contains "
+                f"{header.bone_count} bones, but the skeleton contains "
+                f"{bone_count}"
+            )
+    elif header.bone_count != bone_count:
+        raise FormatError(
+            f"Animation {header.name!r} contains {header.bone_count} "
+            f"bones, but the skeleton contains {bone_count}"
+        )
+    # Additive headers store a layer subset count, but their control arrays
+    # and offsets use the complete skeleton bone count.
+    control = _read_control(
+        ighw,
+        header,
+        bone_count=bone_count if header.additive else header.bone_count,
+    )
 
     bind_t, bind_q, bind_s = _bind_trs(skeleton)
     reference_q = np.zeros((bone_count, 4), dtype=np.int16)
@@ -279,16 +362,14 @@ def _decode_clip(
     for value, mask in zip(
         control.reference_values, control.reference_masks, strict=False
     ):
-        if mask.bone_index >= bone_count:
-            continue
         component = mask.component
-        if mask.kind is TrackKind.ROTATION and component < 4:
+        if mask.kind is TrackKind.ROTATION:
             rotation_raw[:, mask.bone_index, component] = value
             rotation_touched[mask.bone_index] = True
-        elif mask.kind is TrackKind.POSITION and component < 3:
+        elif mask.kind is TrackKind.POSITION:
             position_raw[:, mask.bone_index, component] = value
             position_mask[:, mask.bone_index, component] = True
-        elif mask.kind is TrackKind.SCALE and component < 3:
+        elif mask.kind is TrackKind.SCALE:
             scale_raw[:, mask.bone_index, component] = value
             scale_mask[:, mask.bone_index, component] = True
 
@@ -316,7 +397,6 @@ def _decode_clip(
                 frame,
                 int(value),
                 mask,
-                bone_count,
                 rotation_raw,
                 rotation_touched,
                 position_raw,
@@ -337,7 +417,6 @@ def _decode_clip(
                 frame,
                 value,
                 mask,
-                bone_count,
                 rotation_raw,
                 rotation_touched,
                 position_raw,
@@ -381,6 +460,11 @@ def _decode_clip(
 
     if header.additive:
         rotations = _quat_multiply(bind_q[None, :, :], rotations)
+        blend_enabled = np.ones(bone_count, dtype=np.bool_)
+        copied = min(bone_count, len(control.blend_masks))
+        blend_enabled[:copied] = control.blend_masks[:copied] != 0
+        excluded = ~rotation_touched & ~blend_enabled
+        rotations[:, excluded] = bind_q[excluded]
     elif delta_position_scale:
         untouched = ~rotation_touched
         rotations[:, untouched] = bind_q[untouched]
@@ -407,7 +491,6 @@ def _assign_track(
     frame: int,
     value: int,
     mask: TrackMask,
-    bone_count: int,
     rotation_raw: np.ndarray,
     rotation_touched: np.ndarray,
     position_raw: np.ndarray,
@@ -417,15 +500,13 @@ def _assign_track(
 ) -> None:
     bone = mask.bone_index
     component = mask.component
-    if bone >= bone_count:
-        return
-    if mask.kind is TrackKind.ROTATION and component < 4:
+    if mask.kind is TrackKind.ROTATION:
         rotation_raw[frame, bone, component] = value
         rotation_touched[bone] = True
-    elif mask.kind is TrackKind.POSITION and component < 3:
+    elif mask.kind is TrackKind.POSITION:
         position_raw[frame, bone, component] = value
         position_mask[frame, bone, component] = True
-    elif mask.kind is TrackKind.SCALE and component < 3:
+    elif mask.kind is TrackKind.SCALE:
         scale_raw[frame, bone, component] = value
         scale_mask[frame, bone, component] = True
 

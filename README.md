@@ -17,8 +17,10 @@ v2)**.
 | Direct decrypted ISO sources | Supported through a reusable local extraction cache |
 | `assetlookup.dat` discovery | Supported |
 | Moby models | Supported |
+| Moby damage permutations | Optional; disabled by default and kept in a separate Collection |
+| Moby primitive and triangle collision | Optional wire helpers; disabled by default |
 | Moby skeletons and skin weights | Supported |
-| Moby animsets | Supported; clips become Blender Actions |
+| Moby animsets | Supported, including additive subset and blend masks; clips become Blender Actions |
 | Tie static meshes | Supported |
 | USA model/level import catalog | 4,130 named assets and 27 levels bundled as metadata |
 | Blender Asset Browser library | Locally generated Moby/Tie Collection assets |
@@ -29,7 +31,7 @@ v2)**.
 | Zone terrain (`UFrag`) | Supported |
 | Gameplay Moby placement | Supported as linked static mesh instances |
 | Shrub and foliage geometry | Not yet implemented |
-| Lighting, collision, VFX, and cubemaps | Not yet implemented |
+| Lighting, level collision, VFX, and cubemaps | Not yet implemented |
 
 See [Resistance 2 formats](docs/formats/resistance_2.md) and
 [known issues](docs/known_issues.md) for precise layouts and caveats.
@@ -79,14 +81,33 @@ clears them all. Filters only change what the search popup lists: the current
 selection is kept, stays importable, and is flagged when it falls outside the
 filters.
 
+Sidebar source, filter, asset-selection, and level-selection choices persist
+for the Blender session when creating or opening another file, including with
+**File > New** (`Ctrl+N`). Transient progress and result messages reset with
+the file.
+
 The bundled USA catalog contains 4,130 unique importable TUIDs across all 27
 disc levels. The importer reuses an extracted owner level when available and
 otherwise extracts that level's cached/uncached and global archive pairs from
 the configured ISO on demand. A manually selected PSARC or ISO remains an
 optional source override.
 
-Moby imports create a mesh, armature, weights, materials, and every decoded
-animset clip as a persistent Blender Action by default.
+Moby imports create the intact/base mesh, armature, weights, materials, and
+every decoded animset clip as a persistent Blender Action by default. The rig
+opens in its neutral rest pose; choose an Action when animation playback is
+wanted. Actions retain their source-derived playback ranges, and the imported
+pose bones start selected so Blender's default **Only Show Selected** filter
+shows their keyframes immediately in the Action Editor. Selecting an imported
+Action also updates the scene playback range, and the preview range when it is
+enabled, to that clip's bounds. Sampled transform keys use linear interpolation
+and respect source scale-inheritance flags.
+
+Damage permutations and collision geometry are independently disabled by
+default. Enabling them in Add-on Preferences puts each damage segment in the
+asset's **Damage Permutations** child Collection and puts decoded box, sphere,
+capsule, and triangle collision helpers in its **Collision Geometry** child
+Collection. Collision helpers display as in-front wire geometry and are
+excluded from renders.
 
 ### Import a level
 
@@ -119,7 +140,8 @@ The extension never modifies the ISO.
 Model/static-mesh and level options live in Add-on Preferences rather than
 the sidebar:
 
-- model materials, Moby animations, animation limit, and axis conversion;
+- model materials, Moby animations, animation limit, axis conversion, and
+  default-off damage-permutation and collision-geometry import;
 - asset-selector duplicate suppression, TUID visibility, and owner-level
   visibility;
 - level materials, terrain, static props, gameplay instances, and axis
@@ -218,8 +240,11 @@ data to the repository.
 
 Diffuse lookup first uses the level texture tables, then the global archive's
 per-TUID texture bundles, then already-extracted sibling level pairs under the
-same `packed/levels` tree. References that remain unavailable are reported and
-receive a deterministic placeholder material.
+same `packed/levels` tree. A missing/stale texture ID can also resolve through
+another available ID with the identical authored lookup path, provided every
+available candidate decodes to the same image. Ambiguous path matches remain
+errors. References that remain unavailable are reported and receive a
+deterministic placeholder material.
 
 R2 also contains an authored `defaults/default_pink_shader` material. Its
 magenta texture is real source data, not Blender's missing-image indicator.
@@ -257,12 +282,19 @@ Run the installed extension inside Blender:
 `tools\blender_smoke.py` can prepare an ISO fixture, import and save a Moby or
 level, and reopen a saved file to verify that Blender data survives
 serialization. It validates UVs, materials, packed images, armatures, weights,
-Blender 5.2 Action slots, terrain, placement counts, axis conversion, and
-shared mesh datablocks. It can also assert reconstructed normals, conversion
-from gloss to roughness, source color tints, blend modes, blue-channel
-emission, all-zero non-emissive packed maps, and compile a representative
-material in a small Cycles render without changing the imported scene's
-engine.
+Blender 5.2 Action slots, keyframes and playback ranges, terrain, placement
+counts, axis conversion, and shared mesh datablocks. It can also assert
+reconstructed normals, conversion from gloss to roughness, source color
+tints, blend modes, blue-channel emission, all-zero non-emissive packed maps,
+and compile a representative material in a small Cycles render without
+changing the imported scene's engine.
+
+Run the synthetic Blender rig regression test without game data:
+
+```powershell
+& "C:\path\to\blender.exe" --background --factory-startup `
+  --python-exit-code 1 --python tests\test_blender_rig.py
+```
 
 Validate every generated Asset Browser entry, catalog assignment, preview,
 object dependency, and packed game image:
