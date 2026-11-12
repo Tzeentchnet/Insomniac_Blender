@@ -33,6 +33,104 @@ class TextureTests(unittest.TestCase):
         self.assertEqual(rgba.shape, (4, 4, 4))
         np.testing.assert_array_equal(rgba[0, 0], [255, 0, 0, 255])
 
+    def test_decodes_dxt1_block_layout_and_transparency(self):
+        selectors = sum(
+            (pixel % 4) << (2 * pixel) for pixel in range(16)
+        )
+        transparent = struct.pack("<HHI", 0x001F, 0xF800, selectors)
+        green = struct.pack("<HHI", 0x07E0, 0x001F, 0)
+        info = TextureInfo(
+            id=9,
+            tuid=9,
+            format_code=0x06,
+            mip_count=1,
+            width=5,
+            height=4,
+            offset=0,
+            length=16,
+        )
+
+        rgba = decode_texture(info, transparent + green).rgba
+
+        self.assertEqual(rgba.shape, (4, 5, 4))
+        np.testing.assert_array_equal(rgba[0, 0], [0, 0, 255, 255])
+        np.testing.assert_array_equal(rgba[0, 1], [255, 0, 0, 255])
+        np.testing.assert_array_equal(rgba[0, 2], [127, 0, 127, 255])
+        np.testing.assert_array_equal(rgba[0, 3], [0, 0, 0, 0])
+        np.testing.assert_array_equal(
+            rgba[:, 4],
+            np.tile([0, 255, 0, 255], (4, 1)),
+        )
+
+    def test_decodes_dxt3_explicit_alpha(self):
+        alpha = sum((pixel % 16) << (4 * pixel) for pixel in range(16))
+        block = (
+            alpha.to_bytes(8, "little")
+            + struct.pack("<HHI", 0xF800, 0x07E0, 0)
+        )
+        info = TextureInfo(
+            id=10,
+            tuid=10,
+            format_code=0x07,
+            mip_count=1,
+            width=4,
+            height=4,
+            offset=0,
+            length=16,
+        )
+
+        rgba = decode_texture(info, block).rgba
+
+        np.testing.assert_array_equal(
+            rgba[..., 3].reshape(-1),
+            np.arange(16, dtype=np.uint8) * 17,
+        )
+
+    def test_decodes_both_dxt5_alpha_modes(self):
+        alpha_selectors = sum(
+            (pixel % 8) << (3 * pixel) for pixel in range(16)
+        )
+        color = struct.pack("<HHI", 0xF800, 0x07E0, 0)
+        seven_step = (
+            bytes((255, 0))
+            + alpha_selectors.to_bytes(6, "little")
+            + color
+        )
+        five_step = (
+            bytes((0, 255))
+            + alpha_selectors.to_bytes(6, "little")
+            + color
+        )
+        info = TextureInfo(
+            id=11,
+            tuid=11,
+            format_code=0x08,
+            mip_count=1,
+            width=8,
+            height=4,
+            offset=0,
+            length=32,
+        )
+
+        rgba = decode_texture(info, seven_step + five_step).rgba
+
+        np.testing.assert_array_equal(
+            rgba[0, :4, 3],
+            [255, 0, 218, 182],
+        )
+        np.testing.assert_array_equal(
+            rgba[1, :4, 3],
+            [145, 109, 72, 36],
+        )
+        np.testing.assert_array_equal(
+            rgba[0, 4:, 3],
+            [0, 255, 51, 102],
+        )
+        np.testing.assert_array_equal(
+            rgba[1, 4:, 3],
+            [153, 204, 0, 255],
+        )
+
     def test_decodes_morton_r8(self):
         info = TextureInfo(
             id=2,
