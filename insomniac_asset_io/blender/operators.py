@@ -277,10 +277,7 @@ class INSOMNIAC_OT_inspect_source(bpy.types.Operator):
             self.cancel(context)
             self.report({"INFO"}, "Source inspection cancelled")
             return {"CANCELLED"}
-        if (
-            event.type != "TIMER"
-            or event.timer != self._inspection_timer
-        ):
+        if event.type != "TIMER":
             return {"PASS_THROUGH"}
 
         _remove_inspection_timer(self, context)
