@@ -281,6 +281,14 @@ def _level_items(
     return _LEVEL_ITEMS
 
 
+class InsomniacAssetPickerItem(bpy.types.PropertyGroup):
+    identifier: bpy.props.StringProperty(options={"HIDDEN", "SKIP_SAVE"})
+    label: bpy.props.StringProperty(options={"HIDDEN", "SKIP_SAVE"})
+    description: bpy.props.StringProperty(options={"HIDDEN", "SKIP_SAVE"})
+    search_text: bpy.props.StringProperty(options={"HIDDEN", "SKIP_SAVE"})
+    kind: bpy.props.StringProperty(options={"HIDDEN", "SKIP_SAVE"})
+
+
 class InsomniacSceneSettings(bpy.types.PropertyGroup):
     game: bpy.props.EnumProperty(
         name="Game",
@@ -297,13 +305,18 @@ class InsomniacSceneSettings(bpy.types.PropertyGroup):
         name="Source",
         description=(
             "A Resistance 2 ISO, extracted assetlookup.dat, level PSARC, or "
-            "folder containing extracted level resources"
+            "folder containing one ISO or extracted level resources"
         ),
         subtype="FILE_PATH",
     )
     source_summary: bpy.props.StringProperty(
         name="Summary",
         options={"SKIP_SAVE"},
+    )
+    source_inspection_busy: bpy.props.BoolProperty(
+        name="Source inspection in progress",
+        default=False,
+        options={"HIDDEN", "SKIP_SAVE"},
     )
     last_message: bpy.props.StringProperty(
         name="Last result",
@@ -347,4 +360,7 @@ class InsomniacSceneSettings(bpy.types.PropertyGroup):
     )
 
 
-CLASSES = (InsomniacSceneSettings,)
+CLASSES = (
+    InsomniacAssetPickerItem,
+    InsomniacSceneSettings,
+)

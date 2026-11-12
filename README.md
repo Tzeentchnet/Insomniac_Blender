@@ -61,9 +61,9 @@ Blender includes NumPy; no external Python package is required at runtime.
 
 1. In Add-on Preferences, select a decrypted Resistance 2 ISO and local
    extraction-cache directory.
-2. In the **Insomniac** sidebar, click the asset button to open a search
-   popup listing every asset alphabetically, and type part of a name to find
-   one.
+2. In the **Insomniac** sidebar, click the asset button to open a scrollable
+   chooser listing every asset alphabetically. Use its search field to find
+   an asset by name, path, kind, TUID, or owner level.
 3. Optionally narrow what the popup lists first. All three filters are
    optional and combine:
    - **All / Mobys / Ties** restricts the asset kind;
@@ -104,9 +104,13 @@ level import. Import an individual Moby to edit its rig and animations.
 The ISO source path calls a libarchive-compatible `tar` executable without
 using a shell. Configure the default ISO in Add-on Preferences or select an
 ISO as the optional sidebar source override, then use the catalog selectors.
-The importer extracts only the required level pair and global pair. Complete
-existing extractions are reused. **Extract Selected Level Now** remains
-available when an explicit PSARC path is useful for external tools.
+The sidebar source also accepts a directory containing exactly one `.iso`
+file. The importer extracts only the required level pair and global pair.
+Complete existing extractions are reused. **Extract Selected Level Now**
+remains available when an explicit PSARC path is useful for external tools.
+When **Inspect Source** needs ISO extraction, the sidebar and status bar show
+a busy message before processing starts; preparing the archives can take
+several minutes.
 
 The extension never modifies the ISO.
 

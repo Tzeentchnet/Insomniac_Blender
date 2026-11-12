@@ -28,6 +28,33 @@ def _tar_executable() -> str:
     return tar
 
 
+def find_resistance_2_iso(
+    source_path: str | Path,
+) -> Path | None:
+    """Resolve an ISO path or a source directory containing exactly one ISO."""
+
+    source = Path(source_path).expanduser()
+    if source.suffix.casefold() == ".iso":
+        return source
+    if not source.is_dir():
+        return None
+
+    candidates = sorted(
+        (
+            path
+            for path in source.iterdir()
+            if path.is_file() and path.suffix.casefold() == ".iso"
+        ),
+        key=lambda path: path.name.casefold(),
+    )
+    if len(candidates) > 1:
+        raise InsomniacError(
+            f"Source folder contains multiple ISO files; select one ISO "
+            f"file directly: {source}"
+        )
+    return candidates[0] if candidates else None
+
+
 def _level_path(level_name: str) -> PurePosixPath:
     level = PurePosixPath(level_name.strip().replace("\\", "/"))
     if (
@@ -160,6 +187,7 @@ def resolve_resistance_2_source(
     """Resolve a PSARC/directory directly or prepare a selected ISO level."""
 
     source = Path(source_path).expanduser()
-    if source.suffix.casefold() == ".iso":
-        return prepare_resistance_2_level(source, level_name, cache_directory)
+    iso = find_resistance_2_iso(source)
+    if iso is not None:
+        return prepare_resistance_2_level(iso, level_name, cache_directory)
     return source

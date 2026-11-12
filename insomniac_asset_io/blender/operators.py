@@ -7,6 +7,7 @@ from bpy_extras.io_utils import ImportHelper
 
 from ..core.errors import InsomniacError
 from ..core.iso import (
+    find_resistance_2_iso,
     prepare_resistance_2_level,
     resistance_2_cached_level_path,
 )
@@ -29,6 +30,7 @@ from .importer import (
 )
 from .preferences import addon_preferences, cycles_materials_enabled
 from .properties import (
+    InsomniacAssetPickerItem,
     asset_search_items,
     clear_asset_filters,
     ensure_asset_selection,
@@ -37,6 +39,9 @@ from .properties import (
 
 
 LOGGER = logging.getLogger(__name__)
+SOURCE_INSPECTION_STATUS = (
+    "Inspecting Resistance 2 source; ISO extraction may take several minutes"
+)
 
 
 def _settings(context: bpy.types.Context):
@@ -60,9 +65,16 @@ def _configured_iso(context: bpy.types.Context) -> str:
     settings = _settings(context)
     if settings.source_path:
         source = bpy.path.abspath(settings.source_path)
-        if Path(source).suffix.casefold() == ".iso":
-            return source
-    return bpy.path.abspath(_preferences(context).resistance_2_iso_path)
+        iso = find_resistance_2_iso(source)
+        if iso is not None:
+            return str(iso)
+    configured = bpy.path.abspath(
+        _preferences(context).resistance_2_iso_path
+    )
+    if not configured:
+        return ""
+    iso = find_resistance_2_iso(configured)
+    return str(iso) if iso is not None else configured
 
 
 def _catalog(context: bpy.types.Context):
@@ -92,13 +104,14 @@ def _resolved_asset_source(
         if settings.source_path
         else ""
     )
-    if manual and Path(manual).suffix.casefold() == ".iso":
+    manual_iso = find_resistance_2_iso(manual) if manual else None
+    if manual_iso is not None:
         cached = prepare_resistance_2_level(
-            manual,
+            manual_iso,
             asset.levels[0],
             cache_directory,
         )
-        return str(cached), manual
+        return str(cached), str(manual_iso)
     if manual and _source_contains_asset(manual, asset):
         return manual, manual
 
@@ -139,13 +152,14 @@ def _resolved_level_source(
         if settings.source_path
         else ""
     )
-    if manual and Path(manual).suffix.casefold() == ".iso":
+    manual_iso = find_resistance_2_iso(manual) if manual else None
+    if manual_iso is not None:
         cached = prepare_resistance_2_level(
-            manual,
+            manual_iso,
             level_name,
             cache_directory,
         )
-        return str(cached), manual
+        return str(cached), str(manual_iso)
     if manual and _source_matches_level(manual, level_name):
         return manual, manual
 
@@ -172,14 +186,15 @@ def _resolved_inspection_source(
 ) -> tuple[str, str]:
     settings = _settings(context)
     original = bpy.path.abspath(settings.source_path)
-    if Path(original).suffix.casefold() != ".iso":
+    iso = find_resistance_2_iso(original)
+    if iso is None:
         return original, original
     cached = prepare_resistance_2_level(
-        original,
+        iso,
         settings.level_id,
         _cache_directory(context),
     )
-    return str(cached), original
+    return str(cached), str(iso)
 
 
 def _summary(reader: Resistance2Reader) -> str:
@@ -220,22 +235,91 @@ class INSOMNIAC_OT_select_source(bpy.types.Operator, ImportHelper):
 
     def execute(self, context):
         settings = _settings(context)
-        settings.source_path = self.filepath
-        if Path(self.filepath).suffix.casefold() == ".iso":
+        iso = find_resistance_2_iso(self.filepath)
+        settings.source_path = (
+            str(iso) if iso is not None else self.filepath
+        )
+        if iso is not None:
             preferences = addon_preferences(context)
             if preferences is not None:
-                preferences.resistance_2_iso_path = self.filepath
-        return _inspect_source(self, context)
+                preferences.resistance_2_iso_path = str(iso)
+        result = bpy.ops.insomniac.inspect_source()
+        return {"CANCELLED"} if "CANCELLED" in result else {"FINISHED"}
 
 
 class INSOMNIAC_OT_inspect_source(bpy.types.Operator):
     bl_idname = "insomniac.inspect_source"
     bl_label = "Inspect Source"
-    bl_description = "Validate the source and count Resistance 2 assets"
+    bl_description = (
+        "Validate the source and count Resistance 2 assets; ISO extraction "
+        "may take several minutes"
+    )
     bl_options = {"REGISTER"}
 
+    _inspection_timer = None
+
     def execute(self, context):
-        return _inspect_source(self, context)
+        settings = _settings(context)
+        if not settings.source_path or context.window is None:
+            return _inspect_source(self, context)
+
+        window_manager = context.window_manager
+        self._inspection_timer = window_manager.event_timer_add(
+            0.2,
+            window=context.window,
+        )
+        window_manager.modal_handler_add(self)
+        _set_source_inspection_busy(context, True)
+        return {"RUNNING_MODAL"}
+
+    def modal(self, context, event):
+        if event.type == "ESC":
+            self.cancel(context)
+            self.report({"INFO"}, "Source inspection cancelled")
+            return {"CANCELLED"}
+        if (
+            event.type != "TIMER"
+            or event.timer != self._inspection_timer
+        ):
+            return {"PASS_THROUGH"}
+
+        _remove_inspection_timer(self, context)
+        try:
+            return _inspect_source(self, context)
+        finally:
+            _set_source_inspection_busy(context, False)
+
+    def cancel(self, context):
+        _remove_inspection_timer(self, context)
+        _set_source_inspection_busy(context, False)
+
+
+def _set_source_inspection_busy(
+    context: bpy.types.Context,
+    busy: bool,
+) -> None:
+    settings = _settings(context)
+    settings.source_inspection_busy = busy
+    if busy:
+        settings.source_summary = ""
+    if context.window is not None:
+        context.window.cursor_set("WAIT" if busy else "DEFAULT")
+    if context.workspace is not None:
+        context.workspace.status_text_set(
+            SOURCE_INSPECTION_STATUS if busy else None
+        )
+    if context.area is not None:
+        context.area.tag_redraw()
+
+
+def _remove_inspection_timer(
+    operator: INSOMNIAC_OT_inspect_source,
+    context: bpy.types.Context,
+) -> None:
+    if operator._inspection_timer is None:
+        return
+    context.window_manager.event_timer_remove(operator._inspection_timer)
+    operator._inspection_timer = None
 
 
 def _inspect_source(operator: bpy.types.Operator, context):
@@ -265,6 +349,71 @@ def _inspect_source(operator: bpy.types.Operator, context):
         return {"CANCELLED"}
 
 
+def _asset_picker_matches(
+    item: InsomniacAssetPickerItem,
+    query: str,
+) -> bool:
+    tokens = query.casefold().split()
+    haystack = item.search_text.casefold()
+    return all(token in haystack for token in tokens)
+
+
+def _update_asset_picker_search(self, _context) -> None:
+    if (
+        0 <= self.asset_index < len(self.assets)
+        and _asset_picker_matches(
+            self.assets[self.asset_index],
+            self.asset_search,
+        )
+    ):
+        return
+    self.asset_index = next(
+        (
+            index
+            for index, item in enumerate(self.assets)
+            if _asset_picker_matches(item, self.asset_search)
+        ),
+        -1,
+    )
+
+
+class INSOMNIAC_UL_asset_picker(bpy.types.UIList):
+    bl_idname = "INSOMNIAC_UL_asset_picker"
+
+    def draw_item(
+        self,
+        _context,
+        layout,
+        _data,
+        item,
+        _icon,
+        _active_data,
+        _active_property,
+        _index=0,
+        _filter_flag=0,
+    ):
+        icon = "ARMATURE_DATA" if item.kind == "MOBY" else "MESH_CUBE"
+        if self.layout_type in {"DEFAULT", "COMPACT"}:
+            layout.label(text=item.label, icon=icon)
+        else:
+            layout.alignment = "CENTER"
+            layout.label(text="", icon=icon)
+
+    def filter_items(self, _context, data, property_name):
+        items = getattr(data, property_name)
+        if not data.asset_search.strip():
+            return [], []
+        flags = [
+            (
+                self.bitflag_filter_item
+                if _asset_picker_matches(item, data.asset_search)
+                else 0
+            )
+            for item in items
+        ]
+        return flags, []
+
+
 class INSOMNIAC_OT_choose_asset(bpy.types.Operator):
     bl_idname = "insomniac.choose_asset"
     bl_label = "Choose Asset"
@@ -272,27 +421,86 @@ class INSOMNIAC_OT_choose_asset(bpy.types.Operator):
         "Search every asset that passes the sidebar filters and select one"
     )
     bl_options = {"INTERNAL"}
-    bl_property = "asset"
 
-    asset: bpy.props.EnumProperty(
-        name="Asset",
-        items=asset_search_items,
+    assets: bpy.props.CollectionProperty(
+        name="Assets",
+        type=InsomniacAssetPickerItem,
+        options={"HIDDEN", "SKIP_SAVE"},
+    )
+    asset_index: bpy.props.IntProperty(
+        name="Selected Asset",
+        default=-1,
+        options={"HIDDEN", "SKIP_SAVE"},
+    )
+    asset_search: bpy.props.StringProperty(
+        name="Search",
+        description=(
+            "Filter by asset name, source path, kind, TUID, or owner level"
+        ),
+        options={"TEXTEDIT_UPDATE", "SKIP_SAVE"},
+        update=_update_asset_picker_search,
     )
 
     def invoke(self, context, _event):
-        if not asset_search_items(self, context):
+        source_items = asset_search_items(self, context)
+        if not source_items:
             self.report(
                 {"WARNING"},
                 "No assets match the filters; clear or loosen them first",
             )
             return {"CANCELLED"}
-        context.window_manager.invoke_search_popup(self)
-        return {"FINISHED"}
+
+        self.assets.clear()
+        self.asset_index = -1
+        self.asset_search = ""
+        selected_identifier = _settings(context).asset_tuid
+        for index, source_item in enumerate(source_items):
+            identifier, label, description, _icon, _number = source_item
+            item = self.assets.add()
+            item.identifier = identifier
+            item.label = label
+            item.description = description
+            item.search_text = f"{label}\n{description}\n{identifier}"
+            item.kind = identifier.partition(":")[0]
+            if identifier == selected_identifier:
+                self.asset_index = index
+        if self.asset_index < 0:
+            self.asset_index = 0
+
+        return context.window_manager.invoke_props_dialog(self, width=480)
+
+    def draw(self, _context):
+        layout = self.layout
+        layout.prop(self, "asset_search", text="", icon="VIEWZOOM")
+        match_count = sum(
+            _asset_picker_matches(item, self.asset_search)
+            for item in self.assets
+        )
+        layout.label(
+            text=f"{match_count:,} of {len(self.assets):,} assets shown",
+            icon="INFO" if match_count else "ERROR",
+        )
+        layout.template_list(
+            "INSOMNIAC_UL_asset_picker",
+            "",
+            self,
+            "assets",
+            self,
+            "asset_index",
+            item_dyntip_propname="description",
+            rows=12,
+            maxrows=12,
+        )
 
     def execute(self, context):
-        if not self.asset:
+        if not 0 <= self.asset_index < len(self.assets):
+            self.report({"WARNING"}, "Choose an asset from the list")
             return {"CANCELLED"}
-        set_asset_selection(_settings(context), self.asset)
+        item = self.assets[self.asset_index]
+        if not _asset_picker_matches(item, self.asset_search):
+            self.report({"WARNING"}, "Choose an asset shown by the search")
+            return {"CANCELLED"}
+        set_asset_selection(_settings(context), item.identifier)
         if context.area is not None:
             context.area.tag_redraw()
         return {"FINISHED"}
@@ -627,6 +835,7 @@ class INSOMNIAC_OT_register_asset_library(bpy.types.Operator):
 CLASSES = (
     INSOMNIAC_OT_select_source,
     INSOMNIAC_OT_inspect_source,
+    INSOMNIAC_UL_asset_picker,
     INSOMNIAC_OT_choose_asset,
     INSOMNIAC_OT_clear_asset_filters,
     INSOMNIAC_OT_import_asset,

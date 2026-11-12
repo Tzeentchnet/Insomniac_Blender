@@ -23,8 +23,21 @@ class INSOMNIAC_PT_asset_io(bpy.types.Panel):
         row = source.row(align=True)
         row.prop(settings, "source_path", text="")
         row.operator("insomniac.select_source", text="", icon="FILEBROWSER")
-        source.operator("insomniac.inspect_source", icon="VIEWZOOM")
-        if settings.source_summary:
+        inspect = source.row()
+        inspect.enabled = not settings.source_inspection_busy
+        inspect.operator(
+            "insomniac.inspect_source",
+            text=(
+                "Inspecting Source..."
+                if settings.source_inspection_busy
+                else "Inspect Source"
+            ),
+            icon="TIME" if settings.source_inspection_busy else "VIEWZOOM",
+        )
+        if settings.source_inspection_busy:
+            source.label(text="Preparing and inspecting source...", icon="TIME")
+            source.label(text="ISO extraction may take several minutes")
+        elif settings.source_summary:
             source.label(text=settings.source_summary, icon="INFO")
 
         asset = layout.box()

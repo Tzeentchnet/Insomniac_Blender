@@ -5,10 +5,12 @@ import unittest
 from unittest import mock
 
 from insomniac_asset_io.core.iso import (
+    find_resistance_2_iso,
     list_resistance_2_levels,
     prepare_resistance_2_level,
     resolve_resistance_2_source,
 )
+from insomniac_asset_io.core.errors import InsomniacError
 
 
 class Resistance2IsoTests(unittest.TestCase):
@@ -101,6 +103,39 @@ class Resistance2IsoTests(unittest.TestCase):
                 )
 
         prepare.assert_called_once_with(iso, "lobby", root)
+
+    def test_resolves_single_iso_inside_source_directory(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "disc"
+            source.mkdir()
+            iso = source / "Resistance 2.dec.iso"
+            iso.touch()
+            prepared = root / "prepared" / "level_cached.psarc"
+            with mock.patch(
+                "insomniac_asset_io.core.iso.prepare_resistance_2_level",
+                return_value=prepared,
+            ) as prepare:
+                result = resolve_resistance_2_source(
+                    source,
+                    "lobby",
+                    root,
+                )
+
+        self.assertEqual(result, prepared)
+        prepare.assert_called_once_with(iso, "lobby", root)
+
+    def test_rejects_source_directory_with_multiple_isos(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            source = Path(temporary)
+            (source / "disc-1.iso").touch()
+            (source / "disc-2.iso").touch()
+
+            with self.assertRaisesRegex(
+                InsomniacError,
+                "contains multiple ISO files",
+            ):
+                find_resistance_2_iso(source)
 
 
 if __name__ == "__main__":
