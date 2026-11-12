@@ -18,6 +18,7 @@ files = "Read game archives and write extraction and Asset Browser caches"
 paths_exclude_pattern = [
   "__pycache__/",
   "/.git/",
+  "/.gitignore",
   "/.github/",
   "/tests/",
   "/tools/",

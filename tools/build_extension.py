@@ -21,7 +21,7 @@ EXCLUDED_PARTS = {
     "tests",
     "tools",
 }
-EXCLUDED_GLOBS = ("*.log", "*.pyc", "*.pyo", "*.zip")
+EXCLUDED_GLOBS = (".gitignore", "*.log", "*.pyc", "*.pyo", "*.zip")
 
 
 def include(path: Path) -> bool:
