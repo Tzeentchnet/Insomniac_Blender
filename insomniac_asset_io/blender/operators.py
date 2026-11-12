@@ -550,6 +550,12 @@ class INSOMNIAC_OT_import_asset(bpy.types.Operator):
                     ),
                     convert_axes=preferences.asset_convert_axes,
                     cycles_materials=cycles_materials_enabled(context),
+                    damage_permutations=(
+                        preferences.asset_import_damage_permutations
+                    ),
+                    collision_geometry=(
+                        preferences.asset_import_collision_geometry
+                    ),
                 )
                 if asset.kind is AssetKind.MOBY:
                     result = import_moby(
@@ -769,6 +775,12 @@ class INSOMNIAC_OT_rebuild_asset_library(bpy.types.Operator):
                     animations=preferences.asset_cache_animations,
                     cycles_materials=preferences.cycles_materials,
                     generate_previews=preferences.asset_cache_previews,
+                    damage_permutations=(
+                        preferences.asset_import_damage_permutations
+                    ),
+                    collision_geometry=(
+                        preferences.asset_import_collision_geometry
+                    ),
                 ),
             )
             library = ensure_asset_library_registered(

@@ -84,6 +84,21 @@ class InsomniacAddonPreferences(bpy.types.AddonPreferences):
         description="Decode a Moby's animset into Blender Actions",
         default=True,
     )
+    asset_import_damage_permutations: bpy.props.BoolProperty(
+        name="Damage permutations",
+        description=(
+            "Import optional damaged model segments into a separate "
+            "Collection"
+        ),
+        default=False,
+    )
+    asset_import_collision_geometry: bpy.props.BoolProperty(
+        name="Collision geometry",
+        description=(
+            "Import model collision shapes into a separate Collection"
+        ),
+        default=False,
+    )
     asset_animation_clip_limit: bpy.props.IntProperty(
         name="Animation limit",
         description="Maximum clips to create; zero imports every clip",
@@ -157,6 +172,8 @@ class InsomniacAddonPreferences(bpy.types.AddonPreferences):
         model.label(text="Model / Static Mesh imports", icon="MESH_DATA")
         model.prop(self, "asset_import_materials")
         model.prop(self, "asset_import_animations")
+        model.prop(self, "asset_import_damage_permutations")
+        model.prop(self, "asset_import_collision_geometry")
         if self.asset_import_animations:
             model.prop(self, "asset_animation_clip_limit")
         model.prop(self, "asset_convert_axes")

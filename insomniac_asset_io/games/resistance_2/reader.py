@@ -20,6 +20,8 @@ from .formats import (
     AssetKind,
     AssetPointer,
     Bone,
+    CollisionMesh,
+    CollisionPrimitive,
     DecodedClip,
     DecodedTexture,
     GameplayRegion,
@@ -79,6 +81,9 @@ SECT_REGION_MOBY_TUIDS = 0x1C600
 MAX_ASSET_SIZE = 512 * 1024 * 1024
 MAX_MESHES = 1_000_000
 MAX_BONES = 4096
+MAX_COLLISION_PRIMITIVES = 65_535
+MAX_COLLISION_VERTICES = 512
+MAX_COLLISION_FACES = 65_535
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,6 +110,11 @@ class Resistance2Reader:
         self._pointer_maps: dict[AssetKind, dict[int, AssetPointer]] = {}
         self._shader_cache: dict[int, ShaderInfo] = {}
         self._texture_cache: dict[int, DecodedTexture] = {}
+        self._texture_fallback_cache: dict[
+            tuple[int, str],
+            DecodedTexture,
+        ] = {}
+        self._texture_path_index: dict[str, tuple[int, ...]] | None = None
         self._sibling_texture_index: dict[int, tuple[Path, ...]] | None = None
         self.warnings: list[str] = []
 
@@ -294,12 +304,21 @@ class Resistance2Reader:
             ighw.f32(base + 0x0C),
         )
         bind_pose_inverse_offset = ighw.i16(base + 0x10)
-        bangle_count = ighw.u16(base + 0x18)
-        bangles_offset = ighw.u32(base + 0x24)
+        segment_count = ighw.u16(base + 0x18)
+        segments_offset = ighw.u32(base + 0x24)
+        collision_primitive_offset = ighw.u32(base + 0x30)
+        collision_mesh_offset = ighw.u32(base + 0x34)
         animset_raw = ighw.u64(base + 0x50)
         mesh_scale = ighw.f32(base + 0x70)
+        bangle_count = ighw.u32(base + 0x90)
+        default_draw_mask = ighw.u64(base + 0x98)
         header_tuid = ighw.u64(base + 0xB0)
         tuid = header_tuid or tuid_hint
+        if bangle_count > segment_count:
+            raise FormatError(
+                f"{ighw.label}: bangle count {bangle_count} exceeds segment "
+                f"count {segment_count}"
+            )
 
         name_section = ighw.section(SECT_MOBY_NAME)
         name = (
@@ -318,10 +337,10 @@ class Resistance2Reader:
             vertex_buffer = ighw.view(
                 vertex_section.offset, vertex_section.length
             )
-            for bangle_index in range(bangle_count):
-                bangle = bangles_offset + bangle_index * 8
-                mesh_table = ighw.u32(bangle)
-                mesh_count = ighw.u32(bangle + 4)
+            for segment_index in range(segment_count):
+                segment = segments_offset + segment_index * 8
+                mesh_table = ighw.u32(segment)
+                mesh_count = ighw.u32(segment + 4)
                 if mesh_count > MAX_MESHES:
                     raise FormatError(
                         f"{ighw.label}: unreasonable mesh count {mesh_count}"
@@ -353,8 +372,29 @@ class Resistance2Reader:
                             bone_map=bone_map,
                             endian=ighw.endian,
                             label=ighw.label,
+                            segment_index=segment_index,
+                            is_damage_permutation=(
+                                bool(default_draw_mask)
+                                and segment_index < 64
+                                and not (
+                                    default_draw_mask & (1 << segment_index)
+                                )
+                            ),
                         )
                     )
+        collision_primitives = (
+            self._read_collision_primitives(
+                ighw,
+                collision_primitive_offset,
+            )
+            if collision_primitive_offset
+            else ()
+        )
+        collision_meshes = (
+            (self._read_collision_mesh(ighw, collision_mesh_offset),)
+            if collision_mesh_offset
+            else ()
+        )
         return MobyAsset(
             tuid=tuid,
             name=name,
@@ -364,6 +404,8 @@ class Resistance2Reader:
             skeleton=skeleton,
             animset_hash=animset_raw or None,
             bind_pose_inverse_offset=bind_pose_inverse_offset,
+            collision_primitives=collision_primitives,
+            collision_meshes=collision_meshes,
         )
 
     @staticmethod
@@ -381,6 +423,8 @@ class Resistance2Reader:
         bone_map: np.ndarray,
         endian: str,
         label: str,
+        segment_index: int,
+        is_damage_permutation: bool,
     ) -> MeshGeometry:
         index_byte_offset = index_index * 2
         index_byte_length = index_count * 2
@@ -455,6 +499,142 @@ class Resistance2Reader:
             indices=indices,
             bone_indices=bone_indices,
             bone_weights=bone_weights,
+            segment_index=segment_index,
+            is_damage_permutation=is_damage_permutation,
+        )
+
+    @staticmethod
+    def _read_collision_primitives(
+        ighw: IghwFile,
+        offset: int,
+    ) -> tuple[CollisionPrimitive, ...]:
+        ighw.require(offset, 0x90)
+        record_alignment = ighw.u16(offset + 0x80)
+        count = ighw.u16(offset + 0x82)
+        record_size = 0x50
+        if record_alignment != 0x10:
+            raise FormatError(
+                f"{ighw.label}: unsupported collision primitive layout "
+                f"alignment={record_alignment}"
+            )
+        if count > MAX_COLLISION_PRIMITIVES:
+            raise FormatError(
+                f"{ighw.label}: unreasonable collision primitive count {count}"
+            )
+
+        records_offset = offset + 0x90
+        ighw.require(records_offset, count * record_size)
+        primitives: list[CollisionPrimitive] = []
+        for index in range(count):
+            record_offset = records_offset + index * record_size
+            kind = ighw.u8(record_offset)
+            source_bone = ighw.u8(record_offset + 0x03)
+            payload = np.frombuffer(
+                ighw.data,
+                dtype=ighw.endian + "f4",
+                count=16,
+                offset=record_offset + 0x10,
+            ).astype(np.float32).reshape((4, 4))
+            primitives.append(
+                CollisionPrimitive(
+                    kind=kind,
+                    bone_index=None if source_bone == 0xFF else source_bone,
+                    data=payload,
+                )
+            )
+        return tuple(primitives)
+
+    @staticmethod
+    def _read_collision_mesh(
+        ighw: IghwFile,
+        offset: int,
+    ) -> CollisionMesh:
+        ighw.require(offset, 0xA0)
+        vertex_count = ighw.u16(offset + 0x80)
+        vertex_group_width = ighw.u16(offset + 0x82)
+        quantization_scale = ighw.u16(offset + 0x84)
+        face_count = ighw.u16(offset + 0x86)
+        vertex_section_length = ighw.u16(offset + 0x88)
+        total_data_length = ighw.u16(offset + 0x8C)
+
+        if vertex_group_width != 16 or quantization_scale != 256:
+            raise FormatError(
+                f"{ighw.label}: unsupported collision mesh layout "
+                f"group_width={vertex_group_width}, "
+                f"quantization={quantization_scale}"
+            )
+        if vertex_count > MAX_COLLISION_VERTICES:
+            raise FormatError(
+                f"{ighw.label}: unreasonable collision vertex count "
+                f"{vertex_count}"
+            )
+        if face_count > MAX_COLLISION_FACES:
+            raise FormatError(
+                f"{ighw.label}: unreasonable collision face count "
+                f"{face_count}"
+            )
+
+        group_count = (vertex_count + 7) // 8
+        expected_vertex_length = 0x20 + group_count * 0x30
+        if vertex_section_length != expected_vertex_length:
+            raise FormatError(
+                f"{ighw.label}: collision vertex section is "
+                f"{vertex_section_length} bytes, expected "
+                f"{expected_vertex_length}"
+            )
+        required_data_length = vertex_section_length + face_count * 4
+        aligned_data_length = (required_data_length + 0x0F) & ~0x0F
+        if total_data_length != aligned_data_length:
+            raise FormatError(
+                f"{ighw.label}: collision data is {total_data_length} bytes, "
+                f"expected {aligned_data_length}"
+            )
+        ighw.require(offset + 0x80, total_data_length)
+
+        base_position = np.frombuffer(
+            ighw.data,
+            dtype=ighw.endian + "i4",
+            count=3,
+            offset=offset + 0x90,
+        ).astype(np.int64)
+        positions = np.empty((vertex_count, 3), dtype=np.float32)
+        vertices_offset = offset + 0xA0
+        for group_index in range(group_count):
+            group = np.frombuffer(
+                ighw.data,
+                dtype=ighw.endian + "u2",
+                count=24,
+                offset=vertices_offset + group_index * 0x30,
+            ).reshape((3, 8)).T
+            start = group_index * 8
+            end = min(start + 8, vertex_count)
+            positions[start:end] = (
+                base_position + group[: end - start].astype(np.int64)
+            ) / 1024.0
+
+        face_offset = offset + 0x80 + vertex_section_length
+        face_words = np.frombuffer(
+            ighw.data,
+            dtype=ighw.endian + "u4",
+            count=face_count,
+            offset=face_offset,
+        ).astype(np.uint32)
+        indices = np.column_stack(
+            (
+                (face_words >> 18) & 0x1FF,
+                (face_words >> 9) & 0x1FF,
+                face_words & 0x1FF,
+            )
+        ).astype(np.int32)
+        if face_count and int(indices.max()) >= vertex_count:
+            raise FormatError(
+                f"{ighw.label}: collision face references vertex "
+                f"{int(indices.max())}, but only {vertex_count} exist"
+            )
+        return CollisionMesh(
+            positions=positions,
+            indices=indices,
+            face_types=(face_words >> 27).astype(np.uint8),
         )
 
     @staticmethod
@@ -806,8 +986,42 @@ class Resistance2Reader:
         everything that needs decoded pixels.
         """
         self._texture_cache.clear()
+        self._texture_fallback_cache.clear()
 
-    def read_texture(self, texture_id: int) -> DecodedTexture:
+    def read_texture(
+        self,
+        texture_id: int,
+        *,
+        lookup_path: str | None = None,
+    ) -> DecodedTexture:
+        try:
+            return self._read_texture_exact(texture_id)
+        except MissingResourceError:
+            normalized = self._normalize_texture_lookup_path(lookup_path)
+            if not normalized:
+                raise
+            cache_key = (texture_id, normalized)
+            cached = self._texture_fallback_cache.get(cache_key)
+            if cached is not None:
+                return cached
+            resolved = self._read_texture_by_lookup_path(
+                texture_id,
+                normalized,
+            )
+            if resolved is None:
+                raise
+            resolved_id, texture = resolved
+            self._texture_fallback_cache[cache_key] = texture
+            LOGGER.info(
+                "Texture 0x%08X resolved as 0x%08X through authored "
+                "lookup path %s",
+                texture_id,
+                resolved_id,
+                lookup_path,
+            )
+            return texture
+
+    def _read_texture_exact(self, texture_id: int) -> DecodedTexture:
         cached = self._texture_cache.get(texture_id)
         if cached is not None:
             return cached
@@ -831,6 +1045,83 @@ class Resistance2Reader:
         texture = decode_texture(info, raw)
         self._texture_cache[texture_id] = texture
         return texture
+
+    @staticmethod
+    def _normalize_texture_lookup_path(value: str | None) -> str:
+        return (value or "").replace("\\", "/").strip("/").casefold()
+
+    def _texture_ids_by_lookup_path(self) -> dict[str, tuple[int, ...]]:
+        if self._texture_path_index is not None:
+            return self._texture_path_index
+        by_path: dict[str, set[int]] = {}
+        for pointer in self.asset_pointers(AssetKind.SHADER):
+            try:
+                shader = self.read_shader(pointer.tuid)
+            except InsomniacError as exc:
+                warning = (
+                    f"Texture path lookup skipped shader "
+                    f"0x{pointer.tuid:016X}: {exc}"
+                )
+                LOGGER.warning(warning)
+                self.warnings.append(warning)
+                continue
+            texture_ids = (
+                shader.albedo_texture_id,
+                shader.normal_texture_id,
+                shader.expensive_texture_id,
+                shader.detail_texture_id,
+            )
+            for texture_id, path in zip(
+                texture_ids,
+                shader.texture_lookup_paths,
+            ):
+                normalized = self._normalize_texture_lookup_path(path)
+                if texture_id is not None and normalized:
+                    by_path.setdefault(normalized, set()).add(texture_id)
+        self._texture_path_index = {
+            path: tuple(sorted(texture_ids))
+            for path, texture_ids in by_path.items()
+        }
+        return self._texture_path_index
+
+    def _read_texture_by_lookup_path(
+        self,
+        texture_id: int,
+        normalized_path: str,
+    ) -> tuple[int, DecodedTexture] | None:
+        candidates: list[tuple[int, DecodedTexture]] = []
+        for candidate_id in self._texture_ids_by_lookup_path().get(
+            normalized_path,
+            (),
+        ):
+            if candidate_id == texture_id:
+                continue
+            try:
+                texture = self._read_texture_exact(candidate_id)
+            except MissingResourceError:
+                continue
+            candidates.append((candidate_id, texture))
+        if not candidates:
+            return None
+
+        first_id, first = candidates[0]
+        if any(
+            texture.info.format_code != first.info.format_code
+            or texture.info.width != first.info.width
+            or texture.info.height != first.info.height
+            or not np.array_equal(texture.rgba, first.rgba)
+            for _candidate_id, texture in candidates[1:]
+        ):
+            choices = ", ".join(
+                f"0x{candidate_id:08X}"
+                for candidate_id, _texture in candidates
+            )
+            raise AmbiguousResourceError(
+                f"Texture 0x{texture_id:08X} lookup path "
+                f"{normalized_path!r} matches multiple different "
+                f"available payloads: {choices}"
+            )
+        return first_id, first
 
     @cached_property
     def global_texture_locations(

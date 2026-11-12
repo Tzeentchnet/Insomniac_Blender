@@ -56,11 +56,22 @@ class Bone:
     child_index: int
     sibling_index: int
 
+    @property
+    def inherits_scale(self) -> bool:
+        return not bool(self.flags & 0x01)
+
     def has_parent(self, own_index: int, bone_count: int) -> bool:
         return (
             self.parent_index >= 0
             and self.parent_index != own_index
             and self.parent_index < bone_count
+        )
+
+    def has_child(self, own_index: int, bone_count: int) -> bool:
+        return (
+            self.child_index > 0
+            and self.child_index != own_index
+            and self.child_index < bone_count
         )
 
 
@@ -87,6 +98,22 @@ class MeshGeometry:
     indices: IntArray
     bone_indices: UInt16Array | None = None
     bone_weights: UInt8Array | None = None
+    segment_index: int = 0
+    is_damage_permutation: bool = False
+
+
+@dataclass(slots=True)
+class CollisionPrimitive:
+    kind: int
+    bone_index: int | None
+    data: FloatArray
+
+
+@dataclass(slots=True)
+class CollisionMesh:
+    positions: FloatArray
+    indices: IntArray
+    face_types: UInt8Array
 
 
 @dataclass(slots=True)
@@ -99,6 +126,8 @@ class MobyAsset:
     skeleton: Skeleton | None
     animset_hash: int | None
     bind_pose_inverse_offset: int
+    collision_primitives: tuple[CollisionPrimitive, ...] = ()
+    collision_meshes: tuple[CollisionMesh, ...] = ()
 
 
 @dataclass(slots=True)
@@ -260,6 +289,7 @@ class TrackMask:
     bone_index: int
     component: int
     kind: TrackKind
+    marker: int
 
     @classmethod
     def unpack(cls, raw: int) -> "TrackMask":
@@ -268,6 +298,7 @@ class TrackMask:
             bone_index=(raw >> 6) & 0x3FF,
             component=(raw >> 2) & 0b11,
             kind=TrackKind(kind_bits),
+            marker=raw & 0b11,
         )
 
 

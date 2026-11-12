@@ -40,6 +40,8 @@ class AssetCacheOptions:
     convert_axes: bool = True
     cycles_materials: bool = False
     generate_previews: bool = True
+    damage_permutations: bool = False
+    collision_geometry: bool = False
     asset_limit: int = 0
 
 
@@ -114,6 +116,10 @@ def run_asset_cache_worker(
         command.append("--no-convert-axes")
     if options.cycles_materials:
         command.append("--cycles-materials")
+    if options.damage_permutations:
+        command.append("--damage-permutations")
+    if options.collision_geometry:
+        command.append("--collision-geometry")
     if not options.generate_previews:
         command.append("--no-previews")
     if options.asset_limit:
@@ -207,6 +213,10 @@ def generate_resistance_2_asset_library(
                             ),
                             convert_axes=options.convert_axes,
                             cycles_materials=options.cycles_materials,
+                            damage_permutations=(
+                                options.damage_permutations
+                            ),
+                            collision_geometry=options.collision_geometry,
                         )
                         if kind is AssetKind.MOBY:
                             result = import_moby(
@@ -282,6 +292,8 @@ def generate_resistance_2_asset_library(
                 "convert_axes": options.convert_axes,
                 "cycles_materials": options.cycles_materials,
                 "generate_previews": options.generate_previews,
+                "damage_permutations": options.damage_permutations,
+                "collision_geometry": options.collision_geometry,
                 "asset_limit": options.asset_limit,
             },
             "assets": assets,

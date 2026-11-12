@@ -16,6 +16,7 @@ OUTPUT = (
 EXCLUDED_PARTS = {
     ".git",
     ".github",
+    ".pytest_cache",
     "__pycache__",
     "dist",
     "tests",

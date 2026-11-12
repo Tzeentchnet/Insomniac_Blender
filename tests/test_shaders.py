@@ -4,9 +4,20 @@ from pathlib import Path
 import struct
 import tempfile
 import unittest
+from unittest.mock import patch
 
+import numpy as np
+
+from insomniac_asset_io.core.errors import (
+    AmbiguousResourceError,
+    MissingResourceError,
+)
 from insomniac_asset_io.core.source import GameSource
-from insomniac_asset_io.games.resistance_2.formats import ShaderInfo
+from insomniac_asset_io.games.resistance_2.formats import (
+    DecodedTexture,
+    ShaderInfo,
+    TextureInfo,
+)
 from insomniac_asset_io.games.resistance_2.reader import Resistance2Reader
 
 
@@ -163,6 +174,100 @@ class ShaderTests(unittest.TestCase):
         self.assertEqual(
             shader.material_values[-1],
             (5.0, 5.25, 5.5, 5.75),
+        )
+
+    def test_missing_texture_resolves_by_identical_lookup_path(self):
+        requested_id = 0xD780_B93E
+        resolved_id = 0xFE6E_A434
+        texture = self._texture(resolved_id, 32)
+        reader = Resistance2Reader.__new__(Resistance2Reader)
+        reader._texture_cache = {}
+        reader._texture_fallback_cache = {}
+        reader._texture_path_index = {
+            "artdepartment/character/attackdrone/attackdrone_c": (
+                requested_id,
+                resolved_id,
+            )
+        }
+
+        def read_exact(texture_id: int) -> DecodedTexture:
+            if texture_id == resolved_id:
+                return texture
+            raise MissingResourceError(f"Missing 0x{texture_id:08X}")
+
+        with patch.object(
+            reader,
+            "_read_texture_exact",
+            side_effect=read_exact,
+        ):
+            actual = reader.read_texture(
+                requested_id,
+                lookup_path=(
+                    r"ArtDepartment\Character\AttackDrone\AttackDrone_C"
+                ),
+            )
+
+        self.assertIs(actual, texture)
+        self.assertIs(
+            reader._texture_fallback_cache[
+                (
+                    requested_id,
+                    "artdepartment/character/attackdrone/attackdrone_c",
+                )
+            ],
+            texture,
+        )
+
+    def test_lookup_path_rejects_different_available_payloads(self):
+        requested_id = 0x1111_1111
+        candidate_ids = (0x2222_2222, 0x3333_3333)
+        textures = {
+            candidate_ids[0]: self._texture(candidate_ids[0], 32),
+            candidate_ids[1]: self._texture(candidate_ids[1], 64),
+        }
+        reader = Resistance2Reader.__new__(Resistance2Reader)
+        reader._texture_cache = {}
+        reader._texture_fallback_cache = {}
+        reader._texture_path_index = {
+            "fixture/texture": (requested_id, *candidate_ids)
+        }
+
+        def read_exact(texture_id: int) -> DecodedTexture:
+            try:
+                return textures[texture_id]
+            except KeyError as exc:
+                raise MissingResourceError(
+                    f"Missing 0x{texture_id:08X}"
+                ) from exc
+
+        with patch.object(
+            reader,
+            "_read_texture_exact",
+            side_effect=read_exact,
+        ):
+            with self.assertRaisesRegex(
+                AmbiguousResourceError,
+                "multiple different available payloads",
+            ):
+                reader.read_texture(
+                    requested_id,
+                    lookup_path="fixture/texture",
+                )
+
+    @staticmethod
+    def _texture(texture_id: int, value: int) -> DecodedTexture:
+        return DecodedTexture(
+            info=TextureInfo(
+                id=texture_id,
+                tuid=texture_id,
+                format_code=0x08,
+                mip_count=1,
+                width=1,
+                height=1,
+                offset=0,
+                length=4,
+            ),
+            rgba=np.full((1, 1, 4), value, dtype=np.uint8),
         )
 
 

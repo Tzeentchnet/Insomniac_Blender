@@ -1,0 +1,370 @@
+from __future__ import annotations
+
+from pathlib import Path
+import sys
+import unittest
+
+import numpy as np
+
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+
+try:
+    import bpy
+except ModuleNotFoundError:
+    bpy = None
+
+
+if bpy is not None:
+    from insomniac_asset_io.blender.importer import (
+        _create_actions,
+        _create_armature,
+    )
+    from insomniac_asset_io.games.resistance_2.formats import (
+        Bone,
+        DecodedClip,
+        Skeleton,
+    )
+
+
+@unittest.skipUnless(bpy is not None, "Blender Python is not available")
+class BlenderRigTests(unittest.TestCase):
+    def setUp(self) -> None:
+        for obj in tuple(bpy.data.objects):
+            bpy.data.objects.remove(obj, do_unlink=True)
+
+    def tearDown(self) -> None:
+        for obj in tuple(bpy.data.objects):
+            bpy.data.objects.remove(obj, do_unlink=True)
+        for action in tuple(bpy.data.actions):
+            bpy.data.actions.remove(action)
+        for mesh in tuple(bpy.data.meshes):
+            bpy.data.meshes.remove(mesh)
+        for armature in tuple(bpy.data.armatures):
+            bpy.data.armatures.remove(armature)
+        for collection in tuple(bpy.data.collections):
+            bpy.data.collections.remove(collection)
+
+    def test_scaled_bind_frame_does_not_deform_mesh(self) -> None:
+        collection = self._collection()
+        bind = np.diag([2.0, 3.0, 4.0, 1.0]).astype(np.float32)
+        skeleton = Skeleton(
+            root_bone=0,
+            bones=(Bone(0, -1, 0xFFFF, 0xFFFF),),
+            bind_local=bind[None].copy(),
+            bind_world=bind[None].copy(),
+            bind_world_inverse=np.linalg.inv(bind)[None].astype(np.float32),
+            scale_shift=0,
+            translation_shift=0,
+        )
+        armature = _create_armature(
+            bpy.context,
+            "Scaled_Rig",
+            skeleton,
+            collection,
+        )
+        mesh_object = self._weighted_vertex(collection, armature)
+        clip = DecodedClip(
+            name="bind",
+            frame_rate=30.0,
+            looping=False,
+            additive=False,
+            translations=np.zeros((1, 1, 3), dtype=np.float32),
+            rotations_xyzw=np.array(
+                [[[0.0, 0.0, 0.0, 1.0]]],
+                dtype=np.float32,
+            ),
+            scales=np.array([[[2.0, 3.0, 4.0]]], dtype=np.float32),
+            animated_bones=np.zeros(1, dtype=np.bool_),
+        )
+
+        self.assertEqual(
+            _create_actions(bpy.context, armature, skeleton, [clip]),
+            1,
+        )
+        self.assertIsNone(armature.animation_data.action)
+
+        action = bpy.data.actions["Scaled_Rig_bind"]
+        self.assertEqual(len(action.slots), 1)
+        armature.animation_data.action = action
+        bpy.context.scene.frame_set(1)
+        bpy.context.view_layer.update()
+
+        evaluated = mesh_object.evaluated_get(
+            bpy.context.evaluated_depsgraph_get()
+        )
+        self.assertAlmostEqual(evaluated.data.vertices[0].co.x, 1.0, places=5)
+
+    def test_action_exposes_keyframes_and_source_range(self) -> None:
+        collection = self._collection()
+        bind = np.identity(4, dtype=np.float32)[None]
+        skeleton = Skeleton(
+            root_bone=0,
+            bones=(Bone(0, -1, 0xFFFF, 0xFFFF),),
+            bind_local=bind.copy(),
+            bind_world=bind.copy(),
+            bind_world_inverse=bind.copy(),
+            scale_shift=0,
+            translation_shift=0,
+        )
+        armature = _create_armature(
+            bpy.context,
+            "Action_Rig",
+            skeleton,
+            collection,
+        )
+        frame_count = 4
+        frame_rate = 30.0
+        translations = np.zeros((frame_count, 1, 3), dtype=np.float32)
+        translations[:, 0, 0] = np.arange(frame_count, dtype=np.float32)
+        clip = DecodedClip(
+            name="motion",
+            frame_rate=frame_rate,
+            looping=False,
+            additive=False,
+            translations=translations,
+            rotations_xyzw=np.tile(
+                np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float32),
+                (frame_count, 1, 1),
+            ),
+            scales=np.ones((frame_count, 1, 3), dtype=np.float32),
+            animated_bones=np.ones(1, dtype=np.bool_),
+        )
+
+        self.assertEqual(
+            _create_actions(bpy.context, armature, skeleton, [clip]),
+            1,
+        )
+
+        action = bpy.data.actions["Action_Rig_motion"]
+        expected_end = (
+            1.0
+            + (frame_count - 1)
+            * max(bpy.context.scene.render.fps, 1)
+            / frame_rate
+        )
+        self.assertTrue(action.use_frame_range)
+        self.assertAlmostEqual(action.frame_range[0], 1.0)
+        self.assertAlmostEqual(action.frame_range[1], expected_end, places=6)
+        self.assertEqual(action.slots.active, action.slots[0])
+
+        channelbag = action.layers[0].strips[0].channelbags[0]
+        self.assertEqual(len(channelbag.fcurves), 10)
+        self.assertTrue(
+            all(
+                len(fcurve.keyframe_points) == frame_count
+                for fcurve in channelbag.fcurves
+            )
+        )
+        self.assertTrue(
+            all(
+                point.interpolation == "LINEAR"
+                for fcurve in channelbag.fcurves
+                for point in fcurve.keyframe_points
+            )
+        )
+        self.assertTrue(all(bone.select for bone in armature.pose.bones))
+        self.assertIsNone(armature.animation_data.action)
+
+    def test_bone_relations_preserve_length_and_scale_flags(self) -> None:
+        collection = self._collection()
+        bind_world = np.repeat(
+            np.identity(4, dtype=np.float32)[None],
+            2,
+            axis=0,
+        )
+        bind_world[1, 1, 3] = 0.25
+        skeleton = Skeleton(
+            root_bone=0,
+            bones=(
+                Bone(0, -1, 1, 0xFFFF),
+                Bone(0x01, 0, 0, 0),
+            ),
+            bind_local=bind_world.copy(),
+            bind_world=bind_world,
+            bind_world_inverse=np.linalg.inv(bind_world).astype(np.float32),
+            scale_shift=0,
+            translation_shift=0,
+        )
+
+        armature = _create_armature(
+            bpy.context,
+            "Relations_Rig",
+            skeleton,
+            collection,
+        )
+
+        root = armature.data.bones["bone_000"]
+        child = armature.data.bones["bone_001"]
+        self.assertAlmostEqual(root.length, 0.25, places=5)
+        self.assertAlmostEqual(child.length, 0.05, places=5)
+        self.assertEqual(root.inherit_scale, "FULL")
+        self.assertEqual(child.inherit_scale, "NONE")
+
+    def test_parent_motion_is_not_applied_twice_to_child(self) -> None:
+        collection = self._collection()
+        bind_local = np.repeat(
+            np.identity(4, dtype=np.float32)[None],
+            2,
+            axis=0,
+        )
+        bind_local[0, 1, 3] = 2.0
+        bind_world = bind_local.copy()
+        bind_world[1] = bind_world[0]
+        skeleton = Skeleton(
+            root_bone=0,
+            bones=(
+                Bone(0x01, -1, 1, 0xFFFF),
+                Bone(0x01, 0, 0xFFFF, 0xFFFF),
+            ),
+            bind_local=bind_local,
+            bind_world=bind_world,
+            bind_world_inverse=np.linalg.inv(bind_world).astype(np.float32),
+            scale_shift=0,
+            translation_shift=0,
+        )
+        armature = _create_armature(
+            bpy.context,
+            "Hierarchy_Rig",
+            skeleton,
+            collection,
+        )
+        mesh_object = self._weighted_vertex(
+            collection,
+            armature,
+            coordinate=(1.0, 2.0, 0.0),
+            bone_name="bone_001",
+        )
+        clip = DecodedClip(
+            name="parent_motion",
+            frame_rate=30.0,
+            looping=False,
+            additive=False,
+            translations=np.zeros((1, 2, 3), dtype=np.float32),
+            rotations_xyzw=np.tile(
+                np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float32),
+                (1, 2, 1),
+            ),
+            scales=np.ones((1, 2, 3), dtype=np.float32),
+            animated_bones=np.array([True, False], dtype=np.bool_),
+        )
+
+        self.assertEqual(
+            _create_actions(bpy.context, armature, skeleton, [clip]),
+            1,
+        )
+        armature.animation_data.action = bpy.data.actions[
+            "Hierarchy_Rig_parent_motion"
+        ]
+        bpy.context.scene.frame_set(1)
+        bpy.context.view_layer.update()
+
+        self.assertAlmostEqual(
+            armature.pose.bones["bone_000"].matrix.translation.y,
+            0.0,
+            places=5,
+        )
+        self.assertAlmostEqual(
+            armature.pose.bones["bone_001"].matrix.translation.y,
+            0.0,
+            places=5,
+        )
+        evaluated = mesh_object.evaluated_get(
+            bpy.context.evaluated_depsgraph_get()
+        )
+        self.assertAlmostEqual(evaluated.data.vertices[0].co.y, 0.0, places=5)
+
+    def test_non_inheriting_bone_ignores_parent_scale(self) -> None:
+        collection = self._collection()
+        bind_local = np.repeat(
+            np.identity(4, dtype=np.float32)[None],
+            2,
+            axis=0,
+        )
+        bind_local[1, 1, 3] = 1.0
+        bind_world = bind_local.copy()
+        skeleton = Skeleton(
+            root_bone=0,
+            bones=(
+                Bone(0, -1, 1, 0xFFFF),
+                Bone(0x01, 0, 0xFFFF, 0xFFFF),
+            ),
+            bind_local=bind_local,
+            bind_world=bind_world,
+            bind_world_inverse=np.linalg.inv(bind_world).astype(np.float32),
+            scale_shift=0,
+            translation_shift=0,
+        )
+        armature = _create_armature(
+            bpy.context,
+            "Scale_Hierarchy_Rig",
+            skeleton,
+            collection,
+        )
+        clip = DecodedClip(
+            name="parent_scale",
+            frame_rate=30.0,
+            looping=False,
+            additive=False,
+            translations=np.array(
+                [[[0.0, 0.0, 0.0], [0.0, 1.0, 0.0]]],
+                dtype=np.float32,
+            ),
+            rotations_xyzw=np.tile(
+                np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float32),
+                (1, 2, 1),
+            ),
+            scales=np.array(
+                [[[2.0, 2.0, 2.0], [1.0, 1.0, 1.0]]],
+                dtype=np.float32,
+            ),
+            animated_bones=np.array([True, False], dtype=np.bool_),
+        )
+
+        self.assertEqual(
+            _create_actions(bpy.context, armature, skeleton, [clip]),
+            1,
+        )
+        armature.animation_data.action = bpy.data.actions[
+            "Scale_Hierarchy_Rig_parent_scale"
+        ]
+        bpy.context.scene.frame_set(1)
+        bpy.context.view_layer.update()
+
+        root = armature.pose.bones["bone_000"]
+        child = armature.pose.bones["bone_001"]
+        self.assertAlmostEqual(root.matrix.to_scale().x, 2.0, places=5)
+        self.assertAlmostEqual(child.matrix.translation.y, 1.0, places=5)
+        self.assertAlmostEqual(child.matrix.to_scale().x, 1.0, places=5)
+
+    @staticmethod
+    def _collection():
+        collection = bpy.data.collections.new("Rig_Test")
+        bpy.context.scene.collection.children.link(collection)
+        return collection
+
+    @staticmethod
+    def _weighted_vertex(
+        collection,
+        armature,
+        *,
+        coordinate=(1.0, 0.0, 0.0),
+        bone_name="bone_000",
+    ):
+        mesh = bpy.data.meshes.new("Mesh")
+        mesh.from_pydata([coordinate], [], [])
+        mesh_object = bpy.data.objects.new("Mesh", mesh)
+        collection.objects.link(mesh_object)
+        mesh_object.parent = armature
+        group = mesh_object.vertex_groups.new(name=bone_name)
+        group.add([0], 1.0, "REPLACE")
+        modifier = mesh_object.modifiers.new(name="Armature", type="ARMATURE")
+        modifier.object = armature
+        return mesh_object
+
+
+if __name__ == "__main__":
+    unittest.main(argv=[sys.argv[0]])
