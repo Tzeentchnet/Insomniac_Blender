@@ -798,6 +798,15 @@ class Resistance2Reader:
             )
         return infos
 
+    def clear_texture_cache(self) -> None:
+        """Drop all decoded textures held by this reader.
+
+        Each decoded texture is a full RGBA array, so the cache grows
+        without bound. Callers should clear it once they have built
+        everything that needs decoded pixels.
+        """
+        self._texture_cache.clear()
+
     def read_texture(self, texture_id: int) -> DecodedTexture:
         cached = self._texture_cache.get(texture_id)
         if cached is not None:

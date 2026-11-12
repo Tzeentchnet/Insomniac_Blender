@@ -29,6 +29,8 @@ from ..games.resistance_2.reader import Resistance2Reader
 
 LOGGER = logging.getLogger(__name__)
 
+_IMAGE_HAS_ALPHA_KEY = "insomniac_has_alpha"
+
 
 @dataclass(frozen=True, slots=True)
 class AssetImportOptions:
@@ -231,7 +233,6 @@ class _MaterialFactory:
         if texture_id is None:
             return
         try:
-            texture = self.reader.read_texture(texture_id)
             image = self.image(texture_id)
         except InsomniacError as exc:
             self._warn(
@@ -263,7 +264,7 @@ class _MaterialFactory:
 
         if self.cycles_materials:
             self._add_alpha(material, principled, node, shader)
-        elif np.any(texture.rgba[..., 3] < 255):
+        elif image[_IMAGE_HAS_ALPHA_KEY]:
             material.node_tree.links.new(
                 node.outputs["Alpha"],
                 principled.inputs["Alpha"],
@@ -406,6 +407,17 @@ class _MaterialFactory:
         LOGGER.warning(message)
         self.warnings.append(message)
 
+    def release_decoded_textures(self) -> None:
+        # Decoded RGBA arrays are only needed while images are built and
+        # while the alpha and emissive checks run. After that, the Blender
+        # images hold the pixels, so free the reader's texture cache. It
+        # otherwise keeps every texture in memory for the reader's lifetime,
+        # which can reach gigabytes on a level import.
+        # Trade-off: a reader shared across imports, such as the asset cache
+        # build, will decode a texture again if a later import needs it and
+        # its Blender image no longer exists.
+        self.reader.clear_texture_cache()
+
     def image(
         self,
         texture_id: int,
@@ -416,7 +428,6 @@ class _MaterialFactory:
         cached = self.images.get(key)
         if cached is not None:
             return cached
-        texture = self.reader.read_texture(texture_id)
         suffixes = {
             "color": "",
             "normal": "_Normal",
@@ -425,6 +436,13 @@ class _MaterialFactory:
         suffix = suffixes.get(role, f"_{role.title()}")
         name = f"R2_Texture_{texture_id:08X}{suffix}"
         image = bpy.data.images.get(name)
+        if image is not None and _IMAGE_HAS_ALPHA_KEY in image:
+            # Built by an earlier import: reuse it without decoding again.
+            self._apply_colorspace(image, role)
+            self.images[key] = image
+            return image
+
+        texture = self.reader.read_texture(texture_id)
         if image is None:
             image = bpy.data.images.new(
                 name,
@@ -433,26 +451,44 @@ class _MaterialFactory:
                 alpha=True,
                 float_buffer=False,
             )
+            # Set the colorspace before writing and packing the pixels.
+            # Changing it on a packed image discards the buffer and makes
+            # Blender reload it from the packed PNG.
+            self._apply_colorspace(image, role)
             rgba = (
                 reconstruct_normal_map(texture)
                 if role == "normal"
                 else texture.rgba
             )
-            pixels = (
-                np.flipud(rgba).astype(np.float32).reshape(-1) / 255.0
-            )
+            pixels = np.multiply(
+                np.flipud(rgba),
+                np.float32(1.0 / 255.0),
+                dtype=np.float32,
+            ).ravel()
             image.pixels.foreach_set(pixels)
             image.pack()
             image.update()
-        if role != "color":
-            image.colorspace_settings.name = "Non-Color"
+        else:
+            self._apply_colorspace(image, role)
         image["insomniac_texture_tuid"] = f"0x{texture.info.tuid:016X}"
         image["insomniac_texture_format"] = (
             f"0x{texture.info.format_code:02X}"
         )
         image["insomniac_texture_role"] = role
+        # Whether the source texture's alpha is not fully opaque.
+        image[_IMAGE_HAS_ALPHA_KEY] = bool(
+            np.any(texture.rgba[..., 3] < 255)
+        )
         self.images[key] = image
         return image
+
+    @staticmethod
+    def _apply_colorspace(image: bpy.types.Image, role: str) -> None:
+        if role == "color":
+            return
+        # Only assign when it changes; every assignment frees the buffer.
+        if image.colorspace_settings.name != "Non-Color":
+            image.colorspace_settings.name = "Non-Color"
 
 
 def import_moby(
@@ -481,6 +517,8 @@ def import_moby(
     blender_materials = [
         materials.material(shader_tuid) for shader_tuid in asset.shader_tuids
     ]
+    # All materials are built; see _MaterialFactory.release_decoded_textures.
+    materials.release_decoded_textures()
     combined = _build_mesh(
         f"{_safe_name(asset.name)}_Mesh",
         asset.meshes,
@@ -563,6 +601,8 @@ def import_tie(
     blender_materials = [
         materials.material(shader_tuid) for shader_tuid in asset.shader_tuids
     ]
+    # All materials are built; see _MaterialFactory.release_decoded_textures.
+    materials.release_decoded_textures()
     combined = _build_mesh(f"{name}_Mesh", asset.meshes, blender_materials)
     obj = bpy.data.objects.new(name, combined.mesh)
     collection.objects.link(obj)
@@ -734,6 +774,10 @@ def import_level(
                 )
                 result.objects += 1
 
+    # Level materials are built lazily while terrain, ties and mobys are
+    # placed, so release only after the last one.
+    # See _MaterialFactory.release_decoded_textures.
+    materials.release_decoded_textures()
     warnings.extend(reader.warnings)
     result.materials = len(materials.materials)
     result.images = len(materials.images)
