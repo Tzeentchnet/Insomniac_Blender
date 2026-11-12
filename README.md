@@ -24,7 +24,7 @@ PlayStation 3 through separate game readers and a shared Blender workflow.
 | Tie static meshes | Supported |
 | USA model/level import catalog | 4,130 named assets and 27 levels bundled as metadata |
 | Blender Asset Browser library | Locally generated Moby/Tie Collection assets |
-| Diffuse textures and packed blue-channel emission masks | Supported |
+| Diffuse textures and albedo-colored packed-blue emission | Supported |
 | Reconstructed normals and packed red-channel gloss | Supported in the default material mode |
 | DXT1/3/5 and common uncompressed textures | Supported |
 | Zone Tie placement | Supported with linked mesh data |
@@ -226,11 +226,11 @@ import continues to include every decoded Action by default.
 The extension has a standard path plus one shared enhancement preference:
 
 - **Standard**, the default, imports diffuse color, source alpha modes, and
-  verified blue-channel emission masks. Both games reconstruct flagged BC3/RG8
-  tangent normals and convert flagged packed-red gloss to Principled roughness
-  in Eevee and Cycles. R3 also preserves the base legs under its opaque-BC1
-  Goliath wet overlay. The standard path recognizes the verified R2 mode-zero
-  `ch_hex_glass_glowy` alpha exception as well.
+  verified albedo-colored blue-channel emission masks. Both games reconstruct
+  flagged BC3/RG8 tangent normals and convert flagged packed-red gloss to
+  Principled roughness in Eevee and Cycles. R3 also preserves the base legs
+  under its opaque-BC1 Goliath wet overlay. The standard path recognizes the
+  verified R2 mode-zero `ch_hex_glass_glowy` alpha exception as well.
 - **Enhanced source materials** additionally applies the source base-color
   multiplier while keeping the same normal, packed-map, and alpha behavior.
 
@@ -291,12 +291,14 @@ The importer preserves it and marks the Blender material with
 `insomniac_source_placeholder = true` and placeholder kind `DEFAULT_PINK`.
 
 The third shader texture is packed material data, not a full-color emissive
-image. Its blue channel is connected as emission only when that channel
-contains nonzero texels. Its red channel is inverted into roughness when the
-shader enables gloss in either game. Packed green connects to Principled
-specular only when the corresponding shader flag is present; that flag is
-absent from the current R2 corpus. Authored emission tint, authored emission
-strength, packed alpha, and detail-map composition remain under research.
+image. Its blue channel masks the corresponding diffuse color into emission
+only when that channel contains nonzero texels, preserving authored colors
+such as the Chimeran Shuttle's orange and cyan glows. Its red channel is
+inverted into roughness when the shader enables gloss in either game. Packed
+green connects to Principled specular only when the corresponding shader flag
+is present; that flag is absent from the current R2 corpus. Additional
+material-vector emission tint, authored emission strength, packed alpha, and
+detail-map composition remain under research.
 
 Analyze one extracted cached archive, or every cached level archive in an ISO:
 

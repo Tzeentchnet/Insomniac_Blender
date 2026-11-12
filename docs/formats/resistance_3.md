@@ -246,8 +246,10 @@ approximation remains explicit and inspectable.
 Resistance 3 Moby triangle-collision prototypes use both `256` and `257` in
 the quantization-marker field at prototype `+0x84`. Both variants retain the
 same verified group-of-eight vertex layout, `/ 1024` position conversion,
-face words, section lengths, and bounds checks. Resistance 2 continues to
-accept only marker `256`.
+face words, header-relative section lengths, and bounds checks. Marker `257`
+is also verified in Resistance 2 on the Chimeran Shuttle, whose physical
+layout is identical but whose lengths are measured from `+0x90`. The shared
+reader accepts both exact length conventions for both games.
 
 The marker-`257` variant was verified on unrelated Resistance 3 assets with 8
 and 70 vertices and on every Moby referenced by the tested

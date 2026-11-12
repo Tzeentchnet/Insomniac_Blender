@@ -107,10 +107,10 @@ class Resistance2Reader:
     shader_material_vector_count = 6
     shader_material_tail_count = 0
     material_surface_channels_by_default = True
-    material_emission_uses_albedo = False
+    material_emission_uses_albedo = True
     material_emission_disabled_control_mask = 0
     material_luminance_alpha_shader_tuids: frozenset[int] = frozenset()
-    collision_quantization_markers = (256,)
+    collision_quantization_markers = (256, 257)
     animation_profile = AnimationProfile.RESISTANCE_2
 
     def __init__(self, source: GameSource) -> None:
@@ -597,12 +597,18 @@ class Resistance2Reader:
             )
 
         group_count = (vertex_count + 7) // 8
-        expected_vertex_length = 0x20 + group_count * 0x30
-        if vertex_section_length != expected_vertex_length:
+        header_relative_vertex_length = 0x20 + group_count * 0x30
+        payload_relative_vertex_length = 0x10 + group_count * 0x30
+        if vertex_section_length == header_relative_vertex_length:
+            collision_data_offset = offset + 0x80
+        elif vertex_section_length == payload_relative_vertex_length:
+            collision_data_offset = offset + 0x90
+        else:
             raise FormatError(
                 f"{ighw.label}: collision vertex section is "
                 f"{vertex_section_length} bytes, expected "
-                f"{expected_vertex_length}"
+                f"{header_relative_vertex_length} or "
+                f"{payload_relative_vertex_length}"
             )
         required_data_length = vertex_section_length + face_count * 4
         aligned_data_length = (required_data_length + 0x0F) & ~0x0F
@@ -611,7 +617,7 @@ class Resistance2Reader:
                 f"{ighw.label}: collision data is {total_data_length} bytes, "
                 f"expected {aligned_data_length}"
             )
-        ighw.require(offset + 0x80, total_data_length)
+        ighw.require(collision_data_offset, total_data_length)
 
         base_position = np.frombuffer(
             ighw.data,
@@ -634,7 +640,7 @@ class Resistance2Reader:
                 base_position + group[: end - start].astype(np.int64)
             ) / 1024.0
 
-        face_offset = offset + 0x80 + vertex_section_length
+        face_offset = collision_data_offset + vertex_section_length
         face_words = np.frombuffer(
             ighw.data,
             dtype=ighw.endian + "u4",

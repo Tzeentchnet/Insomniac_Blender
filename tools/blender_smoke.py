@@ -728,6 +728,20 @@ def _validate_emissive_materials(
         separate = material.node_tree.nodes.get(
             f"Packed_Channels_{texture_id}"
         )
+        shader_tuid = str(
+            material["insomniac_shader_tuid"]
+        ).removeprefix("0x")
+        diffuse = next(
+            (
+                node
+                for node in material.node_tree.nodes
+                if node.name.startswith("Diffuse_")
+            ),
+            None,
+        )
+        emission = material.node_tree.nodes.get(
+            f"Emission_Color_{shader_tuid}"
+        )
         principled = material.node_tree.nodes.get("Principled BSDF")
         _require(
             texture_node is not None,
@@ -736,6 +750,14 @@ def _validate_emissive_materials(
         _require(
             separate is not None,
             f"{material_name} has no packed-channel node",
+        )
+        _require(
+            diffuse is not None,
+            f"{material_name} has no diffuse node",
+        )
+        _require(
+            emission is not None,
+            f"{material_name} has no albedo-colored emission node",
         )
         _require(
             principled is not None,
@@ -754,14 +776,38 @@ def _validate_emissive_materials(
             f"{material_name} packed image is not Non-Color data",
         )
         _require(
+            material.get("insomniac_emissive_color_source")
+            == "ALBEDO_X_BASE_COLOR_FACTOR_X_PACKED_BLUE",
+            f"{material_name} does not identify albedo-colored emission",
+        )
+        _require(
+            any(
+                link.from_node == diffuse
+                and link.from_socket == diffuse.outputs["Color"]
+                and link.to_node == emission
+                and link.to_socket == emission.inputs[0]
+                for link in material.node_tree.links
+            ),
+            f"{material_name} diffuse color is not linked to emission",
+        )
+        _require(
             any(
                 link.from_node == separate
                 and link.from_socket == separate.outputs["Blue"]
+                and link.to_node == emission
+                and link.to_socket == emission.inputs[1]
+                for link in material.node_tree.links
+            ),
+            f"{material_name} blue channel is not linked to the emission mask",
+        )
+        _require(
+            any(
+                link.from_node == emission
                 and link.to_node == principled
                 and link.to_socket == principled.inputs["Emission Color"]
                 for link in material.node_tree.links
             ),
-            f"{material_name} blue channel is not linked to emission",
+            f"{material_name} colored emission is not linked to Principled",
         )
         _require(
             math.isclose(

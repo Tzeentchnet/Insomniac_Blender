@@ -42,7 +42,7 @@ if bpy is not None:
             )
             self.asset_prefix = "R3" if game_id == "RESISTANCE_3" else "R2"
             self.material_surface_channels_by_default = True
-            self.material_emission_uses_albedo = game_id == "RESISTANCE_3"
+            self.material_emission_uses_albedo = True
             self.material_emission_disabled_control_mask = (
                 0x08 if game_id == "RESISTANCE_3" else 0
             )
@@ -436,7 +436,7 @@ class BlenderMaterialTests(unittest.TestCase):
         )
         self.assertFalse(principled.inputs["Emission Color"].is_linked)
 
-    def test_r2_emission_keeps_legacy_grayscale_behavior(self) -> None:
+    def test_r2_emission_uses_albedo_color(self) -> None:
         shader, textures = self._emission_fixture(
             0x106,
             material_word=0x0400_0008,
@@ -444,20 +444,41 @@ class BlenderMaterialTests(unittest.TestCase):
         reader = _MaterialReader("RESISTANCE_2", shader, textures)
         material = _MaterialFactory(reader, True, []).material(shader.tuid)
         principled = material.node_tree.nodes["Principled BSDF"]
+        diffuse = material.node_tree.nodes["Diffuse_00000100"]
         separate = material.node_tree.nodes["Packed_Channels_00000300"]
+        emission = material.node_tree.nodes[
+            "Emission_Color_0000000000000106"
+        ]
 
         self.assertTrue(material["insomniac_emissive"])
         self.assertEqual(
             material["insomniac_emissive_color_source"],
-            "PACKED_BLUE",
+            "ALBEDO_X_BASE_COLOR_FACTOR_X_PACKED_BLUE",
+        )
+        self.assertTrue(
+            self._has_link(
+                material,
+                diffuse,
+                emission,
+                0,
+                from_socket="Color",
+            )
         )
         self.assertTrue(
             self._has_link(
                 material,
                 separate,
+                emission,
+                1,
+                from_socket="Blue",
+            )
+        )
+        self.assertTrue(
+            self._has_link(
+                material,
+                emission,
                 principled,
                 "Emission Color",
-                from_socket="Blue",
             )
         )
 

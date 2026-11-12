@@ -88,6 +88,8 @@ or runtime-only reference fields. R3's two additional texture slots, two
 pre-control words, and three trailing material values are retained without
 assigning speculative rendering semantics. Diffuse images are color data.
 Reconstructed normal and packed auxiliary images are non-color data.
+Packed blue gates the corresponding diffuse color into emission for both
+games, preserving authored hues while suppressing all-zero masks.
 
 Standard R2 and R3 materials reconstruct verified BC3/RG8 tangent normals with
 NumPy and convert flagged packed-red gloss to Principled roughness. These

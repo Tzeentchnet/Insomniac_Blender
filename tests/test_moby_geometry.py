@@ -126,7 +126,7 @@ class MobyGeometryTests(unittest.TestCase):
         self.assertIsNone(primitives[1].bone_index)
         np.testing.assert_array_equal(primitives[0].data, box)
 
-    def test_decodes_quantized_collision_mesh(self):
+    def test_decodes_supported_quantized_collision_meshes(self):
         payload = bytearray(0xE0)
         struct.pack_into(
             ">6H",
@@ -151,19 +151,56 @@ class MobyGeometryTests(unittest.TestCase):
             (4 << 27) | (0 << 18) | (1 << 9) | 2,
             (7 << 27) | (5 << 18) | (6 << 9) | 7,
         )
-        parsed = _single_section_file(0xDA00, payload)
-
-        collision = Resistance2Reader._read_collision_mesh(parsed, 0x40)
-
-        np.testing.assert_allclose(
-            collision.positions[7],
-            (-1017 / 1024, 2062 / 1024, 21 / 1024),
+        layouts = (
+            (256, 0x50, 0x60),
+            (257, 0x50, 0x60),
+            (257, 0x40, 0x50),
         )
-        np.testing.assert_array_equal(
-            collision.indices,
-            ((0, 1, 2), (5, 6, 7)),
-        )
-        np.testing.assert_array_equal(collision.face_types, (4, 7))
+        for (
+            quantization_marker,
+            vertex_section_length,
+            total_data_length,
+        ) in layouts:
+            with self.subTest(
+                quantization_marker=quantization_marker,
+                vertex_section_length=vertex_section_length,
+            ):
+                struct.pack_into(
+                    ">H",
+                    payload,
+                    0x84,
+                    quantization_marker,
+                )
+                struct.pack_into(
+                    ">H",
+                    payload,
+                    0x88,
+                    vertex_section_length,
+                )
+                struct.pack_into(
+                    ">H",
+                    payload,
+                    0x8C,
+                    total_data_length,
+                )
+                parsed = _single_section_file(0xDA00, payload)
+                collision = Resistance2Reader._read_collision_mesh(
+                    parsed,
+                    0x40,
+                )
+
+                np.testing.assert_allclose(
+                    collision.positions[7],
+                    (-1017 / 1024, 2062 / 1024, 21 / 1024),
+                )
+                np.testing.assert_array_equal(
+                    collision.indices,
+                    ((0, 1, 2), (5, 6, 7)),
+                )
+                np.testing.assert_array_equal(
+                    collision.face_types,
+                    (4, 7),
+                )
 
     def test_rejects_out_of_range_collision_face(self):
         payload = bytearray(0xE0)

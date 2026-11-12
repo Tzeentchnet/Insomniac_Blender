@@ -6,7 +6,6 @@ import tempfile
 import unittest
 
 from insomniac_asset_io.core.binary import IghwFile
-from insomniac_asset_io.core.errors import FormatError
 from insomniac_asset_io.core.source import GameSource
 from insomniac_asset_io.games.resistance_2.reader import Resistance2Reader
 from insomniac_asset_io.games.resistance_2.formats import AssetKind
@@ -165,15 +164,15 @@ class Resistance3Tests(unittest.TestCase):
             (10.25, 11.5, 12.75),
         )
 
-    def test_accepts_resistance_3_collision_quantization_marker(self):
+    def test_accepts_shared_collision_quantization_marker(self):
         parsed = _collision_mesh()
 
-        collision = Resistance3Reader._read_collision_mesh(parsed, 0x40)
+        for reader_type in (Resistance2Reader, Resistance3Reader):
+            with self.subTest(reader=reader_type.game_id):
+                collision = reader_type._read_collision_mesh(parsed, 0x40)
 
-        self.assertEqual(collision.positions.shape, (8, 3))
-        self.assertEqual(collision.indices.tolist(), [[0, 1, 2]])
-        with self.assertRaises(FormatError):
-            Resistance2Reader._read_collision_mesh(parsed, 0x40)
+                self.assertEqual(collision.positions.shape, (8, 3))
+                self.assertEqual(collision.indices.tolist(), [[0, 1, 2]])
 
     def test_reads_recomp_verified_resource_companions(self):
         with tempfile.TemporaryDirectory() as temporary:

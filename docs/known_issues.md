@@ -119,10 +119,11 @@ stable `bone_NNN` names and retain the original index/flags as properties.
 
 The default material mode supports diffuse textures, reconstructs BC3 and RG8
 tangent-space normals, and uses verified channels from R2's packed third map:
-red gloss becomes roughness and nonzero blue becomes emission. The default-off
-**Enhanced source materials** preference additionally applies safe source
-color factors. Source alpha modes are handled in both paths. The preference
-affects future imports only and does not change the scene render engine.
+red gloss becomes roughness and nonzero blue masks the corresponding diffuse
+color into emission. The default-off **Enhanced source materials** preference
+additionally applies safe source color factors. Source alpha modes are handled
+in both paths. The preference affects future imports only and does not change
+the scene render engine.
 
 BC3 albedo alpha is sampled as an independent packed channel. This preserves
 RGB under zero-alpha texels for opaque materials while still exposing the
@@ -134,10 +135,11 @@ multi-channel in most tested cases; their exact blend and scale semantics are
 not proven, so they also remain disconnected. Foliage uses a distinct
 material-vector family, but foliage geometry is not imported yet.
 
-The source of authored emission tint and intensity within the six `0x5000`
-material vectors is not yet proven. Emissive masks therefore use neutral
-grayscale at strength `1.0`; the raw material control word and vectors are
-preserved as Blender custom properties for later refinement.
+The source of any additional emission tint and intensity within the six
+`0x5000` material vectors is not yet proven. Emissive color therefore uses the
+verified diffuse hue and packed-blue mask at strength `1.0`; the raw material
+control word and vectors are preserved as Blender custom properties for later
+refinement.
 
 Shader `0x19ECCFD6FFE54E65` is R2's source-authored default pink placeholder.
 Its magenta texture is present and correctly decoded, but the game data does

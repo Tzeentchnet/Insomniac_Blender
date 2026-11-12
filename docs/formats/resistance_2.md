@@ -164,7 +164,7 @@ prototype `+0x80` contains:
 |---:|---|---|
 | `0x00` | `u16` | vertex count, at most 512 |
 | `0x02` | `u16` | group-width marker, `16` |
-| `0x04` | `u16` | quantization marker, `256` |
+| `0x04` | `u16` | quantization marker, `256` or `257` |
 | `0x06` | `u16` | face count |
 | `0x08` | `u16` | vertex section length |
 | `0x0C` | `u16` | aligned total data length |
@@ -177,10 +177,22 @@ eight Z, for 48 bytes per group. Position decoding is:
 position = (base + quantizedOffset) / 1024
 ```
 
-The vertex section length is `0x20 + ceil(vertexCount / 8) * 0x30`, measured
-from the `+0x80` header. Face words immediately follow it. Each big-endian
-`u32` stores face type in bits 27-31 and three nine-bit vertex indices in bits
-18-26, 9-17, and 0-8.
+Marker `257` is independently verified on the R2 Chimeran Shuttle Moby
+`0xFC9676A49C0A7C0E`. It uses the same physical vertex grouping, position
+conversion, and face packing as marker `256`, but its two length fields are
+measured from the base-position block at `+0x90` instead of the collision
+header at `+0x80`.
+
+Both observed length conventions resolve to the same physical face offset:
+
+```text
+header-relative  = 0x20 + ceil(vertexCount / 8) * 0x30  // from +0x80
+payload-relative = 0x10 + ceil(vertexCount / 8) * 0x30  // from +0x90
+```
+
+Face words immediately follow the vertex groups. Each big-endian `u32` stores
+face type in bits 27-31 and three nine-bit vertex indices in bits 18-26, 9-17,
+and 0-8.
 
 ### Vertices
 
@@ -531,15 +543,21 @@ data.
 
 Blender imports a packed map as Non-Color data when its blue channel has
 content or another verified flagged channel is needed. A Separate Color node
-connects blue to Principled BSDF Emission Color with a conservative strength
-of `1.0`.
+multiplies blue by the corresponding diffuse color and connects the result to
+Principled BSDF Emission Color with a conservative strength of `1.0`.
+
+The Chimeran Shuttle provides direct color-source evidence. Its top and bottom
+shaders have the same material vectors except for detail scale, while diffuse
+pixels selected by their packed-blue masks contain the distinct orange, cyan,
+and smaller orange accents seen in game. The packed texture therefore supplies
+coverage/intensity and the diffuse texture supplies the authored hue.
 
 The default material mode converts red gloss to roughness as
 `roughness = 1 - red` when flag `0x04` is set. Green would map to specular
 only when flag `0x02` is set, but that flag is absent from every shader in the
 whole-disc corpus, so no R2 material currently connects green. Authored
-emission tint and strength have not been identified conclusively in the six
-parameter vectors, so the importer does not guess them.
+additional emission tint and strength have not been identified conclusively
+in the six parameter vectors, so the importer does not guess them.
 
 ### Tangent-space normal maps
 
