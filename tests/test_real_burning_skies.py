@@ -1,0 +1,250 @@
+from __future__ import annotations
+
+import os
+import unittest
+from pathlib import Path
+
+from insomniac_asset_io.core.source import GameSource
+from insomniac_asset_io.games.resistance_2.formats import AssetKind
+from insomniac_asset_io.games.resistance_burning_skies.reader import (
+    BurningSkiesReader,
+)
+
+REAL_SOURCE = os.environ.get("BURNING_SKIES_ARCHIVE")
+
+
+@unittest.skipUnless(
+    REAL_SOURCE,
+    "BURNING_SKIES_ARCHIVE is not set",
+)
+class RealBurningSkiesTests(unittest.TestCase):
+    def test_decodes_known_model_material_and_texture(self):
+        with GameSource.open(Path(REAL_SOURCE)) as source:
+            reader = BurningSkiesReader(source)
+            self.assertGreaterEqual(
+                len(reader.asset_pointers(AssetKind.MOBY)),
+                800,
+            )
+            path = next(
+                path
+                for path in source.paths
+                if path.casefold().endswith("/ap_base_twoby4.smf")
+            )
+            model = reader.read_moby(reader.model_id(path))
+            self.assertEqual(len(model.meshes), 1)
+            self.assertEqual(model.meshes[0].positions.shape, (24, 3))
+            self.assertEqual(model.meshes[0].uvs.shape, (24, 2))
+            self.assertAlmostEqual(
+                float(model.meshes[0].uvs[0, 0]),
+                0.5428,
+                places=4,
+            )
+            self.assertAlmostEqual(
+                float(model.meshes[0].uvs[0, 1]),
+                0.00048828125,
+                places=6,
+            )
+            self.assertEqual(model.meshes[0].indices.shape, (36,))
+            self.assertEqual(len(model.shader_tuids), 1)
+
+            shader = reader.read_shader(model.shader_tuids[0])
+            self.assertIsNotNone(shader.albedo_texture_id)
+            texture = reader.read_texture(
+                shader.albedo_texture_id,
+                lookup_path=shader.texture_lookup_paths[0],
+            )
+            self.assertEqual(texture.rgba.shape, (512, 512, 4))
+
+            amship = reader.read_moby(reader.model_id("models/AP_BASE_AMShip.smf"))
+            self.assertEqual(len(amship.shader_tuids), 1)
+            amship_shader = reader.read_shader(amship.shader_tuids[0])
+            self.assertEqual(
+                amship_shader.texture_lookup_paths[0],
+                "textures/Models/RS_CLR_alienmothership2.p2t",
+            )
+
+    def test_decodes_serialized_packet_material_maps(self):
+        expected_maps = {
+            "models/AP_BASE_AMShipA.smf": [0, 1, 2, 3, 4, 5],
+            "models/CH_BASE_Hybrid.smf": [
+                1,
+                0,
+                0,
+                2,
+                2,
+                2,
+                2,
+                2,
+                3,
+            ],
+            "models/CH_PHYS_Hybrid.smf": [
+                1,
+                2,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                4,
+                5,
+                6,
+                1,
+                1,
+                2,
+                2,
+                2,
+                2,
+                2,
+                3,
+                3,
+            ],
+            "models/IT_BASE_FPHero_Axe.smf": [1],
+        }
+
+        with GameSource.open(Path(REAL_SOURCE)) as source:
+            reader = BurningSkiesReader(source)
+            for path, expected in expected_maps.items():
+                with self.subTest(path=path):
+                    model = reader.read_moby(reader.model_id(path))
+                    actual = [mesh.shader_index for mesh in model.meshes]
+                    self.assertEqual(actual, expected)
+                    self.assertTrue(model.shader_tuids)
+                    self.assertLess(max(actual), len(model.shader_tuids))
+                    self.assertEqual(
+                        len(model.collision_meshes),
+                        4 if path == "models/CH_BASE_Hybrid.smf" else 0,
+                    )
+
+    def test_filters_car_shadow_hull_and_decodes_authored_lods(self):
+        with GameSource.open(Path(REAL_SOURCE)) as source:
+            reader = BurningSkiesReader(source)
+            car = reader.read_moby(
+                reader.model_id("models/RS_OB_Car_C.smf")
+            )
+
+            self.assertEqual(len(car.meshes), 3)
+            self.assertTrue(all(mesh.lod_level == 0 for mesh in car.meshes))
+            self.assertEqual(len(car.collision_meshes), 1)
+            shadow_hull = car.collision_meshes[0]
+            self.assertEqual(shadow_hull.positions.shape, (76, 3))
+            self.assertEqual(shadow_hull.indices.shape, (120,))
+
+            lod_test = reader.read_moby(
+                reader.model_id("models/GE_OB_LOD_TEST.smf")
+            )
+            self.assertEqual(
+                [mesh.lod_level for mesh in lod_test.meshes],
+                [0, 0, 1, 1],
+            )
+            self.assertEqual(
+                [mesh.shader_index for mesh in lod_test.meshes],
+                [2, 3, 0, 1],
+            )
+
+    def test_classifies_hybrid_gib_packets_as_damage(self):
+        with GameSource.open(Path(REAL_SOURCE)) as source:
+            reader = BurningSkiesReader(source)
+            hybrid = reader.read_moby(
+                reader.model_id("models/CH_PHYS_Hybrid.smf")
+            )
+            damage_meshes = [
+                mesh
+                for mesh in hybrid.meshes
+                if mesh.is_damage_permutation
+            ]
+            base_meshes = [
+                mesh
+                for mesh in hybrid.meshes
+                if not mesh.is_damage_permutation
+            ]
+
+            self.assertEqual(len(damage_meshes), 13)
+            self.assertEqual(len(base_meshes), 9)
+            self.assertEqual(
+                [mesh.segment_index for mesh in damage_meshes],
+                [47, 46, 35, 36, 37, 38, 39, 41, 42, 43, 44, 40, 45],
+            )
+
+            base_hybrid = reader.read_moby(
+                reader.model_id("models/CH_BASE_Hybrid.smf")
+            )
+            self.assertFalse(
+                any(
+                    mesh.is_damage_permutation
+                    for mesh in base_hybrid.meshes
+                )
+            )
+
+    def test_decodes_normal_gloss_and_emissive_material_channels(self):
+        with GameSource.open(Path(REAL_SOURCE)) as source:
+            reader = BurningSkiesReader(source)
+            car = reader.read_moby(
+                reader.model_id("models/RS_OB_Car_C.smf")
+            )
+            car_shader = reader.read_shader(car.shader_tuids[2])
+            self.assertEqual(car_shader.normal_texture_encoding, "DIRECT")
+            self.assertIsNotNone(car_shader.normal_texture_id)
+            normal = reader.read_texture(
+                car_shader.normal_texture_id,
+                lookup_path=car_shader.texture_lookup_paths[1],
+            )
+            self.assertEqual(normal.info.format_code, 0x83000000)
+            self.assertEqual(normal.rgba.shape, (256, 256, 4))
+            self.assertGreaterEqual(int(normal.rgba[..., 2].min()), 150)
+
+            gloss_path = (
+                "materials/00E91E98_A386A043_B9ADA612_14CFB27C.bmx"
+            )
+            gloss = reader.read_shader(reader.material_id(gloss_path))
+            self.assertEqual(gloss.specular_texture_semantics, "GLOSS")
+            self.assertEqual(
+                gloss.texture_lookup_paths[2],
+                "textures/Models/RS_GLS_FilingCabinetMet_1.p2t",
+            )
+            self.assertEqual(gloss.specular_power, 80.0)
+
+            emissive_path = (
+                "materials/01A7906C_831FF643_BA99B529_D63E1D1A.bmx"
+            )
+            emissive = reader.read_shader(
+                reader.material_id(emissive_path)
+            )
+            self.assertEqual(
+                emissive.emissive_texture_lookup_path,
+                "textures/Models/CB_GLO_Light_Pillar_01.p2t",
+            )
+            self.assertEqual(emissive.emissive_strength, 2.0)
+            self.assertAlmostEqual(emissive.emissive_color[0], 0.5019608)
+
+    def test_faxe_head_uses_upper_texture_region(self):
+        with GameSource.open(Path(REAL_SOURCE)) as source:
+            reader = BurningSkiesReader(source)
+            model = reader.read_moby(reader.model_id("models/AP_BASE_FAxe.smf"))
+            mesh = model.meshes[0]
+            head_vertices = (abs(mesh.positions[:, 0]) > 0.05) & (
+                mesh.positions[:, 1] > 0.3
+            )
+            self.assertGreater(int(head_vertices.sum()), 200)
+            blender_v = 1.0 - mesh.uvs[head_vertices, 1]
+            self.assertGreater(float(blender_v.min()), 0.5)
+
+    def test_decodes_adrone_skeleton_only_model(self):
+        with GameSource.open(Path(REAL_SOURCE)) as source:
+            reader = BurningSkiesReader(source)
+            model = reader.read_moby(reader.model_id("models/CH_PHYS_ADrone.smf"))
+
+            self.assertEqual(model.meshes, [])
+            self.assertEqual(model.shader_tuids, ())
+            self.assertIsNotNone(model.skeleton)
+            assert model.skeleton is not None
+            self.assertEqual(model.skeleton.bone_count, 37)
+            self.assertEqual(model.skeleton.root_bone, 0)
+            self.assertEqual(model.skeleton.bones[1].parent_index, 0)
+            self.assertEqual(model.skeleton.bones[2].parent_index, 1)
+
+
+if __name__ == "__main__":
+    unittest.main()

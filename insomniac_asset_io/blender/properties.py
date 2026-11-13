@@ -1,14 +1,14 @@
 from __future__ import annotations
 
+import logging
 from collections import Counter
 from dataclasses import dataclass
 from functools import lru_cache
-import logging
 
 import bpy
 from bpy.app.handlers import persistent
 
-from ..core.errors import MissingResourceError
+from ..core.errors import InsomniacError, MissingResourceError
 from ..core.iso import DEFAULT_CACHE_DIRECTORY
 from ..games.catalog import (
     CatalogAsset,
@@ -18,7 +18,6 @@ from ..games.catalog import (
 )
 from ..games.registry import GAME_ADAPTERS
 from ..games.resistance_2.formats import AssetKind
-
 
 AssetEnumItem = tuple[str, str, str, int, int]
 
@@ -40,6 +39,7 @@ _PERSISTENT_SETTING_NAMES = (
     "level_id",
 )
 _SESSION_SETTINGS: dict[str, str] = {}
+_RESTORING_PERSISTED_SELECTION = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -62,11 +62,90 @@ def _current_scene_settings() -> bpy.types.PropertyGroup | None:
     return scene.insomniac_asset_io
 
 
+def _addon_preferences(
+    context: bpy.types.Context | None,
+) -> bpy.types.AddonPreferences | None:
+    if context is None:
+        context = getattr(bpy, "context", None)
+    if context is None:
+        return None
+    from .preferences import addon_preferences
+
+    return addon_preferences(context)
+
+
+def _initialize_source_preferences(
+    preferences: bpy.types.AddonPreferences,
+) -> None:
+    if preferences.source_paths_initialized:
+        return
+    for adapter in GAME_ADAPTERS.values():
+        source_path = ""
+        if adapter.supports_iso:
+            source_path = getattr(
+                preferences,
+                adapter.iso_preference_name,
+                "",
+            )
+        setattr(
+            preferences,
+            adapter.source_preference_name,
+            source_path,
+        )
+    preferences.source_paths_initialized = True
+
+
+def _remember_game_source(
+    settings: bpy.types.PropertyGroup,
+    context: bpy.types.Context | None,
+) -> None:
+    if _RESTORING_PERSISTED_SELECTION:
+        return
+    preferences = _addon_preferences(context)
+    if preferences is None:
+        return
+    _initialize_source_preferences(preferences)
+    game_id = _game_id(settings)
+    preferences.last_game = game_id
+    setattr(
+        preferences,
+        GAME_ADAPTERS[game_id].source_preference_name,
+        settings.source_path,
+    )
+
+
+def _restore_game_source(
+    settings: bpy.types.PropertyGroup,
+    context: bpy.types.Context | None,
+) -> bool:
+    global _RESTORING_PERSISTED_SELECTION
+    preferences = _addon_preferences(context)
+    if preferences is None:
+        return False
+    _initialize_source_preferences(preferences)
+    game_id = preferences.last_game
+    if game_id not in GAME_ADAPTERS:
+        game_id = "RESISTANCE_2"
+    source_path = getattr(
+        preferences,
+        GAME_ADAPTERS[game_id].source_preference_name,
+        "",
+    )
+    _RESTORING_PERSISTED_SELECTION = True
+    try:
+        settings.game = game_id
+        settings.source_path = source_path
+    finally:
+        _RESTORING_PERSISTED_SELECTION = False
+    return True
+
+
 @persistent
 def _remember_scene_settings(_unused: object = None) -> None:
     settings = _current_scene_settings()
     if settings is None:
         return
+    _remember_game_source(settings, getattr(bpy, "context", None))
     for name in _PERSISTENT_SETTING_NAMES:
         _SESSION_SETTINGS[name] = getattr(settings, name)
 
@@ -76,7 +155,15 @@ def _restore_scene_settings(_unused: object = None) -> None:
     settings = _current_scene_settings()
     if settings is None:
         return
+    previous_game = _game_id(settings)
+    had_session_settings = bool(_SESSION_SETTINGS)
+    restored_preferences = _restore_game_source(
+        settings,
+        getattr(bpy, "context", None),
+    )
     for name, value in _SESSION_SETTINGS.items():
+        if restored_preferences and name in {"game", "source_path"}:
+            continue
         try:
             setattr(settings, name, value)
         except (TypeError, ValueError) as exc:
@@ -86,13 +173,19 @@ def _restore_scene_settings(_unused: object = None) -> None:
                 value,
                 exc,
             )
+    if (
+        restored_preferences
+        and not had_session_settings
+        and previous_game != _game_id(settings)
+    ):
+        _reset_game_specific_choices(settings, bpy.context)
+    if not had_session_settings:
+        for name in _PERSISTENT_SETTING_NAMES:
+            _SESSION_SETTINGS[name] = getattr(settings, name)
 
 
 def register_scene_settings_persistence() -> None:
-    if _SESSION_SETTINGS:
-        _restore_scene_settings()
-    else:
-        _remember_scene_settings()
+    _restore_scene_settings()
     if _remember_scene_settings not in bpy.app.handlers.load_pre:
         bpy.app.handlers.load_pre.append(_remember_scene_settings)
     if _restore_scene_settings not in bpy.app.handlers.load_post:
@@ -146,7 +239,34 @@ def _catalog(
     settings: bpy.types.PropertyGroup | None,
     context: bpy.types.Context | None,
 ) -> GameCatalog:
-    return load_catalog(_cache_directory(context), _game_id(settings))
+    game_id = _game_id(settings)
+    source_path = (
+        bpy.path.abspath(settings.source_path)
+        if settings is not None and getattr(settings, "source_path", "")
+        else None
+    )
+    cache_directory = _cache_directory(context)
+    try:
+        return load_catalog(
+            cache_directory,
+            game_id,
+            source_path=source_path,
+        )
+    except InsomniacError as exc:
+        adapter = GAME_ADAPTERS[game_id]
+        if source_path is None or adapter.create_source_catalog is None:
+            raise
+        LOGGER.warning(
+            "Could not load %s source catalog from %s: %s",
+            adapter.label,
+            source_path,
+            exc,
+        )
+        return load_catalog(
+            cache_directory,
+            game_id,
+            source_path=None,
+        )
 
 
 def _kind_filter(settings: bpy.types.PropertyGroup) -> AssetKind | None:
@@ -231,9 +351,7 @@ def asset_selector_state(
     context: bpy.types.Context | None,
 ) -> AssetSelectorState:
     catalog = _catalog(settings, context)
-    hide_duplicates, show_tuids, show_owner_levels = _selector_preferences(
-        context
-    )
+    hide_duplicates, show_tuids, show_owner_levels = _selector_preferences(context)
     query = settings.asset_filter
     kind = _kind_filter(settings)
     level = _level_filter(settings, catalog)
@@ -265,9 +383,7 @@ def asset_selector_state(
         items=items,
         total_count=total,
         match_count=len(items),
-        filters_active=bool(
-            query.strip() or kind is not None or level is not None
-        ),
+        filters_active=bool(query.strip() or kind is not None or level is not None),
         selected=selected,
         selected_label=(
             selected.selector_label(
@@ -321,6 +437,9 @@ def ensure_asset_selection(
     context: bpy.types.Context,
 ) -> str:
     catalog = _catalog(settings, context)
+    if not catalog.assets:
+        set_asset_selection(settings, "")
+        return ""
     try:
         catalog.asset(settings.asset_tuid)
     except MissingResourceError:
@@ -354,25 +473,68 @@ def _level_items(
         (
             level,
             level,
-            f"{catalog.game_label} level {level} from the "
-            f"{catalog.region} catalog",
+            (f"{catalog.game_label} level {level} from the {catalog.region} catalog"),
         )
         for level in catalog.levels
     ]
     return _LEVEL_ITEMS
 
 
+def _reset_game_specific_choices(
+    settings: bpy.types.PropertyGroup,
+    context: bpy.types.Context,
+) -> None:
+    settings.source_summary = ""
+    settings.last_message = ""
+    clear_asset_filters(settings)
+    catalog = _catalog(settings, context)
+    set_asset_selection(
+        settings,
+        catalog.assets[0].identifier if catalog.assets else "",
+    )
+    if catalog.levels:
+        settings.level_id = catalog.levels[0]
+
+
 def _update_game(
     settings: bpy.types.PropertyGroup,
     context: bpy.types.Context,
 ) -> None:
-    catalog = _catalog(settings, context)
-    settings.source_path = ""
-    settings.source_summary = ""
-    settings.last_message = ""
-    clear_asset_filters(settings)
-    set_asset_selection(settings, catalog.assets[0].identifier)
-    settings.level_id = catalog.levels[0]
+    global _RESTORING_PERSISTED_SELECTION
+    if _RESTORING_PERSISTED_SELECTION:
+        return
+    game_id = _game_id(settings)
+    preferences = _addon_preferences(context)
+    source_path = ""
+    if preferences is not None:
+        _initialize_source_preferences(preferences)
+        previous_game = preferences.last_game
+        if previous_game in GAME_ADAPTERS:
+            setattr(
+                preferences,
+                GAME_ADAPTERS[previous_game].source_preference_name,
+                settings.source_path,
+            )
+        preferences.last_game = game_id
+        source_path = getattr(
+            preferences,
+            GAME_ADAPTERS[game_id].source_preference_name,
+            "",
+        )
+
+    _RESTORING_PERSISTED_SELECTION = True
+    try:
+        settings.source_path = source_path
+    finally:
+        _RESTORING_PERSISTED_SELECTION = False
+    _reset_game_specific_choices(settings, context)
+
+
+def _update_source_path(
+    settings: bpy.types.PropertyGroup,
+    context: bpy.types.Context,
+) -> None:
+    _remember_game_source(settings, context)
 
 
 class InsomniacAssetPickerItem(bpy.types.PropertyGroup):
@@ -401,9 +563,11 @@ class InsomniacSceneSettings(bpy.types.PropertyGroup):
         name="Source",
         description=(
             "A decrypted game ISO, extracted assetlookup.dat, level PSARC, "
-            "or folder containing one ISO or extracted level resources"
+            "Burning Skies build.psa, or folder containing extracted "
+            "resources"
         ),
         subtype="FILE_PATH",
+        update=_update_source_path,
     )
     source_summary: bpy.props.StringProperty(
         name="Summary",
@@ -449,9 +613,7 @@ class InsomniacSceneSettings(bpy.types.PropertyGroup):
     )
     level_id: bpy.props.EnumProperty(
         name="Level",
-        description=(
-            "Importable level from the active extraction catalog"
-        ),
+        description=("Importable level from the active extraction catalog"),
         items=_level_items,
     )
 

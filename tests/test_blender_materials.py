@@ -38,10 +38,25 @@ if bpy is not None:
             self.game_label = (
                 "Resistance 3"
                 if game_id == "RESISTANCE_3"
-                else "Resistance 2"
+                else (
+                    "Resistance: Burning Skies"
+                    if game_id == "RESISTANCE_BURNING_SKIES"
+                    else "Resistance 2"
+                )
             )
-            self.asset_prefix = "R3" if game_id == "RESISTANCE_3" else "R2"
+            self.asset_prefix = (
+                "R3"
+                if game_id == "RESISTANCE_3"
+                else (
+                    "RBS"
+                    if game_id == "RESISTANCE_BURNING_SKIES"
+                    else "R2"
+                )
+            )
             self.material_surface_channels_by_default = True
+            self.material_uses_base_color_factor_by_default = (
+                game_id == "RESISTANCE_BURNING_SKIES"
+            )
             self.material_emission_uses_albedo = True
             self.material_emission_disabled_control_mask = (
                 0x08 if game_id == "RESISTANCE_3" else 0
@@ -244,6 +259,129 @@ class BlenderMaterialTests(unittest.TestCase):
                 from_socket="Green",
             )
         )
+
+    def test_burning_skies_uses_direct_normal_and_dedicated_maps(self) -> None:
+        texture_ids = {
+            "albedo": 0x610,
+            "normal": 0x620,
+            "gloss": 0x630,
+            "emissive": 0x640,
+            "alpha": 0x650,
+        }
+        textures = {
+            texture_id: DecodedTexture(
+                TextureInfo(
+                    id=texture_id,
+                    tuid=texture_id,
+                    format_code=0x83000000,
+                    mip_count=1,
+                    width=2,
+                    height=2,
+                    offset=0,
+                    length=0,
+                ),
+                np.full((2, 2, 4), 255, dtype=np.uint8),
+            )
+            for texture_id in texture_ids.values()
+        }
+        shader = ShaderInfo(
+            tuid=0x106,
+            albedo_texture_id=texture_ids["albedo"],
+            normal_texture_id=texture_ids["normal"],
+            specular_texture_id=texture_ids["gloss"],
+            detail_texture_id=None,
+            texture_lookup_paths=(
+                "albedo",
+                "normal",
+                "gloss",
+                None,
+            ),
+            material_values=((0.5, 0.75, 1.0, 1.0),),
+            normal_texture_encoding="DIRECT",
+            specular_texture_semantics="GLOSS",
+            emissive_texture_id=texture_ids["emissive"],
+            emissive_texture_lookup_path="emissive",
+            alpha_texture_id=texture_ids["alpha"],
+            alpha_texture_lookup_path="alpha",
+            emissive_color=(0.25, 0.5, 1.0),
+            emissive_strength=2.5,
+            specular_power=100.0,
+            alpha_mode_override="BLEND",
+        )
+        reader = _MaterialReader(
+            "RESISTANCE_BURNING_SKIES",
+            shader,
+            textures,
+        )
+        material = _MaterialFactory(reader, True, []).material(shader.tuid)
+        principled = material.node_tree.nodes["Principled BSDF"]
+        normal_texture = material.node_tree.nodes["Normal_00000620"]
+        normal_map = material.node_tree.nodes["Normal_Map_00000620"]
+        gloss_channel = material.node_tree.nodes["Gloss_Channel_00000630"]
+        roughness = material.node_tree.nodes["Roughness_00000630"]
+        emissive = material.node_tree.nodes["Emissive_00000640"]
+        emissive_tint = material.node_tree.nodes[
+            "Emissive_Tint_0000000000000106"
+        ]
+        alpha_channel = material.node_tree.nodes["Alpha_Channel_00000650"]
+
+        self.assertEqual(material["insomniac_material_mode"], "RBS_STANDARD")
+        self.assertIn("direct RGB normal", normal_texture.label)
+        self.assertEqual(
+            normal_texture.image.colorspace_settings.name,
+            "Non-Color",
+        )
+        self.assertTrue(
+            self._has_link(material, normal_map, principled, "Normal")
+        )
+        self.assertTrue(
+            self._has_link(
+                material,
+                gloss_channel,
+                roughness,
+                1,
+                from_socket="Red",
+            )
+        )
+        self.assertTrue(
+            self._has_link(
+                material,
+                roughness,
+                principled,
+                "Roughness",
+            )
+        )
+        self.assertTrue(
+            self._has_link(
+                material,
+                emissive,
+                emissive_tint,
+                0,
+                from_socket="Color",
+            )
+        )
+        self.assertTrue(
+            self._has_link(
+                material,
+                emissive_tint,
+                principled,
+                "Emission Color",
+            )
+        )
+        self.assertEqual(
+            principled.inputs["Emission Strength"].default_value,
+            2.5,
+        )
+        self.assertTrue(
+            self._has_link(
+                material,
+                alpha_channel,
+                principled,
+                "Alpha",
+                from_socket="Red",
+            )
+        )
+        self.assertEqual(material.surface_render_method, "DITHERED")
 
     def test_r3_goliath_wet_overlay_uses_luminance_coverage(self) -> None:
         shader, textures = self._alpha_fixture()

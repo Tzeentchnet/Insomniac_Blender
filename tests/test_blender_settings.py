@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from pathlib import Path
 import sys
 import unittest
-
+from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -17,6 +18,7 @@ except ModuleNotFoundError:
 
 
 if bpy is not None:
+    from insomniac_asset_io.blender import properties as scene_properties
     from insomniac_asset_io.blender import register, unregister
 
 
@@ -25,10 +27,32 @@ class BlenderSettingsTests(unittest.TestCase):
     def setUp(self) -> None:
         self.assertFalse(hasattr(bpy.types.Scene, "insomniac_asset_io"))
         register()
+        self.preferences = SimpleNamespace(
+            last_game="RESISTANCE_2",
+            source_paths_initialized=True,
+            resistance_2_last_source_path="",
+            resistance_3_last_source_path="",
+            resistance_burning_skies_last_source_path="",
+        )
+        self.preferences_patch = mock.patch.object(
+            scene_properties,
+            "_addon_preferences",
+            return_value=self.preferences,
+        )
+        self.preferences_patch.start()
+        scene_properties._RESTORING_PERSISTED_SELECTION = True
+        try:
+            settings = bpy.context.scene.insomniac_asset_io
+            settings.game = "RESISTANCE_2"
+            settings.source_path = ""
+        finally:
+            scene_properties._RESTORING_PERSISTED_SELECTION = False
+        scene_properties._SESSION_SETTINGS.clear()
 
     def tearDown(self) -> None:
         if hasattr(bpy.types.Scene, "insomniac_asset_io"):
             unregister()
+        self.preferences_patch.stop()
 
     def test_selected_imported_action_updates_playback_range(self) -> None:
         scene = bpy.context.scene
@@ -117,17 +141,51 @@ class BlenderSettingsTests(unittest.TestCase):
 
     def test_switching_games_resets_game_specific_scene_choices(self) -> None:
         settings = bpy.context.scene.insomniac_asset_io
+
+        self.preferences.resistance_3_last_source_path = r"E:\Tests\resistance_3.iso"
         settings.source_path = r"E:\Tests\resistance_2.iso"
         settings.asset_filter = "vtol"
         settings.asset_kind_filter = "MOBY"
 
         settings.game = "RESISTANCE_3"
 
-        self.assertEqual(settings.source_path, "")
+        self.assertEqual(
+            settings.source_path,
+            r"E:\Tests\resistance_3.iso",
+        )
         self.assertEqual(settings.asset_filter, "")
         self.assertEqual(settings.asset_kind_filter, "ALL")
         self.assertTrue(settings.asset_tuid.startswith(("MOBY:", "TIE:")))
         self.assertEqual(settings.level_id, "lobby")
+
+        settings.game = "RESISTANCE_2"
+        self.assertEqual(
+            settings.source_path,
+            r"E:\Tests\resistance_2.iso",
+        )
+
+    def test_game_and_source_restore_from_preferences(self) -> None:
+        self.preferences.last_game = "RESISTANCE_3"
+        self.preferences.resistance_3_last_source_path = (
+            r"E:\Tests\persisted_resistance_3.iso"
+        )
+        scene_properties._SESSION_SETTINGS.clear()
+        scene_properties._RESTORING_PERSISTED_SELECTION = True
+        try:
+            settings = bpy.context.scene.insomniac_asset_io
+            settings.game = "RESISTANCE_2"
+            settings.source_path = ""
+        finally:
+            scene_properties._RESTORING_PERSISTED_SELECTION = False
+
+        scene_properties._restore_scene_settings()
+
+        restored = bpy.context.scene.insomniac_asset_io
+        self.assertEqual(restored.game, "RESISTANCE_3")
+        self.assertEqual(
+            restored.source_path,
+            r"E:\Tests\persisted_resistance_3.iso",
+        )
 
 
 if __name__ == "__main__":

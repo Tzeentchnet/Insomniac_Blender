@@ -6,8 +6,10 @@ generations through one parser. Each supported game owns its archive,
 resource, geometry, animation, material, and level-placement chain behind a
 shared Blender-facing interface.
 
-The extension currently supports **Resistance 2** and **Resistance 3** on
-PlayStation 3 through separate game readers and a shared Blender workflow.
+The extension supports **Resistance 2** and **Resistance 3** on PlayStation 3
+through separate game readers and a shared Blender workflow. It also includes
+an explicitly experimental static-model reader for **Resistance: Burning
+Skies** on PlayStation Vita.
 
 ## Resistance 2 support
 
@@ -58,6 +60,33 @@ See [Resistance 2 formats](docs/formats/resistance_2.md) and
 See [Resistance 3 formats](docs/formats/resistance_3.md) for the verified
 layout differences from Resistance 2.
 
+## Experimental Resistance: Burning Skies support
+
+Burning Skies uses Nihilistic's little-endian `NSIRSRC` resources rather than
+the PS3 IGHW formats. Its support is intentionally isolated behind a separate
+experimental game adapter.
+
+| Feature | Status |
+|---|---|
+| Decrypted `build.psa` PSARC source | Supported; the protected retail PFS file is not |
+| Source-driven model catalog | Supported; no game-derived asset list is bundled |
+| SMF model geometry | All 798 files with GBuffer packets decode in the tested European archive |
+| Rigid and skinned vertex packets | Imported as static bind-pose geometry with UVs |
+| Lower LODs | Authored groups decoded; optional, disabled by default, and kept in a separate Collection |
+| Shadow-only and collision GBuffer packets | 156 auxiliary packets are excluded by default and available through the Collision geometry option |
+| BMX material references | Exact serialized packet maps decoded for all 798 GBuffer SMFs |
+| BMX surface channels | Diffuse tint, direct RGB normals, dedicated red-channel gloss, specular power, and dedicated emissive color/strength are supported |
+| Vita GXT textures | UBC1, UBC2, UBC3, 32-bit color, and PVRTC-II 4bpp supported |
+| Skeleton-only SMFs | 17 files import as bind-pose armatures, including `CH_PHYS_ADrone` |
+| Skin weights and animation | Not yet supported |
+| Geometry-less SMFs | Six files have no recoverable skeleton and fail explicitly |
+| Levels, native collision resources, cutscenes, and effects | Not yet supported |
+
+See [Burning Skies formats](docs/formats/resistance_burning_skies.md) and
+[known issues](docs/known_issues.md) for the verified layouts and strict
+fallback behavior. No Burning Skies resource bytes or asset-name catalog are
+distributed with the extension.
+
 ## Install
 
 1. Build an installable archive:
@@ -99,6 +128,17 @@ Blender includes NumPy; no external Python package is required at runtime.
      the matching Tie.
 4. Click **Import Asset**.
 
+For experimental Burning Skies imports, select **Resistance: Burning Skies
+(Experimental)**, choose a decrypted `build.psa` whose first four bytes are
+`PSAR`, and click **Inspect Source**. The model chooser is built directly from
+that archive. Burning Skies does not use the ISO, level, or Asset Browser
+cache workflow.
+
+The sidebar remembers the active game and a separate last-selected ISO,
+archive, or extracted folder for each game in Blender preferences. These
+selections are restored after opening another `.blend` file or restarting
+Blender.
+
 A status line reports how many assets pass the filters, and its **X** button
 clears them all. Filters only change what the search popup lists: the current
 selection is kept, stays importable, and is flagged when it falls outside the
@@ -133,12 +173,13 @@ animation layers. These Actions retain
 `insomniac_additive_source = true` and identify the baked base through the
 `insomniac_overlay_baked` and `insomniac_overlay_base` custom properties.
 
-Damage permutations and collision geometry are independently disabled by
-default. Enabling them in Add-on Preferences puts each damage segment in the
-asset's **Damage Permutations** child Collection and puts decoded box, sphere,
-capsule, and triangle collision helpers in its **Collision Geometry** child
-Collection. Collision helpers display as in-front wire geometry and are
-excluded from renders.
+Damage permutations, lower LODs, and collision geometry are independently
+disabled by default. Enabling them in Add-on Preferences puts each damage
+segment in the asset's **Damage Permutations** child Collection, each authored
+lower-detail group in **Lower LODs**, and decoded box, sphere, capsule,
+triangle, or Burning Skies auxiliary helpers in **Collision Geometry**.
+Collision helpers display as in-front wire geometry and are excluded from
+renders.
 
 ### Import a level
 
@@ -175,7 +216,7 @@ the games and live in Add-on Preferences rather than the sidebar. ISO paths
 and generated catalogs remain game-specific:
 
 - model materials, Moby animations, animation limit, axis conversion, and
-  default-off damage-permutation and collision-geometry import;
+  default-off damage-permutation, lower-LOD, and collision-geometry import;
 - asset-selector duplicate suppression, TUID visibility, and owner-level
   visibility;
 - level materials, terrain, static props, gameplay instances, and axis
@@ -375,6 +416,8 @@ This project builds on public Insomniac-engine research, especially:
 - [Insomniac Engine AllExtractor](https://lukascone.wordpress.com/2017/12/03/insomniac-engine-allextractor/)
 - [WebWorksTools](https://github.com/okangel12345/WebWorksTools)
 - [Luna Engine IO Tools](https://github.com/Pcniado/luna_engine_io_tools)
+- [PowerVR Native SDK](https://github.com/powervr-graphics/Native_SDK)
+- [Vita3K](https://github.com/Vita3K/Vita3K)
 
 The implementation is GPL-3.0-or-later. It is not affiliated with Insomniac
 Games or Sony Interactive Entertainment. Users must provide their own legally

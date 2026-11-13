@@ -98,7 +98,7 @@ class GameSource:
         if not source_path.exists():
             raise MissingResourceError(f"Source path does not exist: {source_path}")
 
-        if source_path.is_file() and source_path.suffix.casefold() == ".psarc":
+        if source_path.is_file() and cls._is_psarc_file(source_path):
             archive_paths = cls._paired_archives(source_path)
             return cls._from_archives(
                 source_path.parent,
@@ -115,7 +115,9 @@ class GameSource:
         archive_paths = sorted(
             item
             for item in source_path.rglob("*")
-            if item.is_file() and item.suffix.casefold() == ".psarc"
+            if item.is_file()
+            and item.suffix.casefold() in {".psarc", ".psa"}
+            and cls._is_psarc_file(item)
         )
         if archive_paths:
             return cls._from_archives(
@@ -127,6 +129,16 @@ class GameSource:
             source_path,
             selected_path=source_path,
         )
+
+    @staticmethod
+    def _is_psarc_file(path: Path) -> bool:
+        try:
+            with path.open("rb") as stream:
+                return stream.read(4) == b"PSAR"
+        except OSError as exc:
+            raise MissingResourceError(
+                f"Could not inspect source file {path}: {exc}"
+            ) from exc
 
     @staticmethod
     def _paired_archives(path: Path) -> list[Path]:

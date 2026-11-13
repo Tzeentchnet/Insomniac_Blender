@@ -1,5 +1,35 @@
 # Known issues
 
+## Resistance: Burning Skies (experimental)
+
+Burning Skies render packets import as static bind-pose geometry; skin
+weights and animation are not decoded. Seventeen resources without render
+packets expose valid bind matrices and import as armature-only assets. Six
+geometry-less resources contain no recoverable skeleton.
+
+Vita PVRTC-II 4bpp textures are decoded, including hard-transition palettes
+and punch-through alpha. Burning Skies normal maps are direct tangent-space
+RGB data rather than the reconstructed R2/R3 encoding. Dedicated gloss maps
+drive inverted Principled roughness, and authored emissive maps use the BMX
+color and strength parameters. Separate alpha maps are preserved but remain
+disconnected unless the BMX also identifies a supported translucent or
+masked render state.
+
+The serialized `0x00020500` external-reference table now provides an exact
+mesh-entry-to-BMX dependency map for every one of the 798 GBuffer SMFs in
+the tested archive. This includes repeated material slots in destructible
+physics models and non-leading slots such as the first-person axe.
+Five debug, marker, or environment models reference seven BMX identifiers
+that are not present in the archive; they report the missing dependencies and
+remain geometry-only.
+
+The authored multi-LOD table is decoded with its full-detail group as LOD 0.
+Lower groups are disabled by default and require the **Lower LODs** import
+option. The tested archive also contains 154 shadow-only packets and two
+`WorldCollision` packets; these are excluded from the visible base mesh and
+require **Collision geometry**. Other native collision resource families are
+not decoded.
+
 ## Resistance 3
 
 ### Additional shader slots

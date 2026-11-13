@@ -24,6 +24,7 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--no-convert-axes", action="store_true")
     parser.add_argument("--cycles-materials", action="store_true")
     parser.add_argument("--damage-permutations", action="store_true")
+    parser.add_argument("--lower-lods", action="store_true")
     parser.add_argument("--collision-geometry", action="store_true")
     parser.add_argument("--no-previews", action="store_true")
     parser.add_argument("--asset-limit", type=int, default=0)
@@ -60,6 +61,7 @@ def main() -> int:
                 cycles_materials=args.cycles_materials,
                 generate_previews=not args.no_previews,
                 damage_permutations=args.damage_permutations,
+                lower_lods=args.lower_lods,
                 collision_geometry=args.collision_geometry,
                 asset_limit=max(args.asset_limit, 0),
             ),

@@ -79,6 +79,7 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
         self.assertFalse(
             any(
                 obj.get("insomniac_damage_permutation")
+                or obj.get("insomniac_lod_level")
                 or obj.get("insomniac_collision_geometry")
                 for obj in bpy.data.objects
             )
@@ -90,6 +91,9 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
             properties = InsomniacAddonPreferences.bl_rna.properties
             self.assertFalse(
                 properties["asset_import_damage_permutations"].default
+            )
+            self.assertFalse(
+                properties["asset_import_lower_lods"].default
             )
             self.assertFalse(
                 properties["asset_import_collision_geometry"].default
@@ -106,6 +110,7 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
                 materials=False,
                 animations=False,
                 damage_permutations=True,
+                lower_lods=True,
                 collision_geometry=True,
             ),
             source_path="fixture",
@@ -116,6 +121,7 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
             for child in asset_collection.children
         }
         damage_objects = tuple(children["DAMAGE_PERMUTATIONS"].objects)
+        lod_objects = tuple(children["LOWER_LODS"].objects)
         collision_objects = tuple(children["COLLISION"].objects)
 
         self.assertEqual(len(damage_objects), 2)
@@ -125,6 +131,14 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
         )
         self.assertTrue(
             all(len(obj.data.polygons) == 1 for obj in damage_objects)
+        )
+        self.assertEqual(len(lod_objects), 2)
+        self.assertEqual(
+            {obj["insomniac_lod_level"] for obj in lod_objects},
+            {1, 2},
+        )
+        self.assertTrue(
+            all(len(obj.data.polygons) == 1 for obj in lod_objects)
         )
         self.assertEqual(len(collision_objects), 4)
         self.assertEqual(
@@ -139,11 +153,15 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
         )
         self.assertTrue(all(obj.show_in_front for obj in collision_objects))
         self.assertTrue(all(obj.hide_render for obj in collision_objects))
-        self.assertEqual(result.meshes, 7)
+        self.assertEqual(result.meshes, 9)
 
     @staticmethod
     def _asset():
-        def geometry(segment_index: int, damage: bool) -> MeshGeometry:
+        def geometry(
+            segment_index: int,
+            damage: bool,
+            lod_level: int = 0,
+        ) -> MeshGeometry:
             return MeshGeometry(
                 shader_index=0,
                 positions=np.asarray(
@@ -154,6 +172,7 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
                 indices=np.asarray((0, 1, 2), dtype=np.int32),
                 segment_index=segment_index,
                 is_damage_permutation=damage,
+                lod_level=lod_level,
             )
 
         box = np.asarray(
@@ -177,6 +196,8 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
                 geometry(0, False),
                 geometry(1, True),
                 geometry(2, True),
+                geometry(0, False, 1),
+                geometry(0, False, 2),
             ],
             bounding_sphere=(0.0, 0.0, 0.0, 2.0),
             shader_tuids=(1,),

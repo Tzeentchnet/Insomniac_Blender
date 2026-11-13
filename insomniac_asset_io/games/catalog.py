@@ -27,6 +27,7 @@ class CatalogAsset:
     levels: tuple[str, ...]
     source_name: str | None = None
     game_label: str = "Resistance 2"
+    kind_label: str | None = None
 
     @property
     def display_name(self) -> str:
@@ -34,7 +35,7 @@ class CatalogAsset:
             return f"{self.kind.name.title()} 0x{self.tuid:016X}"
         filename = self.source_name.replace("\\", "/").rsplit("/", 1)[-1]
         lower_filename = filename.lower()
-        for suffix in (".entity.irb", ".irb", ".entity"):
+        for suffix in (".entity.irb", ".irb", ".entity", ".smf"):
             if lower_filename.endswith(suffix):
                 filename = filename[: -len(suffix)]
                 break
@@ -43,7 +44,9 @@ class CatalogAsset:
 
     @property
     def identity_label(self) -> str:
-        kind = "Moby" if self.kind is AssetKind.MOBY else "Tie"
+        kind = self.kind_label or (
+            "Moby" if self.kind is AssetKind.MOBY else "Tie"
+        )
         return f"{kind} 0x{self.tuid:016X}"
 
     @property
@@ -98,10 +101,8 @@ class CatalogAsset:
         owners = ", ".join(self.levels[:6])
         if len(self.levels) > 6:
             owners += f", and {len(self.levels) - 6} more"
-        identity = (
-            f"{self.game_label} {self.kind.name.title()} "
-            f"0x{self.tuid:016X}"
-        )
+        kind = self.kind_label or self.kind.name.title()
+        identity = f"{self.game_label} {kind} 0x{self.tuid:016X}"
         if not self.source_name:
             return f"{identity}; available in {owners}"
         return f"{self.source_name}; {identity}; available in {owners}"
@@ -196,7 +197,12 @@ class GameCatalog:
 
 
 def bundled_catalog_path(game_id: str) -> Path:
-    return get_game_adapter(game_id).bundled_catalog_path
+    adapter = get_game_adapter(game_id)
+    if adapter.bundled_catalog_path is None:
+        raise MissingResourceError(
+            f"{adapter.label} uses a source-driven catalog"
+        )
+    return adapter.bundled_catalog_path
 
 
 def local_catalog_path(
@@ -214,8 +220,12 @@ def local_catalog_path(
 def load_catalog(
     cache_directory: str | Path,
     game_id: str = "RESISTANCE_2",
+    *,
+    source_path: str | Path | None = None,
 ) -> GameCatalog:
     adapter = get_game_adapter(game_id)
+    if adapter.create_source_catalog is not None:
+        return adapter.create_source_catalog(source_path)
     local = local_catalog_path(cache_directory, game_id)
     path = local if local.is_file() else bundled_catalog_path(game_id)
     if not path.is_file():

@@ -5,7 +5,6 @@ import bpy
 from ..core.iso import DEFAULT_CACHE_DIRECTORY
 from ..games.registry import GAME_ADAPTERS
 
-
 _INTERNAL_PACKAGE_SUFFIX = ".insomniac_asset_io.blender"
 
 
@@ -49,23 +48,46 @@ class InsomniacAddonPreferences(bpy.types.AddonPreferences):
         ),
         subtype="FILE_PATH",
     )
+    last_game: bpy.props.EnumProperty(
+        name="Last selected game",
+        items=[
+            (adapter.id, adapter.label, adapter.engine)
+            for adapter in GAME_ADAPTERS.values()
+        ],
+        default="RESISTANCE_2",
+        options={"HIDDEN"},
+    )
+    source_paths_initialized: bpy.props.BoolProperty(
+        default=False,
+        options={"HIDDEN"},
+    )
+    resistance_2_last_source_path: bpy.props.StringProperty(
+        subtype="FILE_PATH",
+        options={"HIDDEN"},
+    )
+    resistance_3_last_source_path: bpy.props.StringProperty(
+        subtype="FILE_PATH",
+        options={"HIDDEN"},
+    )
+    resistance_burning_skies_last_source_path: bpy.props.StringProperty(
+        subtype="FILE_PATH",
+        options={"HIDDEN"},
+    )
     asset_cache_directory: bpy.props.StringProperty(
         name="Local cache directory",
         description=(
-            "Stores extracted PSARCs and the generated Blender Asset Browser "
-            "library"
+            "Stores extracted PSARCs and the generated Blender Asset Browser library"
         ),
         subtype="DIR_PATH",
         default=str(DEFAULT_CACHE_DIRECTORY),
     )
     asset_cache_game: bpy.props.EnumProperty(
         name="Catalog / Asset Browser game",
-        description=(
-            "Game used by catalog regeneration and Asset Browser cache tools"
-        ),
+        description=("Game used by catalog regeneration and Asset Browser cache tools"),
         items=[
             (adapter.id, adapter.label, adapter.engine)
             for adapter in GAME_ADAPTERS.values()
+            if adapter.supports_iso
         ],
         default="RESISTANCE_2",
     )
@@ -108,16 +130,21 @@ class InsomniacAddonPreferences(bpy.types.AddonPreferences):
     asset_import_damage_permutations: bpy.props.BoolProperty(
         name="Damage permutations",
         description=(
-            "Import optional damaged model segments into a separate "
+            "Import optional damaged model segments into a separate Collection"
+        ),
+        default=False,
+    )
+    asset_import_lower_lods: bpy.props.BoolProperty(
+        name="Lower LODs",
+        description=(
+            "Import optional lower-detail model levels into a separate "
             "Collection"
         ),
         default=False,
     )
     asset_import_collision_geometry: bpy.props.BoolProperty(
         name="Collision geometry",
-        description=(
-            "Import model collision shapes into a separate Collection"
-        ),
+        description=("Import model collision shapes into a separate Collection"),
         default=False,
     )
     asset_animation_clip_limit: bpy.props.IntProperty(
@@ -196,6 +223,7 @@ class InsomniacAddonPreferences(bpy.types.AddonPreferences):
         model.prop(self, "asset_import_materials")
         model.prop(self, "asset_import_animations")
         model.prop(self, "asset_import_damage_permutations")
+        model.prop(self, "asset_import_lower_lods")
         model.prop(self, "asset_import_collision_geometry")
         if self.asset_import_animations:
             model.prop(self, "asset_animation_clip_limit")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import bpy
 
+from ..games.registry import get_game_adapter
 from ..games.resistance_2.formats import AssetKind
 from .properties import asset_selector_state, asset_selector_status
 
@@ -16,6 +17,7 @@ class INSOMNIAC_PT_asset_io(bpy.types.Panel):
     def draw(self, context):
         layout = self.layout
         settings = context.scene.insomniac_asset_io
+        adapter = get_game_adapter(settings.game)
 
         layout.prop(settings, "game")
         source = layout.box()
@@ -47,8 +49,13 @@ class INSOMNIAC_PT_asset_io(bpy.types.Panel):
         # Filters only narrow what the Asset search lists; they never change
         # or hide the current selection.
         filters = asset.column(align=True)
-        filters.row(align=True).prop(settings, "asset_kind_filter", expand=True)
-        filters.prop(settings, "asset_level_filter", text="")
+        if adapter.supports_levels:
+            filters.row(align=True).prop(
+                settings,
+                "asset_kind_filter",
+                expand=True,
+            )
+            filters.prop(settings, "asset_level_filter", text="")
         filters.prop(settings, "asset_filter", text="", icon="VIEWZOOM")
         status = asset.row(align=True)
         status.label(
@@ -71,6 +78,8 @@ class INSOMNIAC_PT_asset_io(bpy.types.Panel):
             icon=(
                 "DOWNARROW_HLT"
                 if selected is None
+                else "MESH_CUBE"
+                if adapter.experimental
                 else "ARMATURE_DATA"
                 if selected.kind is AssetKind.MOBY
                 else "MESH_CUBE"
@@ -91,19 +100,27 @@ class INSOMNIAC_PT_asset_io(bpy.types.Panel):
         importer.enabled = selected is not None
         importer.operator("insomniac.import_asset", icon="IMPORT")
 
-        level = layout.box()
-        level.label(text="Level", icon="WORLD_DATA")
-        level.prop(settings, "level_id")
-        level.operator("insomniac.import_level", icon="IMPORT")
-        level.operator(
-            "insomniac.prepare_iso",
-            text="Extract Selected Level Now",
-            icon="PACKAGE",
-        )
-        layout.label(
-            text="Import options and default ISO are in Add-on Preferences",
-            icon="INFO",
-        )
+        if adapter.supports_levels:
+            level = layout.box()
+            level.label(text="Level", icon="WORLD_DATA")
+            level.prop(settings, "level_id")
+            level.operator("insomniac.import_level", icon="IMPORT")
+            level.operator(
+                "insomniac.prepare_iso",
+                text="Extract Selected Level Now",
+                icon="PACKAGE",
+            )
+            layout.label(
+                text=(
+                    "Import options and default ISO are in Add-on Preferences"
+                ),
+                icon="INFO",
+            )
+        else:
+            layout.label(
+                text="Experimental static model import from decrypted PSAR",
+                icon="EXPERIMENTAL",
+            )
 
         if settings.last_message:
             result = layout.box()

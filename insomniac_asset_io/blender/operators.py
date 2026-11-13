@@ -6,7 +6,7 @@ import bpy
 from bpy_extras.io_utils import ImportHelper
 
 from ..core.errors import InsomniacError
-from ..core.iso import find_iso
+from ..core.iso import DEFAULT_CACHE_DIRECTORY, find_iso
 from ..core.source import GameSource
 from ..games.catalog import CatalogAsset, load_catalog
 from ..games.registry import get_game_adapter
@@ -55,12 +55,17 @@ def _adapter(context: bpy.types.Context):
 
 
 def _cache_directory(context: bpy.types.Context) -> str:
-    return bpy.path.abspath(_preferences(context).asset_cache_directory)
+    preferences = addon_preferences(context)
+    if preferences is None:
+        return str(DEFAULT_CACHE_DIRECTORY)
+    return bpy.path.abspath(preferences.asset_cache_directory)
 
 
 def _configured_iso(context: bpy.types.Context) -> str:
     settings = _settings(context)
     adapter = _adapter(context)
+    if not adapter.supports_iso:
+        return ""
     if settings.source_path:
         source = bpy.path.abspath(settings.source_path)
         iso = find_iso(source)
@@ -76,7 +81,16 @@ def _configured_iso(context: bpy.types.Context) -> str:
 
 
 def _catalog(context: bpy.types.Context):
-    return load_catalog(_cache_directory(context), _settings(context).game)
+    settings = _settings(context)
+    return load_catalog(
+        _cache_directory(context),
+        settings.game,
+        source_path=(
+            bpy.path.abspath(settings.source_path)
+            if settings.source_path
+            else None
+        ),
+    )
 
 
 def _source_contains_asset(
@@ -105,6 +119,16 @@ def _resolved_asset_source(
         else ""
     )
     manual_iso = find_iso(manual) if manual else None
+    if not adapter.supports_iso:
+        if not manual:
+            raise InsomniacError(
+                f"Select a decrypted {adapter.label} build.psa source"
+            )
+        if _source_contains_asset(adapter, manual, asset):
+            return manual, manual
+        raise InsomniacError(
+            f"{asset.label} is not present in the selected source"
+        )
     if manual_iso is not None:
         cached = adapter.prepare_level(
             manual_iso,
@@ -151,6 +175,10 @@ def _resolved_level_source(
 ) -> tuple[str, str]:
     settings = _settings(context)
     adapter = _adapter(context)
+    if not adapter.supports_levels:
+        raise InsomniacError(
+            f"{adapter.label} level import is not supported"
+        )
     cache_directory = _cache_directory(context)
     manual = (
         bpy.path.abspath(settings.source_path)
@@ -193,6 +221,8 @@ def _resolved_inspection_source(
     settings = _settings(context)
     adapter = _adapter(context)
     original = bpy.path.abspath(settings.source_path)
+    if not adapter.supports_iso:
+        return original, original
     iso = find_iso(original)
     if iso is None:
         return original, original
@@ -205,6 +235,9 @@ def _resolved_inspection_source(
 
 
 def _summary(reader) -> str:
+    summary_text = getattr(reader, "summary_text", None)
+    if callable(summary_text):
+        return summary_text()
     summary = reader.inspect()
     counts = summary.counts
     return (
@@ -230,13 +263,14 @@ class INSOMNIAC_OT_select_source(bpy.types.Operator, ImportHelper):
     bl_idname = "insomniac.select_source"
     bl_label = "Select Insomniac Source"
     bl_description = (
-        "Select an ISO, assetlookup.dat, or level PSARC for the active game"
+        "Select an ISO, assetlookup.dat, PSARC, or decrypted Vita build.psa "
+        "for the active game"
     )
     bl_options = {"REGISTER", "UNDO"}
 
     filename_ext = ".psarc"
     filter_glob: bpy.props.StringProperty(
-        default="*.iso;*.psarc;*.dat",
+        default="*.iso;*.psarc;*.psa;*.dat",
         options={"HIDDEN"},
     )
 
@@ -247,7 +281,7 @@ class INSOMNIAC_OT_select_source(bpy.types.Operator, ImportHelper):
         settings.source_path = (
             str(iso) if iso is not None else self.filepath
         )
-        if iso is not None:
+        if iso is not None and adapter.supports_iso:
             preferences = addon_preferences(context)
             if preferences is not None:
                 setattr(
@@ -351,6 +385,11 @@ def _inspect_source(operator: bpy.types.Operator, context):
             settings.last_message = (
                 f"Validated {reader.resource_prefix}: {settings.source_summary}"
             )
+        catalog = _catalog(context)
+        set_asset_selection(
+            settings,
+            catalog.assets[0].identifier if catalog.assets else "",
+        )
         operator.report({"INFO"}, settings.last_message)
         return {"FINISHED"}
     except InsomniacError as exc:
@@ -538,7 +577,7 @@ class INSOMNIAC_OT_clear_asset_filters(bpy.types.Operator):
 class INSOMNIAC_OT_import_asset(bpy.types.Operator):
     bl_idname = "insomniac.import_asset"
     bl_label = "Import Asset"
-    bl_description = "Import the selected Moby or Tie for the active game"
+    bl_description = "Import the selected model or static mesh"
     bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):
@@ -573,6 +612,7 @@ class INSOMNIAC_OT_import_asset(bpy.types.Operator):
                     damage_permutations=(
                         preferences.asset_import_damage_permutations
                     ),
+                    lower_lods=preferences.asset_import_lower_lods,
                     collision_geometry=(
                         preferences.asset_import_collision_geometry
                     ),
@@ -621,6 +661,10 @@ class INSOMNIAC_OT_import_level(bpy.types.Operator):
         settings = _settings(context)
         try:
             adapter = _adapter(context)
+            if not adapter.supports_levels:
+                raise InsomniacError(
+                    f"{adapter.label} level import is not supported"
+                )
             level_name = settings.level_id
             if level_name not in _catalog(context).levels:
                 raise InsomniacError(
@@ -676,6 +720,10 @@ class INSOMNIAC_OT_prepare_iso(bpy.types.Operator):
         settings = _settings(context)
         try:
             adapter = _adapter(context)
+            if not adapter.supports_iso:
+                raise InsomniacError(
+                    f"{adapter.label} does not use ISO extraction"
+                )
             iso = _configured_iso(context)
             if not iso:
                 raise InsomniacError(
@@ -818,6 +866,7 @@ class INSOMNIAC_OT_rebuild_asset_library(bpy.types.Operator):
                     damage_permutations=(
                         preferences.asset_import_damage_permutations
                     ),
+                    lower_lods=preferences.asset_import_lower_lods,
                     collision_geometry=(
                         preferences.asset_import_collision_geometry
                     ),

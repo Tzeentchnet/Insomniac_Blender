@@ -40,6 +40,7 @@ class AssetCacheOptions:
     cycles_materials: bool = False
     generate_previews: bool = True
     damage_permutations: bool = False
+    lower_lods: bool = False
     collision_geometry: bool = False
     asset_limit: int = 0
 
@@ -120,6 +121,8 @@ def run_asset_cache_worker(
         command.append("--cycles-materials")
     if options.damage_permutations:
         command.append("--damage-permutations")
+    if options.lower_lods:
+        command.append("--lower-lods")
     if options.collision_geometry:
         command.append("--collision-geometry")
     if not options.generate_previews:
@@ -221,6 +224,7 @@ def generate_asset_library(
                             damage_permutations=(
                                 options.damage_permutations
                             ),
+                            lower_lods=options.lower_lods,
                             collision_geometry=options.collision_geometry,
                         )
                         if kind is AssetKind.MOBY:
@@ -299,6 +303,7 @@ def generate_asset_library(
                 "cycles_materials": options.cycles_materials,
                 "generate_previews": options.generate_previews,
                 "damage_permutations": options.damage_permutations,
+                "lower_lods": options.lower_lods,
                 "collision_geometry": options.collision_geometry,
                 "asset_limit": options.asset_limit,
             },

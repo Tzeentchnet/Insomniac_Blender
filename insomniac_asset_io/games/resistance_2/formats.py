@@ -101,6 +101,7 @@ class MeshGeometry:
     bone_weights: UInt8Array | None = None
     segment_index: int = 0
     is_damage_permutation: bool = False
+    lod_level: int = 0
 
 
 @dataclass(slots=True)
@@ -159,6 +160,16 @@ class ShaderInfo:
     material_word: int | None = None
     material_values: tuple[tuple[float, float, float, float], ...] = ()
     material_tail_values: tuple[float, ...] = ()
+    normal_texture_encoding: str = "RECONSTRUCTED"
+    specular_texture_semantics: str = "PACKED"
+    emissive_texture_id: int | None = None
+    emissive_texture_lookup_path: str | None = None
+    alpha_texture_id: int | None = None
+    alpha_texture_lookup_path: str | None = None
+    emissive_color: tuple[float, float, float] = (1.0, 1.0, 1.0)
+    emissive_strength: float = 1.0
+    specular_power: float | None = None
+    alpha_mode_override: str | None = None
 
     @property
     def expensive_texture_id(self) -> int | None:
@@ -218,6 +229,8 @@ class ShaderInfo:
 
     @property
     def alpha_mode(self) -> str:
+        if self.alpha_mode_override is not None:
+            return self.alpha_mode_override
         blend_mode = self.blend_mode or 0
         if blend_mode == 4:
             return "MASK"
