@@ -303,6 +303,11 @@ class _MaterialFactory:
             material["insomniac_emissive_texture_path"] = (
                 shader.emissive_texture_lookup_path
             )
+        material["insomniac_emissive_enabled"] = shader.emissive_enabled
+        if shader.use_emissive_texture is not None:
+            material["insomniac_use_emissive_texture"] = (
+                shader.use_emissive_texture
+            )
         if shader.alpha_texture_id is not None:
             material["insomniac_alpha_texture_id"] = (
                 f"0x{shader.alpha_texture_id:08X}"
@@ -757,43 +762,62 @@ class _MaterialFactory:
         shader: ShaderInfo,
     ) -> None:
         texture_id = shader.emissive_texture_id
+        color_source = "AUTHORED_COLOR"
         if texture_id is None:
-            return
-        try:
-            image = self.image(
-                texture_id,
-                role="color",
-                lookup_path=shader.emissive_texture_lookup_path,
+            if not shader.emissive_enabled:
+                return
+            if shader.use_emissive_texture is True:
+                self._warn(
+                    f"Shader 0x{shader.tuid:016X} emissive map unavailable: "
+                    "texture is enabled but no map was resolved"
+                )
+                return
+            principled.inputs["Emission Color"].default_value = (
+                *shader.emissive_color,
+                1.0,
             )
-        except InsomniacError as exc:
-            self._warn(
-                f"Shader 0x{shader.tuid:016X} emissive map unavailable: {exc}"
+        else:
+            try:
+                image = self.image(
+                    texture_id,
+                    role="color",
+                    lookup_path=shader.emissive_texture_lookup_path,
+                )
+            except InsomniacError as exc:
+                self._warn(
+                    f"Shader 0x{shader.tuid:016X} emissive map unavailable: "
+                    f"{exc}"
+                )
+                return
+            texture_node = material.node_tree.nodes.new(
+                "ShaderNodeTexImage"
             )
-            return
-        texture_node = material.node_tree.nodes.new("ShaderNodeTexImage")
-        texture_node.name = f"Emissive_{texture_id:08X}"
-        texture_node.label = (
-            f"{_reader_game_label(self.reader)} emissive color"
-        )
-        texture_node.image = image
-        emission_color = texture_node.outputs["Color"]
-        if shader.emissive_color != (1.0, 1.0, 1.0):
-            tint = material.node_tree.nodes.new("ShaderNodeVectorMath")
-            tint.name = f"Emissive_Tint_{shader.tuid:016X}"
-            tint.label = (
-                f"{_reader_game_label(self.reader)} emissive multiplier"
+            texture_node.name = f"Emissive_{texture_id:08X}"
+            texture_node.label = (
+                f"{_reader_game_label(self.reader)} emissive color"
             )
-            tint.operation = "MULTIPLY"
-            tint.inputs[1].default_value = shader.emissive_color
+            texture_node.image = image
+            emission_color = texture_node.outputs["Color"]
+            if shader.emissive_color != (1.0, 1.0, 1.0):
+                tint = material.node_tree.nodes.new(
+                    "ShaderNodeVectorMath"
+                )
+                tint.name = f"Emissive_Tint_{shader.tuid:016X}"
+                tint.label = (
+                    f"{_reader_game_label(self.reader)} emissive multiplier"
+                )
+                tint.operation = "MULTIPLY"
+                tint.inputs[1].default_value = shader.emissive_color
+                material.node_tree.links.new(
+                    emission_color,
+                    tint.inputs[0],
+                )
+                emission_color = tint.outputs["Vector"]
             material.node_tree.links.new(
                 emission_color,
-                tint.inputs[0],
+                principled.inputs["Emission Color"],
             )
-            emission_color = tint.outputs["Vector"]
-        material.node_tree.links.new(
-            emission_color,
-            principled.inputs["Emission Color"],
-        )
+            color_source = "DEDICATED_TEXTURE_X_COLOR"
         strength = (
             shader.emissive_strength
             if math.isfinite(shader.emissive_strength)
@@ -803,9 +827,7 @@ class _MaterialFactory:
         principled.inputs["Emission Strength"].default_value = strength
         material["insomniac_emissive_mask"] = False
         material["insomniac_emissive"] = strength > 0.0
-        material["insomniac_emissive_color_source"] = (
-            "DEDICATED_TEXTURE_X_COLOR"
-        )
+        material["insomniac_emissive_color_source"] = color_source
         material["insomniac_emissive_color"] = list(
             shader.emissive_color
         )

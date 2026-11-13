@@ -729,6 +729,103 @@ class BurningSkiesFormatTests(unittest.TestCase):
         self.assertEqual(textures.emissive, "textures/Test_GLO.p2t")
         self.assertEqual(textures.alpha, "textures/Test_APH.p2t")
 
+    def test_decodes_color_only_opaque_emissive_material(self):
+        data = _resource(0x09, DATA_BASE + 0x300, "TestEmissive")
+        data[0x100 : 0x100 + len(b"OpaqueEmissive\0")] = (
+            b"OpaqueEmissive\0"
+        )
+        root = DATA_BASE
+        struct.pack_into(
+            "<II",
+            data,
+            root + 0x24,
+            0xCCCCCCCC,
+            0xCCCCCCCC,
+        )
+        parameters = (
+            ("diffuse_color", 0x0B, (0.25, 0.5, 0.75)),
+            ("emissive_color", 0x0B, (1.0, 0.5, 0.25)),
+            ("emissive_factor", 0x09, (2.0,)),
+            ("Use_Emissive_Texture", 0x09, (0.0,)),
+        )
+        records_pointer = 0x100
+        struct.pack_into(
+            "<II",
+            data,
+            root + 0x70,
+            len(parameters),
+            records_pointer,
+        )
+        for index, (name, type_id, value) in enumerate(parameters):
+            name_pointer = 0x180 + index * 0x20
+            value_pointer = 0x220 + index * 0x10
+            struct.pack_into(
+                "<6I",
+                data,
+                root + records_pointer + index * 0x18,
+                name_pointer,
+                type_id,
+                value_pointer,
+                value_pointer,
+                0,
+                0,
+            )
+            encoded_name = name.encode("ascii") + b"\0"
+            data[
+                root + name_pointer : root
+                + name_pointer
+                + len(encoded_name)
+            ] = encoded_name
+            struct.pack_into(
+                f"<{len(value)}f",
+                data,
+                root + value_pointer,
+                *value,
+            )
+
+        material = decode_material_texture_paths(
+            bytes(data),
+            label="materials/TestEmissive.bmx",
+            texture_paths_by_stem={},
+        )
+
+        self.assertEqual(
+            material.diffuse_tint,
+            (0.25, 0.5, 0.75, 1.0),
+        )
+        self.assertEqual(material.emissive_color, (1.0, 0.5, 0.25))
+        self.assertEqual(material.emissive_factor, 2.0)
+        self.assertFalse(material.use_emissive_texture)
+        self.assertTrue(material.emissive_enabled)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            source_root = Path(temporary)
+            (source_root / "models").mkdir()
+            (source_root / "models" / "Test.smf").write_bytes(b"")
+            (source_root / "materials").mkdir()
+            (source_root / "materials" / "ColorOnly.bmx").write_bytes(data)
+            textured_data = bytearray(data)
+            struct.pack_into("<f", textured_data, root + 0x250, 1.0)
+            (source_root / "materials" / "MissingMap.bmx").write_bytes(
+                textured_data
+            )
+            with GameSource.open(source_root) as source:
+                reader = BurningSkiesReader(source)
+                for name, uses_texture in (
+                    ("ColorOnly.bmx", False),
+                    ("MissingMap.bmx", True),
+                ):
+                    with self.subTest(name=name):
+                        shader = reader.read_shader(
+                            reader.material_id(f"materials/{name}")
+                        )
+                        self.assertTrue(shader.emissive_enabled)
+                        self.assertIs(
+                            shader.use_emissive_texture,
+                            uses_texture,
+                        )
+                        self.assertIsNone(shader.emissive_texture_id)
+
     def test_classifies_auxiliary_bmx_materials(self):
         data = _resource(0x09, DATA_BASE, "TestMaterial")
         strings = b"WorldCollision\0OnlyCastShadows\0"

@@ -176,6 +176,13 @@ maps with `emissive_color` and `emissive_factor`. `Use_Emissive_Texture`
 disables stale emissive references. Separate alpha maps are connected only
 when a supported authored render state identifies blending or masking.
 
+`OpaqueEmissive` and `GunEmissive` materials remain emissive when
+`Use_Emissive_Texture` is false. In that mode, `diffuse_color` supplies the
+base surface color and `emissive_color` with `emissive_factor` supplies a
+constant glow. The disabled serialized texture reference is not connected.
+If an emissive material enables a texture but no map can be resolved, the
+importer reports a warning instead of substituting a constant glow.
+
 Materials marked `WorldCollision`, `OnlyCastShadows`,
 `GE_Shadowcaster_*`, or explicitly non-renderable are auxiliary. A whole-model
 sweep finds 154 shadow-only packets and two `WorldCollision` packets across

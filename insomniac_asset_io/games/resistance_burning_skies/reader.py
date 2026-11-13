@@ -303,6 +303,8 @@ class BurningSkiesReader:
             alpha_texture_lookup_path=textures.alpha,
             emissive_color=textures.emissive_color,
             emissive_strength=textures.emissive_factor,
+            emissive_enabled=textures.emissive_enabled,
+            use_emissive_texture=textures.use_emissive_texture,
             specular_power=textures.specular_power,
             alpha_mode_override=textures.alpha_mode_override,
         )

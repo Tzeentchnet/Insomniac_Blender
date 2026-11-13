@@ -170,6 +170,8 @@ class ShaderInfo:
     emissive_strength: float = 1.0
     specular_power: float | None = None
     alpha_mode_override: str | None = None
+    emissive_enabled: bool = False
+    use_emissive_texture: bool | None = None
 
     @property
     def expensive_texture_id(self) -> int | None:

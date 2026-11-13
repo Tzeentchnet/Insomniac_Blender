@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from pathlib import Path
+import os
 import sys
 import unittest
+from pathlib import Path
 
 import numpy as np
-
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -305,6 +305,8 @@ class BlenderMaterialTests(unittest.TestCase):
             alpha_texture_lookup_path="alpha",
             emissive_color=(0.25, 0.5, 1.0),
             emissive_strength=2.5,
+            emissive_enabled=True,
+            use_emissive_texture=True,
             specular_power=100.0,
             alpha_mode_override="BLEND",
         )
@@ -382,6 +384,133 @@ class BlenderMaterialTests(unittest.TestCase):
             )
         )
         self.assertEqual(material.surface_render_method, "DITHERED")
+
+    def test_burning_skies_uses_color_only_emissive_parameters(self) -> None:
+        shader = ShaderInfo(
+            tuid=0x107,
+            albedo_texture_id=None,
+            normal_texture_id=None,
+            specular_texture_id=None,
+            detail_texture_id=None,
+            material_values=((0.25, 0.5, 0.75, 1.0),),
+            specular_texture_semantics="GLOSS",
+            emissive_color=(1.0, 0.5, 0.25),
+            emissive_strength=2.0,
+            emissive_enabled=True,
+            use_emissive_texture=False,
+        )
+        reader = _MaterialReader(
+            "RESISTANCE_BURNING_SKIES",
+            shader,
+            {},
+        )
+        material = _MaterialFactory(reader, True, []).material(shader.tuid)
+        principled = material.node_tree.nodes["Principled BSDF"]
+
+        self.assertEqual(
+            tuple(principled.inputs["Base Color"].default_value),
+            (0.25, 0.5, 0.75, 1.0),
+        )
+        self.assertEqual(
+            tuple(principled.inputs["Emission Color"].default_value),
+            (1.0, 0.5, 0.25, 1.0),
+        )
+        self.assertEqual(
+            principled.inputs["Emission Strength"].default_value,
+            2.0,
+        )
+        self.assertTrue(material["insomniac_emissive_enabled"])
+        self.assertFalse(material["insomniac_use_emissive_texture"])
+        self.assertTrue(material["insomniac_emissive"])
+        self.assertEqual(
+            material["insomniac_emissive_color_source"],
+            "AUTHORED_COLOR",
+        )
+
+    def test_burning_skies_reports_missing_enabled_emissive_map(self) -> None:
+        shader = ShaderInfo(
+            tuid=0x108,
+            albedo_texture_id=None,
+            normal_texture_id=None,
+            specular_texture_id=None,
+            detail_texture_id=None,
+            emissive_color=(1.0, 0.5, 0.25),
+            emissive_enabled=True,
+            use_emissive_texture=True,
+        )
+        reader = _MaterialReader("RESISTANCE_BURNING_SKIES", shader, {})
+        warnings: list[str] = []
+        material = _MaterialFactory(reader, True, warnings).material(
+            shader.tuid
+        )
+        principled = material.node_tree.nodes["Principled BSDF"]
+
+        self.assertTrue(material["insomniac_use_emissive_texture"])
+        self.assertFalse(principled.inputs["Emission Color"].is_linked)
+        self.assertEqual(
+            principled.inputs["Emission Strength"].default_value,
+            0.0,
+        )
+        self.assertNotIn("insomniac_emissive_color_source", material)
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("texture is enabled but no map was resolved", warnings[0])
+
+    @unittest.skipUnless(
+        os.environ.get("BURNING_SKIES_ARCHIVE"),
+        "BURNING_SKIES_ARCHIVE is not set",
+    )
+    def test_burning_skies_real_color_only_emissive_materials(self) -> None:
+        from insomniac_asset_io.core.source import GameSource
+        from insomniac_asset_io.games.resistance_burning_skies.reader import (
+            BurningSkiesReader,
+        )
+
+        expected = {
+            0x6C1660E1224715A1: (
+                (1.0, 0.5019608, 0.2509804, 1.0),
+                (1.0, 0.5019608, 0.0, 1.0),
+            ),
+            0x98FE2F2A92B89201: (
+                (1.0, 1.0, 0.0, 1.0),
+                (1.0, 0.5019608, 0.2509804, 1.0),
+            ),
+        }
+        with GameSource.open(Path(os.environ["BURNING_SKIES_ARCHIVE"])) as source:
+            reader = BurningSkiesReader(source)
+            warnings: list[str] = []
+            factory = _MaterialFactory(reader, True, warnings)
+            for shader_tuid, (base_color, emission_color) in expected.items():
+                with self.subTest(shader_tuid=f"0x{shader_tuid:016X}"):
+                    material = factory.material(shader_tuid)
+                    principled = material.node_tree.nodes["Principled BSDF"]
+                    for name, expected_color in (
+                        ("Base Color", base_color),
+                        ("Emission Color", emission_color),
+                    ):
+                        socket = principled.inputs[name]
+                        self.assertFalse(socket.is_linked)
+                        for actual, component in zip(
+                            socket.default_value,
+                            expected_color,
+                            strict=True,
+                        ):
+                            self.assertAlmostEqual(actual, component)
+                    for actual, component in zip(
+                        material.diffuse_color,
+                        base_color,
+                        strict=True,
+                    ):
+                        self.assertAlmostEqual(actual, component)
+                    self.assertEqual(
+                        principled.inputs["Emission Strength"].default_value,
+                        1.0,
+                    )
+                    self.assertTrue(material["insomniac_emissive"])
+                    self.assertEqual(
+                        material["insomniac_emissive_color_source"],
+                        "AUTHORED_COLOR",
+                    )
+            self.assertEqual(warnings, [])
 
     def test_r3_goliath_wet_overlay_uses_luminance_coverage(self) -> None:
         shader, textures = self._alpha_fixture()

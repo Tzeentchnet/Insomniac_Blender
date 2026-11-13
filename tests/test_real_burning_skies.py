@@ -219,6 +219,39 @@ class RealBurningSkiesTests(unittest.TestCase):
             self.assertEqual(emissive.emissive_strength, 2.0)
             self.assertAlmostEqual(emissive.emissive_color[0], 0.5019608)
 
+    def test_decodes_dropship_color_only_emissive_materials(self):
+        expected = {
+            0x6C1660E1224715A1: (
+                (1.0, 0.5019608, 0.2509804, 1.0),
+                (1.0, 0.5019608, 0.0),
+            ),
+            0x98FE2F2A92B89201: (
+                (1.0, 1.0, 0.0, 1.0),
+                (1.0, 0.5019608, 0.2509804),
+            ),
+        }
+        with GameSource.open(Path(REAL_SOURCE)) as source:
+            reader = BurningSkiesReader(source)
+            for shader_id, (base_color, emission_color) in expected.items():
+                with self.subTest(shader_id=f"0x{shader_id:016X}"):
+                    shader = reader.read_shader(shader_id)
+                    self.assertTrue(shader.emissive_enabled)
+                    self.assertIs(shader.use_emissive_texture, False)
+                    self.assertIsNone(shader.emissive_texture_id)
+                    for actual, expected_value in zip(
+                        shader.base_color_factor,
+                        base_color,
+                        strict=True,
+                    ):
+                        self.assertAlmostEqual(actual, expected_value)
+                    for actual, expected_value in zip(
+                        shader.emissive_color,
+                        emission_color,
+                        strict=True,
+                    ):
+                        self.assertAlmostEqual(actual, expected_value)
+                    self.assertEqual(shader.emissive_strength, 1.0)
+
     def test_faxe_head_uses_upper_texture_region(self):
         with GameSource.open(Path(REAL_SOURCE)) as source:
             reader = BurningSkiesReader(source)

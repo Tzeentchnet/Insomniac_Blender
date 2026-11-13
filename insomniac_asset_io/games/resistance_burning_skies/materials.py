@@ -32,6 +32,7 @@ class MaterialTexturePaths:
     emissive_color: tuple[float, float, float] = (1.0, 1.0, 1.0)
     emissive_factor: float = 1.0
     use_emissive_texture: bool | None = None
+    emissive_enabled: bool = False
     alpha_mode_override: str | None = None
     renderable: bool | None = None
     world_collision: bool = False
@@ -95,7 +96,8 @@ def decode_material_texture_paths(
 
     diffuse_tint = _vector_parameter(
         resource,
-        parameters.get("diffuse_tint"),
+        parameters.get("diffuse_tint")
+        or parameters.get("diffuse_color"),
         default=(1.0, 1.0, 1.0),
     )
     emissive_color = _vector_parameter(
@@ -149,6 +151,9 @@ def decode_material_texture_paths(
             else 1.0
         ),
         use_emissive_texture=use_emissive_texture,
+        emissive_enabled=bool(
+            {"opaqueemissive", "gunemissive"} & folded_strings
+        ),
         alpha_mode_override=alpha_mode_override,
         renderable=renderable,
         world_collision="worldcollision" in folded_strings,
