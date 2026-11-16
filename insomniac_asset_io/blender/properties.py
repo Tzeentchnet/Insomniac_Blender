@@ -275,6 +275,8 @@ def _kind_filter(settings: bpy.types.PropertyGroup) -> AssetKind | None:
         return AssetKind.MOBY
     if value == "TIE":
         return AssetKind.TIE
+    if value == "SHADER":
+        return AssetKind.SHADER
     return None
 
 
@@ -595,9 +597,10 @@ class InsomniacSceneSettings(bpy.types.PropertyGroup):
         name="Asset Kind",
         description="Only list assets of one kind",
         items=[
-            (ALL_KINDS, "All", "List both Mobys and Ties"),
+            (ALL_KINDS, "All", "List Mobys, Ties, and materials"),
             ("MOBY", "Mobys", "Animated or dynamic models"),
             ("TIE", "Ties", "Static level meshes"),
+            ("SHADER", "Materials", "Standalone shader materials"),
         ],
         default=ALL_KINDS,
     )

@@ -18,8 +18,8 @@ except ModuleNotFoundError:
 
 
 if bpy is not None:
+    from insomniac_asset_io.blender import operators, register, unregister
     from insomniac_asset_io.blender import properties as scene_properties
-    from insomniac_asset_io.blender import register, unregister
 
 
 @unittest.skipUnless(bpy is not None, "Blender Python is not available")
@@ -202,6 +202,44 @@ class BlenderSettingsTests(unittest.TestCase):
         )
         self.assertEqual(settings.level_id, "apogee_space_station")
         self.assertEqual(len(settings.asset_tuid.split(":")), 3)
+
+    def test_tod_material_filter_lists_level_scoped_shaders(self) -> None:
+        settings = bpy.context.scene.insomniac_asset_io
+        settings.game = "RATCHET_TOD"
+        settings.asset_kind_filter = "SHADER"
+        settings.asset_level_filter = "metropolis"
+
+        state = scene_properties.asset_selector_state(
+            settings,
+            bpy.context,
+        )
+
+        self.assertGreater(state.match_count, 600)
+        self.assertTrue(
+            all(
+                identifier.startswith("SHADER:metropolis:")
+                for identifier, *_rest in state.items
+            )
+        )
+
+    def test_animation_search_selects_first_matching_clip(self) -> None:
+        picker = SimpleNamespace(
+            clips=[
+                SimpleNamespace(search_text="idle 30 frames"),
+                SimpleNamespace(search_text="crumbling 151 frames"),
+            ],
+            clip_index=0,
+            asset_search="crumbling",
+        )
+
+        operators._update_animation_picker_search(picker, None)
+
+        self.assertEqual(picker.clip_index, 1)
+
+        picker.asset_search = "missing"
+        operators._update_animation_picker_search(picker, None)
+
+        self.assertEqual(picker.clip_index, -1)
 
 
 if __name__ == "__main__":

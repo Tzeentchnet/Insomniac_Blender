@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
+import tempfile
+from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-import tempfile
 from typing import Callable, Iterable
 
 from ..core.errors import InsomniacError, MissingResourceError
@@ -13,10 +13,17 @@ from ..core.source import GameSource
 from .registry import get_game_adapter
 from .resistance_2.formats import AssetKind
 
-
 CATALOG_SCHEMA_VERSION = 1
 CATALOG_FILENAME = "disc_catalog.json"
 _DISC_LEVEL_ROOT = "PS3_GAME/USRDIR/packed/levels"
+
+
+def _kind_label(kind: AssetKind) -> str:
+    return {
+        AssetKind.MOBY: "Moby",
+        AssetKind.TIE: "Tie",
+        AssetKind.SHADER: "Material",
+    }.get(kind, kind.name.title())
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,7 +39,7 @@ class CatalogAsset:
     @property
     def display_name(self) -> str:
         if not self.source_name:
-            return f"{self.kind.name.title()} 0x{self.tuid:016X}"
+            return f"{self.kind_label or _kind_label(self.kind)} 0x{self.tuid:016X}"
         filename = self.source_name.replace("\\", "/").rsplit("/", 1)[-1]
         lower_filename = filename.lower()
         for suffix in (".entity.irb", ".irb", ".entity", ".smf"):
@@ -44,9 +51,7 @@ class CatalogAsset:
 
     @property
     def identity_label(self) -> str:
-        kind = self.kind_label or (
-            "Moby" if self.kind is AssetKind.MOBY else "Tie"
-        )
+        kind = self.kind_label or _kind_label(self.kind)
         return f"{kind} 0x{self.tuid:016X}"
 
     @property
@@ -101,7 +106,7 @@ class CatalogAsset:
         owners = ", ".join(self.levels[:6])
         if len(self.levels) > 6:
             owners += f", and {len(self.levels) - 6} more"
-        kind = self.kind_label or self.kind.name.title()
+        kind = self.kind_label or _kind_label(self.kind)
         identity = f"{self.game_label} {kind} 0x{self.tuid:016X}"
         if not self.source_name:
             return f"{identity}; available in {owners}"
@@ -292,8 +297,12 @@ def _load_catalog_cached(
         if level_id in level_ids:
             raise InsomniacError(f"{path}: duplicate level {level_id!r}")
         level_ids.append(level_id)
-        for field, kind in (("mobys", AssetKind.MOBY), ("ties", AssetKind.TIE)):
-            values = raw_level.get(field)
+        for field, kind, required in (
+            ("mobys", AssetKind.MOBY, True),
+            ("ties", AssetKind.TIE, True),
+            ("materials", AssetKind.SHADER, False),
+        ):
+            values = raw_level.get(field, [] if not required else None)
             if not isinstance(values, list):
                 raise InsomniacError(
                     f"{path}: level {level_id!r} has no {field} list"
@@ -337,6 +346,7 @@ def _load_catalog_cached(
             ),
             source_name=names.get(identifier),
             game_label=game_label,
+            kind_label=_kind_label(kind),
         )
         for (identifier, kind, tuid), asset_levels in sorted(
             owners.items(),
@@ -408,9 +418,13 @@ def build_catalog_from_iso(
                     reader = adapter.create_reader(source)
                     moby_pointers = reader.asset_pointers(AssetKind.MOBY)
                     tie_pointers = reader.asset_pointers(AssetKind.TIE)
+                    material_pointers = reader.asset_pointers(
+                        AssetKind.SHADER
+                    )
                     for kind, pointers in (
                         (AssetKind.MOBY, moby_pointers),
                         (AssetKind.TIE, tie_pointers),
+                        (AssetKind.SHADER, material_pointers),
                     ):
                         for pointer in pointers:
                             identifier = adapter.catalog_identifier(
@@ -434,6 +448,10 @@ def build_catalog_from_iso(
                         f"0x{pointer.tuid:016X}"
                         for pointer in tie_pointers
                     ]
+                    materials = [
+                        f"0x{pointer.tuid:016X}"
+                        for pointer in material_pointers
+                    ]
             finally:
                 archive_path.unlink(missing_ok=True)
             catalog_levels.append(
@@ -441,6 +459,7 @@ def build_catalog_from_iso(
                     "id": level,
                     "mobys": mobys,
                     "ties": ties,
+                    "materials": materials,
                 }
             )
 
@@ -471,14 +490,20 @@ def build_catalog_from_iso(
             str(level["id"]),
         )
         for level in catalog_levels
-        for kind, field in (("MOBY", "mobys"), ("TIE", "ties"))
+        for kind, field in (
+            ("MOBY", "mobys"),
+            ("TIE", "ties"),
+            ("SHADER", "materials"),
+        )
         for value in level[field]
     }
     return {
         "catalog": str(output),
         "levels": len(catalog_levels),
         "asset_references": sum(
-            len(level["mobys"]) + len(level["ties"])
+            len(level["mobys"])
+            + len(level["ties"])
+            + len(level["materials"])
             for level in catalog_levels
         ),
         "unique_assets": len(unique_assets),
@@ -490,11 +515,19 @@ def build_catalog_from_iso(
             identifier.startswith("TIE:")
             for identifier in unique_assets
         ),
+        "materials": sum(
+            identifier.startswith("SHADER:")
+            for identifier in unique_assets
+        ),
         "named_assets": len(asset_names),
         "named_mobys": sum(
             identifier.startswith("MOBY:") for identifier in asset_names
         ),
         "named_ties": sum(
             identifier.startswith("TIE:") for identifier in asset_names
+        ),
+        "named_materials": sum(
+            identifier.startswith("SHADER:")
+            for identifier in asset_names
         ),
     }

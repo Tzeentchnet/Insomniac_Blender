@@ -19,7 +19,10 @@ except ModuleNotFoundError:
 
 
 if bpy is not None:
-    from insomniac_asset_io.blender.importer import _MaterialFactory
+    from insomniac_asset_io.blender.importer import (
+        _MaterialFactory,
+        import_materials,
+    )
     from insomniac_asset_io.games.resistance_2.formats import (
         DecodedTexture,
         ShaderInfo,
@@ -39,20 +42,29 @@ if bpy is not None:
                 "Resistance 3"
                 if game_id == "RESISTANCE_3"
                 else (
-                    "Resistance: Burning Skies"
-                    if game_id == "RESISTANCE_BURNING_SKIES"
-                    else "Resistance 2"
+                    "Ratchet & Clank Future: Tools of Destruction"
+                    if game_id == "RATCHET_TOD"
+                    else (
+                        "Resistance: Burning Skies"
+                        if game_id == "RESISTANCE_BURNING_SKIES"
+                        else "Resistance 2"
+                    )
                 )
             )
             self.asset_prefix = (
                 "R3"
                 if game_id == "RESISTANCE_3"
                 else (
-                    "RBS"
-                    if game_id == "RESISTANCE_BURNING_SKIES"
-                    else "R2"
+                    "TOD"
+                    if game_id == "RATCHET_TOD"
+                    else (
+                        "RBS"
+                        if game_id == "RESISTANCE_BURNING_SKIES"
+                        else "R2"
+                    )
                 )
             )
+            self.resource_prefix = ""
             self.material_surface_channels_by_default = True
             self.material_uses_base_color_factor_by_default = (
                 game_id == "RESISTANCE_BURNING_SKIES"
@@ -91,6 +103,38 @@ class BlenderMaterialTests(unittest.TestCase):
             bpy.data.materials.remove(material)
         for image in tuple(bpy.data.images):
             bpy.data.images.remove(image)
+
+    def test_tod_standalone_material_names_are_level_scoped(self) -> None:
+        shader = ShaderInfo(7, None, None, None, None)
+        metropolis = _MaterialReader("RATCHET_TOD", shader, {})
+        metropolis.resource_prefix = (
+            "PS3_GAME/USRDIR/packed/levels/metropolis"
+        )
+        apogee = _MaterialReader("RATCHET_TOD", shader, {})
+        apogee.resource_prefix = (
+            "PS3_GAME/USRDIR/packed/levels/apogee_space_station"
+        )
+
+        metropolis_result = import_materials(metropolis, (7,))
+        apogee_result = import_materials(apogee, (7,))
+
+        metropolis_material = metropolis_result.materials[0]
+        apogee_material = apogee_result.materials[0]
+        self.assertNotEqual(
+            metropolis_material.name,
+            apogee_material.name,
+        )
+        self.assertEqual(
+            metropolis_material["insomniac_asset_scope"],
+            "metropolis",
+        )
+        self.assertEqual(
+            apogee_material["insomniac_asset_scope"],
+            "apogee_space_station",
+        )
+        self.assertTrue(metropolis_material.use_fake_user)
+        self.assertEqual(metropolis_result.images, ())
+        self.assertEqual(metropolis_result.warnings, [])
 
     def test_authored_alpha_mode_controls_diffuse_alpha(self) -> None:
         image = bpy.data.images.new(

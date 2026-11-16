@@ -5,7 +5,8 @@ This adapter targets the USA `BCUS98127` v02.00 retail disc. It validates
 any level.
 
 No game payloads are distributed. The bundled catalog contains only numeric
-asset metadata and deterministic fallback names.
+asset metadata and deterministic fallback names: 3,012 Mobys, 2,048 Ties,
+and 10,521 level-scoped Materials across 20 levels.
 
 ## Archive topology
 
@@ -34,8 +35,8 @@ Most metadata is stored directly in a big-endian IGHW 1.1 `main.dat`.
 These values repeat in different levels. Catalog identifiers therefore use
 `KIND:level:VALUE`; existing R2/R3 catalog identifiers remain unchanged.
 
-The retail debug archive exposes no usable Moby or Tie names. The reader uses
-`Moby_XXXX` and `Tie_XXXXXXXX`.
+The retail debug archive exposes no usable Moby, Tie, or Material names. The
+reader uses `Moby_XXXX`, `Tie_XXXXXXXX`, and level-scoped shader identities.
 
 ## Mobys
 

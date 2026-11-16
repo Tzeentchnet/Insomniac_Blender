@@ -38,12 +38,13 @@ A complete game-specific extraction is reused, so inspect and import
 operators can accept the ISO directly without repeating the copy.
 
 The sidebar selectors are backed by per-game metadata-only disc catalogs. The
-bundled USA catalogs record level IDs, source names, and Moby/Tie TUID
-ownership, but no geometry, textures, or archive payloads. A selected asset
-first resolves against its manual source override, then extracted owner
-levels, then the active game's configured ISO. Level selection follows the
-same cache-first resolution. A background catalog worker can replace either
-bundled catalog with a locally generated catalog for a different disc.
+bundled USA catalogs record level IDs, source names, Moby/Tie identities, and
+verified shader identities, but no geometry, textures, or archive payloads.
+A selected asset first resolves against its manual source override, then
+extracted owner levels, then the active game's configured ISO. Level selection
+follows the same cache-first resolution. A background catalog worker can
+replace a bundled catalog with a locally generated catalog for a different
+disc.
 
 Catalog identity is adapter-driven. R2 and R3 retain globally meaningful
 TUIDs, while Tools of Destruction includes the owner level in each catalog
@@ -139,6 +140,11 @@ slot for each imported Action. The Action synchronization handler binds that
 slot when the user selects an imported clip, then updates the scene playback
 range to the clip bounds.
 
+A Moby can also expose a clip picker. Importing one selected clip creates its
+source skeleton and one compatible Action without creating mesh geometry.
+Every Action records the game, source Moby identity and name, clip index, and
+clip name as custom properties.
+
 ## Resistance 3 adapter
 
 `Resistance3Reader` inherits the verified common PS3 geometry, animation,
@@ -159,8 +165,13 @@ The Asset Browser cache is generated locally from a user-provided ISO. A
 background factory-startup Blender process imports each selected-level Moby
 and Tie independently, marks its containing Collection as an asset, generates
 an optional preview, and writes that Collection plus dependencies to a
-compressed `.blend`. One asset per file bounds memory use and lets Blender
-index the cache incrementally.
+compressed `.blend`. When requested, decoded Actions in the same file are
+marked under a deterministic per-Moby Animation catalog.
+
+Verified level shaders are built once as standalone Material assets in one
+shared level file so common images remain shared. Materials use a deterministic
+Material catalog; TOD names include the owner-level scope because shader
+indices repeat between levels.
 
 Generation occurs in a staging directory. The prior level directory is
 replaced only after every selected asset and its manifest have been written.

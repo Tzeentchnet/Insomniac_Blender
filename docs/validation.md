@@ -120,14 +120,26 @@ Run the synthetic Blender rig regression test without game data:
   --python-exit-code 1 --python tests\test_blender_rig.py
 ```
 
+Run the standalone Material/Action catalog metadata regression:
+
+```powershell
+& "C:\path\to\blender.exe" --background --factory-startup `
+  --python-exit-code 1 --python tests\test_blender_asset_cache.py
+```
+
 Validate every generated Asset Browser entry, catalog assignment, preview,
 object dependency, and packed game image:
 
 ```powershell
 & "C:\path\to\blender.exe" --background --factory-startup `
   --python-exit-code 1 --python tools\validate_asset_cache.py -- `
-  "C:\path\to\InsomniacAssetIOCache\asset_library"
+  "C:\path\to\InsomniacAssetIOCache\asset_library" `
+  --expected-mobys 3 --expected-ties 3 --expected-materials 3 `
+  --expected-animations 1
 ```
+
+Add `--skip-previews` when validating a cache generated with previews
+disabled.
 
 The current implementation was validated in Blender 5.2.2 LTS with:
 
@@ -138,6 +150,11 @@ The current implementation was validated in Blender 5.2.2 LTS with:
   frames across a 38-bone skeleton;
 - TOD `animate_spin`, reduced from 8,001 paired disk records to 4,000 Action
   frames at 15 fps;
+- a bounded Metropolis Asset Browser cache containing three Moby Collections,
+  three Ties, three standalone Materials, and one standalone `animate_spin`
+  Action, all reopened with their catalog assignments and metadata intact;
+- a selected `crumbling` import containing only its 38-bone compatible rig
+  and one Action, plus a separately saved/reopened standalone TOD Material;
 - a saved TOD Metropolis level containing 6,228 objects and 313 mesh
   datablocks, plus separate saved Moby and Tie material imports;
 - a 16,150-vertex Moby containing 44 bones and 21 Actions;

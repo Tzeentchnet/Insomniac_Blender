@@ -7,6 +7,14 @@ from ..games.resistance_2.formats import AssetKind
 from .properties import asset_selector_state, asset_selector_status
 
 
+def _asset_icon(kind: AssetKind) -> str:
+    return {
+        AssetKind.MOBY: "ARMATURE_DATA",
+        AssetKind.TIE: "MESH_CUBE",
+        AssetKind.SHADER: "MATERIAL",
+    }.get(kind, "OBJECT_DATA")
+
+
 class INSOMNIAC_PT_asset_io(bpy.types.Panel):
     bl_idname = "INSOMNIAC_PT_asset_io"
     bl_label = "Insomniac Asset IO"
@@ -43,7 +51,7 @@ class INSOMNIAC_PT_asset_io(bpy.types.Panel):
             source.label(text=settings.source_summary, icon="INFO")
 
         asset = layout.box()
-        asset.label(text="Model / Static Mesh", icon="MESH_DATA")
+        asset.label(text="Asset", icon="ASSET_MANAGER")
         state = asset_selector_state(settings, context)
 
         # Filters only narrow what the Asset search lists; they never change
@@ -80,9 +88,7 @@ class INSOMNIAC_PT_asset_io(bpy.types.Panel):
                 if selected is None
                 else "MESH_CUBE"
                 if adapter.experimental
-                else "ARMATURE_DATA"
-                if selected.kind is AssetKind.MOBY
-                else "MESH_CUBE"
+                else _asset_icon(selected.kind)
             ),
         )
         if selected is not None:
@@ -99,6 +105,12 @@ class INSOMNIAC_PT_asset_io(bpy.types.Panel):
         importer = asset.row()
         importer.enabled = selected is not None
         importer.operator("insomniac.import_asset", icon="IMPORT")
+        if selected is not None and selected.kind is AssetKind.MOBY:
+            asset.operator(
+                "insomniac.import_animation",
+                text="Import One Animation...",
+                icon="ACTION",
+            )
 
         if adapter.supports_levels:
             level = layout.box()

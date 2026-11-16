@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from pathlib import Path
 import sys
 import unittest
+from pathlib import Path
 
 import numpy as np
-
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -23,8 +22,10 @@ if bpy is not None:
         sync_active_action_range,
     )
     from insomniac_asset_io.blender.importer import (
+        AssetImportOptions,
         _create_actions,
         _create_armature,
+        import_moby_animation,
     )
     from insomniac_asset_io.games.resistance_2.animations import (
         _compose_r3_overlays,
@@ -32,6 +33,7 @@ if bpy is not None:
     from insomniac_asset_io.games.resistance_2.formats import (
         Bone,
         DecodedClip,
+        MobyAsset,
         Skeleton,
     )
 
@@ -53,6 +55,88 @@ class BlenderRigTests(unittest.TestCase):
             bpy.data.armatures.remove(armature)
         for collection in tuple(bpy.data.collections):
             bpy.data.collections.remove(collection)
+
+    def test_imports_one_animation_with_compatible_rig(self) -> None:
+        bind = np.identity(4, dtype=np.float32)[None]
+        skeleton = Skeleton(
+            root_bone=0,
+            bones=(Bone(0, -1, 0xFFFF, 0xFFFF),),
+            bind_local=bind.copy(),
+            bind_world=bind.copy(),
+            bind_world_inverse=bind.copy(),
+            scale_shift=0,
+            translation_shift=0,
+        )
+        clip = DecodedClip(
+            name="selected",
+            frame_rate=30.0,
+            looping=True,
+            additive=False,
+            translations=np.zeros((2, 1, 3), dtype=np.float32),
+            rotations_xyzw=np.tile(
+                np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float32),
+                (2, 1, 1),
+            ),
+            scales=np.ones((2, 1, 3), dtype=np.float32),
+            animated_bones=np.ones(1, dtype=np.bool_),
+        )
+        moby = MobyAsset(
+            tuid=0x22,
+            name="Animated_Moby",
+            meshes=[],
+            bounding_sphere=(0.0, 0.0, 0.0, 1.0),
+            shader_tuids=(),
+            skeleton=skeleton,
+            animset_hash=1,
+            bind_pose_inverse_offset=0,
+        )
+
+        class Reader:
+            game_id = "RATCHET_TOD"
+            game_label = "Ratchet & Clank Future: Tools of Destruction"
+            engine_id = "V1"
+            asset_prefix = "TOD"
+            resource_prefix = "levels/test"
+
+            @staticmethod
+            def read_moby(_tuid):
+                return moby
+
+            @staticmethod
+            def read_animations(_moby):
+                return [clip]
+
+            @staticmethod
+            def consume_import_warnings():
+                return ()
+
+        result = import_moby_animation(
+            bpy.context,
+            Reader(),
+            moby.tuid,
+            0,
+            AssetImportOptions(
+                materials=False,
+                animations=True,
+                convert_axes=False,
+            ),
+            source_path="test",
+        )
+
+        self.assertEqual(result.objects, 2)
+        self.assertEqual(result.meshes, 0)
+        self.assertEqual(result.actions, 1)
+        self.assertEqual(
+            result.root["insomniac_asset_kind"],
+            "ANIMATION",
+        )
+        action = bpy.data.actions["Animated_Moby_Rig_selected"]
+        self.assertEqual(
+            action["insomniac_source_moby_tuid"],
+            "0x0000000000000022",
+        )
+        self.assertEqual(action["insomniac_animation_name"], "selected")
+        self.assertEqual(action["insomniac_animation_index"], 0)
 
     def test_scaled_bind_frame_does_not_deform_mesh(self) -> None:
         collection = self._collection()

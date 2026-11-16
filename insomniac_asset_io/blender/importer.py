@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import logging
 import math
 import re
+from dataclasses import dataclass
 from typing import Iterable
 
 import bpy
-from mathutils import Matrix, Quaternion, Vector
 import numpy as np
+from mathutils import Matrix, Quaternion, Vector
 
 from ..core.errors import InsomniacError
 from ..games.resistance_2.formats import (
@@ -28,7 +28,6 @@ from ..games.resistance_2.materials import (
     reconstruct_normal_map,
 )
 from ..games.resistance_2.reader import Resistance2Reader
-
 
 LOGGER = logging.getLogger(__name__)
 
@@ -58,6 +57,18 @@ def _reader_asset_prefix(reader: object | None) -> str:
 
 def _reader_axis_conversion_x_degrees(reader: object | None) -> float:
     return float(getattr(reader, "axis_conversion_x_degrees", 90.0))
+
+
+def _reader_asset_scope(reader: object | None) -> str:
+    if _reader_game_id(reader) != "RATCHET_TOD":
+        return ""
+    prefix = str(getattr(reader, "resource_prefix", "")).replace("\\", "/")
+    marker = "/levels/"
+    normalized = "/" + prefix.lstrip("/")
+    if marker in normalized.casefold():
+        marker_index = normalized.casefold().index(marker) + len(marker)
+        prefix = normalized[marker_index:]
+    return _safe_name(prefix.replace("/", "_")) if prefix else ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,6 +113,19 @@ class ImportResult:
 
 
 @dataclass(slots=True)
+class MaterialImportResult:
+    materials: tuple[bpy.types.Material, ...]
+    images: tuple[bpy.types.Image, ...]
+    warnings: list[str]
+
+    def summary(self) -> str:
+        return (
+            f"{len(self.materials)} materials, {len(self.images)} images, "
+            f"{len(self.warnings)} warnings"
+        )
+
+
+@dataclass(slots=True)
 class _CombinedMesh:
     mesh: bpy.types.Mesh
     bone_indices: np.ndarray | None
@@ -142,12 +166,22 @@ class _MaterialFactory:
         cached = self.materials.get(shader_tuid)
         if cached is not None:
             return cached
-        name = (
-            f"{_reader_asset_prefix(self.reader)}_Shader_"
-            f"{shader_tuid:016X}"
+        scope = _reader_asset_scope(self.reader)
+        name = "_".join(
+            part
+            for part in (
+                _reader_asset_prefix(self.reader),
+                scope,
+                "Shader",
+                f"{shader_tuid:016X}",
+            )
+            if part
         )
         material = bpy.data.materials.get(name) or bpy.data.materials.new(name)
         material.use_nodes = True
+        material["insomniac_game"] = _reader_game_id(self.reader)
+        if scope:
+            material["insomniac_asset_scope"] = scope
         material["insomniac_shader_tuid"] = f"0x{shader_tuid:016X}"
         color = _stable_color(shader_tuid)
         material.diffuse_color = (*color, 1.0)
@@ -1039,6 +1073,38 @@ class _MaterialFactory:
             image.colorspace_settings.name = "Non-Color"
 
 
+def import_materials(
+    reader: Resistance2Reader,
+    shader_tuids: Iterable[int],
+    *,
+    cycles_materials: bool = False,
+) -> MaterialImportResult:
+    warnings: list[str] = []
+    factory = _MaterialFactory(
+        reader,
+        True,
+        warnings,
+        cycles_materials=cycles_materials,
+    )
+    materials = tuple(
+        factory.material(shader_tuid)
+        for shader_tuid in dict.fromkeys(shader_tuids)
+    )
+    for material in materials:
+        material.use_fake_user = True
+    factory.release_decoded_textures()
+    consume_warnings = getattr(reader, "consume_import_warnings", None)
+    if callable(consume_warnings):
+        for warning in consume_warnings():
+            if warning not in warnings:
+                warnings.append(warning)
+    return MaterialImportResult(
+        materials=materials,
+        images=tuple(dict.fromkeys(factory.images.values())),
+        warnings=warnings,
+    )
+
+
 def import_moby(
     context: bpy.types.Context,
     reader: Resistance2Reader,
@@ -1221,7 +1287,7 @@ def import_moby(
             _reader_game_label(reader),
         )
 
-    action_count = 0
+    created_actions: list[bpy.types.Action] = []
     if (
         options.animations
         and armature is not None
@@ -1230,12 +1296,23 @@ def import_moby(
         clips = reader.read_animations(asset)
         if options.animation_clip_limit:
             clips = clips[: options.animation_clip_limit]
-        action_count = _create_actions(
+        _create_actions(
             context,
             armature,
             asset.skeleton,
             clips,
+            created_actions=created_actions,
         )
+        for clip_index, (action, clip) in enumerate(
+            zip(created_actions, clips, strict=True)
+        ):
+            _tag_action(
+                action,
+                reader,
+                asset,
+                clip,
+                clip_index,
+            )
     consume_warnings = getattr(reader, "consume_import_warnings", None)
     if callable(consume_warnings):
         for warning in consume_warnings():
@@ -1247,7 +1324,72 @@ def import_moby(
         meshes=1 + optional_object_count,
         materials=len(materials.materials),
         images=len(materials.images),
-        actions=action_count,
+        actions=len(created_actions),
+        warnings=warnings,
+    )
+
+
+def import_moby_animation(
+    context: bpy.types.Context,
+    reader: Resistance2Reader,
+    tuid: int,
+    clip_index: int,
+    options: AssetImportOptions,
+    *,
+    source_path: str,
+) -> ImportResult:
+    asset = reader.read_moby(tuid)
+    if asset.skeleton is None or asset.animset_hash is None:
+        raise InsomniacError(f"{asset.name} has no importable animations")
+    clips = reader.read_animations(asset)
+    if not 0 <= clip_index < len(clips):
+        raise InsomniacError(
+            f"{asset.name} animation index {clip_index} is unavailable"
+        )
+    clip = clips[clip_index]
+    name = _safe_name(f"{asset.name}_{clip.name}")
+    collection = _new_collection(context, name)
+    root = _create_root(
+        collection,
+        name,
+        options.convert_axes,
+        source_path,
+        reader,
+    )
+    root["insomniac_asset_kind"] = "ANIMATION"
+    root["insomniac_source_moby_tuid"] = f"0x{asset.tuid:016X}"
+    root["insomniac_animation_index"] = clip_index
+    root["insomniac_animation_name"] = clip.name
+    armature = _create_armature(
+        context,
+        f"{_safe_name(asset.name)}_Rig",
+        asset.skeleton,
+        collection,
+    )
+    armature.parent = root
+    created_actions: list[bpy.types.Action] = []
+    _create_actions(
+        context,
+        armature,
+        asset.skeleton,
+        [clip],
+        created_actions=created_actions,
+    )
+    _tag_action(
+        created_actions[0],
+        reader,
+        asset,
+        clip,
+        clip_index,
+    )
+    warnings: list[str] = []
+    consume_warnings = getattr(reader, "consume_import_warnings", None)
+    if callable(consume_warnings):
+        warnings.extend(consume_warnings())
+    return ImportResult(
+        root=root,
+        objects=2,
+        actions=1,
         warnings=warnings,
     )
 
@@ -2032,6 +2174,8 @@ def _create_actions(
     armature: bpy.types.Object,
     skeleton: Skeleton,
     clips: list[DecodedClip],
+    *,
+    created_actions: list[bpy.types.Action] | None = None,
 ) -> int:
     if not clips:
         return 0
@@ -2060,6 +2204,8 @@ def _create_actions(
         action = bpy.data.actions.new(
             name=f"{armature.name}_{_safe_name(clip.name)}"
         )
+        if created_actions is not None:
+            created_actions.append(action)
         action.use_fake_user = True
         action["insomniac_frame_rate"] = clip.frame_rate
         action["insomniac_looping"] = clip.looping
@@ -2204,6 +2350,21 @@ def _create_actions(
     context.scene.frame_set(original_frame)
     context.view_layer.update()
     return len(clips)
+
+
+def _tag_action(
+    action: bpy.types.Action,
+    reader: Resistance2Reader,
+    asset: MobyAsset,
+    clip: DecodedClip,
+    clip_index: int,
+) -> None:
+    action["insomniac_game"] = _reader_game_id(reader)
+    action["insomniac_asset_kind"] = "ANIMATION"
+    action["insomniac_source_moby_tuid"] = f"0x{asset.tuid:016X}"
+    action["insomniac_source_moby_name"] = asset.name
+    action["insomniac_animation_index"] = clip_index
+    action["insomniac_animation_name"] = clip.name
 
 
 def _write_action_curves(

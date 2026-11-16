@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timezone
 import json
-from pathlib import Path
 import shutil
 import subprocess
 import uuid
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
 
 import bpy
 
@@ -14,8 +14,12 @@ from ..core.errors import InsomniacError
 from ..core.source import GameSource
 from ..games.registry import GameAdapter, get_game_adapter
 from ..games.resistance_2.formats import AssetKind
-from .importer import AssetImportOptions, import_moby, import_tie
-
+from .importer import (
+    AssetImportOptions,
+    import_materials,
+    import_moby,
+    import_tie,
+)
 
 ASSET_LIBRARY_NAME = "Insomniac Assets"
 ASSET_LIBRARY_DIRECTORY = "asset_library"
@@ -243,6 +247,13 @@ def generate_asset_library(
                                 import_options,
                                 source_path=str(iso),
                             )
+                        created_actions = tuple(
+                            sorted(
+                                set(bpy.data.actions)
+                                - snapshot["actions"],
+                                key=lambda action: action.name.casefold(),
+                            )
+                        )
                         collection = _asset_collection(result.root)
                         _mark_asset(
                             collection,
@@ -257,9 +268,32 @@ def generate_asset_library(
                             f"{kind.name.casefold()}_{pointer.tuid:016x}.blend"
                         )
                         output = kind_directory / filename
+                        if created_actions:
+                            animation_catalog_path = (
+                                f"{adapter.label}/"
+                                f"{level_name.replace('\\', '/')}/"
+                                f"Animations/{collection.name}"
+                            )
+                            animation_catalog_id = uuid.uuid5(
+                                _CATALOG_NAMESPACE,
+                                animation_catalog_path,
+                            )
+                            catalogs[animation_catalog_path] = (
+                                animation_catalog_id,
+                                collection.name,
+                            )
+                            for action in created_actions:
+                                _mark_action_asset(
+                                    action,
+                                    moby_tuid=pointer.tuid,
+                                    moby_name=collection.name,
+                                    level_name=level_name,
+                                    catalog_id=animation_catalog_id,
+                                    adapter=adapter,
+                                )
                         bpy.data.libraries.write(
                             str(output),
-                            {collection},
+                            {collection, *created_actions},
                             fake_user=True,
                             compress=True,
                         )
@@ -277,11 +311,122 @@ def generate_asset_library(
                                 "actions": result.actions,
                             }
                         )
+                        assets.extend(
+                            {
+                                "kind": "ANIMATION",
+                                "tuid": f"0x{pointer.tuid:016X}",
+                                "name": action.name,
+                                "file": relative_file.as_posix(),
+                                "moby_tuid": f"0x{pointer.tuid:016X}",
+                                "frame_rate": action.get(
+                                    "insomniac_frame_rate"
+                                ),
+                            }
+                            for action in created_actions
+                        )
                         warnings.extend(result.warnings or ())
                     except Exception as exc:
                         raise InsomniacError(
                             f"Failed to cache {kind.name} "
                             f"0x{pointer.tuid:016X}: {exc}"
+                        ) from exc
+                    finally:
+                        _remove_new_datablocks(snapshot)
+
+            if options.materials:
+                material_pointers = reader.asset_pointers(
+                    AssetKind.SHADER
+                )
+                if options.asset_limit:
+                    material_pointers = material_pointers[
+                        : options.asset_limit
+                    ]
+                if material_pointers:
+                    snapshot = _snapshot_datablocks()
+                    try:
+                        material_catalog_path = (
+                            f"{adapter.label}/"
+                            f"{level_name.replace('\\', '/')}/Materials"
+                        )
+                        material_catalog_id = uuid.uuid5(
+                            _CATALOG_NAMESPACE,
+                            material_catalog_path,
+                        )
+                        catalogs[material_catalog_path] = (
+                            material_catalog_id,
+                            "Materials",
+                        )
+                        material_result = import_materials(
+                            reader,
+                            (
+                                pointer.tuid
+                                for pointer in material_pointers
+                            ),
+                            cycles_materials=options.cycles_materials,
+                        )
+                        for pointer, material in zip(
+                            material_pointers,
+                            material_result.materials,
+                            strict=True,
+                        ):
+                            _mark_material_asset(
+                                material,
+                                shader_tuid=pointer.tuid,
+                                level_name=level_name,
+                                catalog_id=material_catalog_id,
+                                generate_preview=options.generate_previews,
+                                adapter=adapter,
+                            )
+                        material_directory = staged_level / "material"
+                        material_directory.mkdir(
+                            parents=True,
+                            exist_ok=True,
+                        )
+                        material_filename = "materials.blend"
+                        material_output = (
+                            material_directory / material_filename
+                        )
+                        bpy.data.libraries.write(
+                            str(material_output),
+                            set(material_result.materials),
+                            fake_user=True,
+                            compress=True,
+                        )
+                        material_relative_file = (
+                            relative_level
+                            / "material"
+                            / material_filename
+                        )
+                        assets.extend(
+                            {
+                                "kind": AssetKind.SHADER.name,
+                                "tuid": f"0x{pointer.tuid:016X}",
+                                "name": material.name,
+                                "file": (
+                                    material_relative_file.as_posix()
+                                ),
+                                "materials": 1,
+                                "images": len(
+                                    {
+                                        node.image
+                                        for node in material.node_tree.nodes
+                                        if (
+                                            node.type == "TEX_IMAGE"
+                                            and node.image is not None
+                                        )
+                                    }
+                                ),
+                            }
+                            for pointer, material in zip(
+                                material_pointers,
+                                material_result.materials,
+                                strict=True,
+                            )
+                        )
+                        warnings.extend(material_result.warnings)
+                    except Exception as exc:
+                        raise InsomniacError(
+                            f"Failed to cache level materials: {exc}"
                         ) from exc
                     finally:
                         _remove_new_datablocks(snapshot)
@@ -327,6 +472,12 @@ def generate_asset_library(
         "assets": len(assets),
         "mobys": sum(asset["kind"] == "MOBY" for asset in assets),
         "ties": sum(asset["kind"] == "TIE" for asset in assets),
+        "materials": sum(
+            asset["kind"] == "SHADER" for asset in assets
+        ),
+        "animations": sum(
+            asset["kind"] == "ANIMATION" for asset in assets
+        ),
         "warnings": len(warnings),
         "manifest": str(final_level / "manifest.json"),
     }
@@ -374,6 +525,58 @@ def _mark_asset(
     metadata.tags.new(f"0x{tuid:016X}", skip_if_exists=True)
     if generate_preview:
         collection.asset_generate_preview()
+
+
+def _mark_material_asset(
+    material: bpy.types.Material,
+    *,
+    shader_tuid: int,
+    level_name: str,
+    catalog_id: uuid.UUID,
+    generate_preview: bool,
+    adapter: GameAdapter,
+) -> None:
+    material["insomniac_game"] = adapter.id
+    material["insomniac_asset_kind"] = AssetKind.SHADER.name
+    material["insomniac_shader_tuid"] = f"0x{shader_tuid:016X}"
+    material["insomniac_cache_level"] = level_name.replace("\\", "/")
+    material.asset_mark()
+    metadata = material.asset_data
+    metadata.catalog_id = str(catalog_id)
+    metadata.description = (
+        f"{adapter.label} Material 0x{shader_tuid:016X} from {level_name}"
+    )
+    metadata.tags.new(adapter.label, skip_if_exists=True)
+    metadata.tags.new("Material", skip_if_exists=True)
+    metadata.tags.new(f"0x{shader_tuid:016X}", skip_if_exists=True)
+    if generate_preview:
+        material.asset_generate_preview()
+
+
+def _mark_action_asset(
+    action: bpy.types.Action,
+    *,
+    moby_tuid: int,
+    moby_name: str,
+    level_name: str,
+    catalog_id: uuid.UUID,
+    adapter: GameAdapter,
+) -> None:
+    action["insomniac_game"] = adapter.id
+    action["insomniac_asset_kind"] = "ANIMATION"
+    action["insomniac_source_moby_tuid"] = f"0x{moby_tuid:016X}"
+    action["insomniac_cache_level"] = level_name.replace("\\", "/")
+    action.asset_mark()
+    metadata = action.asset_data
+    metadata.catalog_id = str(catalog_id)
+    metadata.description = (
+        f"{adapter.label} animation for {moby_name} "
+        f"(0x{moby_tuid:016X}) from {level_name}"
+    )
+    metadata.tags.new(adapter.label, skip_if_exists=True)
+    metadata.tags.new("Animation", skip_if_exists=True)
+    metadata.tags.new(moby_name, skip_if_exists=True)
+    metadata.tags.new(f"0x{moby_tuid:016X}", skip_if_exists=True)
 
 
 def _snapshot_datablocks() -> dict[str, set[bpy.types.ID]]:

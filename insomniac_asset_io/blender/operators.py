@@ -1,5 +1,4 @@
 import logging
-from pathlib import Path
 import traceback
 
 import bpy
@@ -21,7 +20,9 @@ from .importer import (
     AssetImportOptions,
     LevelImportOptions,
     import_level,
+    import_materials,
     import_moby,
+    import_moby_animation,
     import_tie,
 )
 from .preferences import addon_preferences, cycles_materials_enabled
@@ -32,7 +33,6 @@ from .properties import (
     ensure_asset_selection,
     set_asset_selection,
 )
-
 
 LOGGER = logging.getLogger(__name__)
 
@@ -251,6 +251,7 @@ def _summary(reader) -> str:
     counts = summary.counts
     return (
         f"{counts[AssetKind.MOBY]} mobys, {counts[AssetKind.TIE]} ties, "
+        f"{counts[AssetKind.SHADER]} materials, "
         f"{counts[AssetKind.ANIMSET]} animsets, "
         f"{counts[AssetKind.HIGH_MIP]} textures, "
         f"{counts[AssetKind.ZONE]} zones"
@@ -422,22 +423,49 @@ def _asset_picker_matches(
     return all(token in haystack for token in tokens)
 
 
+def _asset_kind_icon(kind: str) -> str:
+    return {
+        "MOBY": "ARMATURE_DATA",
+        "TIE": "MESH_CUBE",
+        "SHADER": "MATERIAL",
+        "ANIMATION": "ACTION",
+    }.get(kind, "OBJECT_DATA")
+
+
 def _update_asset_picker_search(self, _context) -> None:
+    _update_picker_search(self, "assets", "asset_index")
+
+
+def _update_animation_picker_search(self, _context) -> None:
+    _update_picker_search(self, "clips", "clip_index")
+
+
+def _update_picker_search(
+    owner,
+    collection_name: str,
+    index_name: str,
+) -> None:
+    items = getattr(owner, collection_name)
+    selected_index = getattr(owner, index_name)
     if (
-        0 <= self.asset_index < len(self.assets)
+        0 <= selected_index < len(items)
         and _asset_picker_matches(
-            self.assets[self.asset_index],
-            self.asset_search,
+            items[selected_index],
+            owner.asset_search,
         )
     ):
         return
-    self.asset_index = next(
-        (
-            index
-            for index, item in enumerate(self.assets)
-            if _asset_picker_matches(item, self.asset_search)
+    setattr(
+        owner,
+        index_name,
+        next(
+            (
+                index
+                for index, item in enumerate(items)
+                if _asset_picker_matches(item, owner.asset_search)
+            ),
+            -1,
         ),
-        -1,
     )
 
 
@@ -456,7 +484,7 @@ class INSOMNIAC_UL_asset_picker(bpy.types.UIList):
         _index=0,
         _filter_flag=0,
     ):
-        icon = "ARMATURE_DATA" if item.kind == "MOBY" else "MESH_CUBE"
+        icon = _asset_kind_icon(item.kind)
         if self.layout_type in {"DEFAULT", "COMPACT"}:
             layout.label(text=item.label, icon=icon)
         else:
@@ -586,7 +614,7 @@ class INSOMNIAC_OT_clear_asset_filters(bpy.types.Operator):
 class INSOMNIAC_OT_import_asset(bpy.types.Operator):
     bl_idname = "insomniac.import_asset"
     bl_label = "Import Asset"
-    bl_description = "Import the selected model or static mesh"
+    bl_description = "Import the selected model, static mesh, or Material"
     bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):
@@ -634,6 +662,12 @@ class INSOMNIAC_OT_import_asset(bpy.types.Operator):
                         options,
                         source_path=original_path,
                     )
+                elif asset.kind is AssetKind.SHADER:
+                    result = import_materials(
+                        reader,
+                        (asset.tuid,),
+                        cycles_materials=cycles_materials_enabled(context),
+                    )
                 else:
                     result = import_tie(
                         context,
@@ -656,6 +690,168 @@ class INSOMNIAC_OT_import_asset(bpy.types.Operator):
                 traceback.format_exc(),
             )
             settings.last_message = f"Unexpected import error: {exc}"
+            self.report({"ERROR"}, settings.last_message)
+            return {"CANCELLED"}
+
+
+class INSOMNIAC_OT_import_animation(bpy.types.Operator):
+    bl_idname = "insomniac.import_animation"
+    bl_label = "Import Moby Animation"
+    bl_description = (
+        "Import a compatible rig and one selected animation from the Moby"
+    )
+    bl_options = {"REGISTER", "UNDO"}
+
+    clips: bpy.props.CollectionProperty(
+        name="Animations",
+        type=InsomniacAssetPickerItem,
+        options={"HIDDEN", "SKIP_SAVE"},
+    )
+    clip_index: bpy.props.IntProperty(
+        name="Selected Animation",
+        default=-1,
+        options={"HIDDEN", "SKIP_SAVE"},
+    )
+    asset_identifier: bpy.props.StringProperty(
+        options={"HIDDEN", "SKIP_SAVE"},
+    )
+    asset_search: bpy.props.StringProperty(
+        name="Search",
+        description="Filter animations by name, frame count, or frame rate",
+        options={"TEXTEDIT_UPDATE", "SKIP_SAVE"},
+        update=_update_animation_picker_search,
+    )
+
+    def invoke(self, context, _event):
+        settings = _settings(context)
+        try:
+            asset = _catalog(context).asset(
+                ensure_asset_selection(settings, context)
+            )
+            if asset.kind is not AssetKind.MOBY:
+                raise InsomniacError(
+                    "Select a Moby before importing an animation"
+                )
+            source_path, _original_path = _resolved_asset_source(
+                context,
+                asset,
+            )
+            with GameSource.open(source_path) as source:
+                reader = _adapter(context).create_reader(source)
+                moby = reader.read_moby(asset.tuid)
+                clips = reader.read_animations(moby)
+            if not clips:
+                raise InsomniacError(
+                    f"{asset.display_name} has no importable animations"
+                )
+
+            self.clips.clear()
+            self.asset_identifier = asset.identifier
+            self.clip_index = 0
+            self.asset_search = ""
+            for index, clip in enumerate(clips):
+                item = self.clips.add()
+                item.identifier = str(index)
+                item.label = clip.name or f"Animation {index}"
+                item.description = (
+                    f"{clip.frame_count:,} frames at {clip.frame_rate:g} fps; "
+                    f"{clip.bone_count} bones"
+                )
+                item.search_text = (
+                    f"{item.label}\n{item.description}\n{index}"
+                )
+                item.kind = "ANIMATION"
+            return context.window_manager.invoke_props_dialog(
+                self,
+                width=480,
+            )
+        except InsomniacError as exc:
+            settings.last_message = str(exc)
+            self.report({"ERROR"}, str(exc))
+            return {"CANCELLED"}
+        except Exception as exc:
+            LOGGER.error(
+                "Unexpected animation inspection failure:\n%s",
+                traceback.format_exc(),
+            )
+            settings.last_message = f"Unexpected animation error: {exc}"
+            self.report({"ERROR"}, settings.last_message)
+            return {"CANCELLED"}
+
+    def draw(self, _context):
+        layout = self.layout
+        layout.prop(self, "asset_search", text="", icon="VIEWZOOM")
+        match_count = sum(
+            _asset_picker_matches(item, self.asset_search)
+            for item in self.clips
+        )
+        layout.label(
+            text=f"{match_count:,} of {len(self.clips):,} animations shown",
+            icon="INFO" if match_count else "ERROR",
+        )
+        layout.template_list(
+            "INSOMNIAC_UL_asset_picker",
+            "animations",
+            self,
+            "clips",
+            self,
+            "clip_index",
+            item_dyntip_propname="description",
+            rows=10,
+            maxrows=10,
+        )
+
+    def execute(self, context):
+        settings = _settings(context)
+        try:
+            if not 0 <= self.clip_index < len(self.clips):
+                raise InsomniacError("Choose an animation from the list")
+            if not _asset_picker_matches(
+                self.clips[self.clip_index],
+                self.asset_search,
+            ):
+                raise InsomniacError(
+                    "Choose an animation shown by the search"
+                )
+            asset = _catalog(context).asset(self.asset_identifier)
+            if asset.kind is not AssetKind.MOBY:
+                raise InsomniacError(
+                    "The selected animation source is no longer a Moby"
+                )
+            source_path, original_path = _resolved_asset_source(
+                context,
+                asset,
+            )
+            preferences = _preferences(context)
+            selected_clip = int(self.clips[self.clip_index].identifier)
+            with GameSource.open(source_path) as source:
+                reader = _adapter(context).create_reader(source)
+                result = import_moby_animation(
+                    context,
+                    reader,
+                    asset.tuid,
+                    selected_clip,
+                    AssetImportOptions(
+                        materials=False,
+                        animations=True,
+                        convert_axes=preferences.asset_convert_axes,
+                    ),
+                    source_path=original_path,
+                )
+            _report_warnings(self, result.warnings)
+            settings.last_message = result.summary()
+            self.report({"INFO"}, settings.last_message)
+            return {"FINISHED"}
+        except InsomniacError as exc:
+            settings.last_message = str(exc)
+            self.report({"ERROR"}, str(exc))
+            return {"CANCELLED"}
+        except Exception as exc:
+            LOGGER.error(
+                "Unexpected animation import failure:\n%s",
+                traceback.format_exc(),
+            )
+            settings.last_message = f"Unexpected animation error: {exc}"
             self.report({"ERROR"}, settings.last_message)
             return {"CANCELLED"}
 
@@ -763,8 +959,8 @@ class INSOMNIAC_OT_rebuild_import_catalog(bpy.types.Operator):
     bl_idname = "insomniac.rebuild_import_catalog"
     bl_label = "Regenerate Import Catalog"
     bl_description = (
-        "Scan the configured ISO for importable Moby, Tie, and level IDs and "
-        "write a local metadata catalog"
+        "Scan the configured ISO for importable Moby, Tie, Material, and "
+        "level IDs and write a local metadata catalog"
     )
     bl_options = {"REGISTER"}
 
@@ -946,6 +1142,7 @@ CLASSES = (
     INSOMNIAC_OT_choose_asset,
     INSOMNIAC_OT_clear_asset_filters,
     INSOMNIAC_OT_import_asset,
+    INSOMNIAC_OT_import_animation,
     INSOMNIAC_OT_import_level,
     INSOMNIAC_OT_prepare_iso,
     INSOMNIAC_OT_rebuild_import_catalog,

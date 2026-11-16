@@ -112,15 +112,18 @@ class InsomniacAddonPreferences(bpy.types.AddonPreferences):
         default="lobby",
     )
     asset_cache_materials: bpy.props.BoolProperty(
-        name="Cache materials and textures",
-        description="Decode and pack materials into generated asset files",
+        name="Cache Material assets and textures",
+        description=(
+            "Create standalone Material assets and pack materials into "
+            "generated model files"
+        ),
         default=True,
     )
     asset_cache_animations: bpy.props.BoolProperty(
-        name="Cache Moby animations",
+        name="Cache Moby Action assets",
         description=(
-            "Include decoded Actions in generated Moby files; disabled by "
-            "default to keep the Asset Browser cache compact"
+            "Create standalone Action assets alongside generated Moby "
+            "Collections; disabled by default to keep the cache compact"
         ),
         default=False,
     )

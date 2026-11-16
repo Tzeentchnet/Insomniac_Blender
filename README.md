@@ -34,11 +34,12 @@ fields from `PARAM.SFO` before extraction.
 | Direct decrypted ISO source | Supported with exact disc-build validation |
 | Level archive topology | Cached, uncached, and texture PSARCs are paired automatically |
 | Moby models, skeletons, and skin weights | Supported |
-| Inline Moby animations | Supported, including compressed 8-bit tracks and TOD pair-frame clips |
+| Inline Moby animations | Supported, including compressed 8-bit tracks, TOD pair-frame clips, and selected-clip rig imports |
 | Tie static meshes | Supported |
-| USA v02.00 import catalog | 5,060 level-scoped assets across 20 levels |
+| USA v02.00 import catalog | 15,581 level-scoped assets across 20 levels: 3,012 Mobys, 2,048 Ties, and 10,521 Materials |
 | DXT1/3/5 and common uncompressed textures | Supported, including streamed high-resolution mips |
 | Diffuse, reconstructed normal, packed, masked, and blended materials | Supported |
+| Blender Asset Browser | Moby/Tie Collections plus standalone Material and optional Action assets |
 | Level terrain (`UFrag`) and Tie placement | Supported |
 | Gameplay Moby placement | Supported as linked static mesh instances |
 | Retail names | Deterministic `Moby_XXXX` and `Tie_XXXXXXXX` names; retail debug names are absent |
@@ -62,7 +63,7 @@ remaining limitations.
 | Moby animsets | Supported, including additive subset and blend masks; clips become Blender Actions |
 | Tie static meshes | Supported |
 | USA model/level import catalog | 4,130 named assets and 27 levels bundled as metadata |
-| Blender Asset Browser library | Locally generated Moby/Tie Collection assets |
+| Blender Asset Browser library | Locally generated Moby/Tie Collections, standalone Materials, and optional Actions |
 | Diffuse textures and albedo-colored packed-blue emission | Supported |
 | Reconstructed normals and packed red-channel gloss | Supported in the default material mode |
 | DXT1/3/5 and common uncompressed textures | Supported |
@@ -86,6 +87,7 @@ See [Resistance 2 formats](docs/formats/resistance_2.md) and
 | Moby damage permutations and collision geometry | Optional; disabled by default |
 | Tie static meshes | Supported |
 | USA model/level import catalog | 5,820 named assets and 27 levels bundled as metadata |
+| Blender Asset Browser library | Locally generated Moby/Tie Collections, standalone Materials, and optional Actions |
 | Diffuse, reconstructed normal, packed red-gloss response, albedo-colored packed-blue emission, and the Goliath wet-leg overlay | Supported in the default material mode |
 | Detail and additional shader references | Preserved as metadata; runtime composition is not yet proven |
 | DXT and common uncompressed textures | Supported, including global texture bundles |
@@ -140,14 +142,14 @@ distributed with the extension.
 
 2. In Blender, open **Edit > Preferences > Get Extensions**.
 3. Use **Install from Disk** and choose
-   `dist\insomniac_asset_io-0.5.0.zip`.
+   `dist\insomniac_asset_io-0.6.0.zip`.
 4. Open the **Insomniac** tab in the 3D View sidebar.
 
 Blender includes NumPy; no external Python package is required at runtime.
 
 ## Use
 
-### Import a model or static mesh
+### Import an asset
 
 1. Select **Ratchet & Clank Future: Tools of Destruction**,
    **Resistance 2**, or **Resistance 3** in the sidebar. In Add-on
@@ -158,13 +160,19 @@ Blender includes NumPy; no external Python package is required at runtime.
    an asset by name, path, kind, TUID, or owner level.
 3. Optionally narrow what the popup lists first. All three filters are
    optional and combine:
-   - **All / Mobys / Ties** restricts the asset kind;
+   - **All / Mobys / Ties / Materials** restricts the asset kind;
    - the level list restricts to assets used by one level;
    - the text field searches the complete source self-path, readable name,
      kind, TUID, and owning levels. Space-separated fragments are all
      required, so `entities objects architecture nb_lobby_skyline_1` resolves
      the matching Tie.
 4. Click **Import Asset**.
+
+Material entries create a persistent Blender Material with decoded textures
+and source metadata but do not add a placeholder object. Select a Moby and use
+**Import One Animation...** to choose a clip; this creates only its compatible
+armature and selected Action. Ordinary Moby import still creates the model,
+rig, and every decoded Action by default.
 
 For experimental Burning Skies imports, select **Resistance: Burning Skies
 (Experimental)**, choose a decrypted `build.psa` whose first four bytes are
@@ -267,12 +275,14 @@ matching display basenames after the path filter is applied. TUIDs and owner
 levels remain in tooltips and can be restored to labels in Add-on Preferences.
 
 The extension ships metadata-only USA catalogs containing source entity
-paths, level ownership, and TUIDs, not models, textures, or other game
-payloads. Choose **Catalog / Asset Browser game** before using **Regenerate
-Import Catalog from ISO**. It scans that game's legally obtained disc into the
-local extraction cache and replaces only that game's selector catalog.
-Catalog generation reads only IGHW headers, section tables, and bounded name
-sections; it does not decode every mesh.
+paths, level ownership, Moby/Tie IDs, and verified shader IDs, not models,
+textures, or other game payloads. The bundled TOD catalog includes Material
+entries; existing R2/R3 bundled catalogs remain model-only until regenerated.
+Choose **Catalog / Asset Browser game** before using **Regenerate Import
+Catalog from ISO**. It scans that game's legally obtained disc into the local
+extraction cache and replaces only that game's selector catalog. Catalog
+generation reads only IGHW headers, section tables, and bounded name sections;
+it does not decode every mesh or texture.
 
 ### Build the local Asset Browser cache
 
@@ -292,13 +302,16 @@ To populate or regenerate it:
 
 Generation runs in an isolated background Blender process, so it does not
 alter the open scene. Each Moby or Tie becomes a marked Collection asset in
-its own compressed `.blend` file under the local cache. Assets are cataloged
-under `<game>/<level>/Mobys` and `<game>/<level>/Ties`, and the library uses
-Blender's **Append** import mode. Rebuilding a level is transactional: a
-failed generation leaves its previous cache intact.
+its own compressed `.blend` file. Verified shaders become standalone Material
+assets under `<game>/<level>/Materials`. When animation caching is enabled,
+each decoded clip is also marked as an Action under
+`<game>/<level>/Animations/<Moby>`. The library uses Blender's **Append**
+import mode. Rebuilding a level is transactional: a failed generation leaves
+its previous cache intact.
 
-Animations are off by default to keep the browser cache compact. Direct Moby
-import continues to include every decoded Action by default.
+Action assets are off by default to keep the browser cache compact. They
+retain the source Moby identity needed to choose a compatible rig. Direct
+Moby import continues to include every decoded Action by default.
 
 ### Choose the material mode
 

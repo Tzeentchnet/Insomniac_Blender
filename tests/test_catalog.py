@@ -1,7 +1,7 @@
 import json
-from pathlib import Path
 import tempfile
 import unittest
+from pathlib import Path
 
 from insomniac_asset_io.games.catalog import (
     load_catalog as load_game_catalog,
@@ -161,13 +161,15 @@ class Resistance2CatalogTests(unittest.TestCase):
                             "MOBY:0000000000001234": (
                                 "entities/example/test_asset/"
                                 "test_asset.entity.irb"
-                            )
+                            ),
+                            "SHADER:0000000000009ABC": "example_material",
                         },
                         "levels": [
                             {
                                 "id": "test_level",
                                 "mobys": ["0x0000000000001234"],
                                 "ties": ["0x0000000000005678"],
+                                "materials": ["0x0000000000009ABC"],
                             }
                         ],
                     }
@@ -180,7 +182,11 @@ class Resistance2CatalogTests(unittest.TestCase):
         self.assertEqual(catalog.levels, ("test_level",))
         self.assertEqual(
             {asset.identifier for asset in catalog.assets},
-            {"MOBY:0000000000001234", "TIE:0000000000005678"},
+            {
+                "MOBY:0000000000001234",
+                "TIE:0000000000005678",
+                "SHADER:0000000000009ABC",
+            },
         )
         moby = catalog.asset("MOBY:0000000000001234")
         self.assertEqual(moby.source_name, "entities/example/test_asset/test_asset.entity.irb")
@@ -194,6 +200,13 @@ class Resistance2CatalogTests(unittest.TestCase):
         self.assertEqual(
             tie.label,
             "Tie 0x0000000000005678 - test_level",
+        )
+        material = catalog.asset("SHADER:0000000000009ABC")
+        self.assertEqual(material.kind, AssetKind.SHADER)
+        self.assertEqual(material.display_name, "Example Material")
+        self.assertEqual(
+            material.identity_label,
+            "Material 0x0000000000009ABC",
         )
 
     def test_schema_one_catalog_without_names_remains_supported(self):
@@ -243,11 +256,13 @@ class Resistance2CatalogTests(unittest.TestCase):
                                 "id": "level_a",
                                 "mobys": ["0x0000000000000001"],
                                 "ties": [],
+                                "materials": ["0x0000000000000001"],
                             },
                             {
                                 "id": "level_b",
                                 "mobys": ["0x0000000000000001"],
                                 "ties": [],
+                                "materials": ["0x0000000000000001"],
                             },
                         ],
                     }
@@ -259,12 +274,14 @@ class Resistance2CatalogTests(unittest.TestCase):
                 "RATCHET_TOD",
             )
 
-        self.assertEqual(len(catalog.assets), 2)
+        self.assertEqual(len(catalog.assets), 4)
         self.assertEqual(
             {asset.identifier for asset in catalog.assets},
             {
                 "MOBY:level_a:0000000000000001",
                 "MOBY:level_b:0000000000000001",
+                "SHADER:level_a:0000000000000001",
+                "SHADER:level_b:0000000000000001",
             },
         )
         self.assertTrue(
@@ -280,7 +297,7 @@ class Resistance2CatalogTests(unittest.TestCase):
 
         self.assertEqual(catalog.region, "USA v02.00")
         self.assertEqual(len(catalog.levels), 20)
-        self.assertEqual(len(catalog.assets), 5060)
+        self.assertEqual(len(catalog.assets), 15581)
         self.assertEqual(
             sum(asset.kind is AssetKind.MOBY for asset in catalog.assets),
             3012,
@@ -288,6 +305,10 @@ class Resistance2CatalogTests(unittest.TestCase):
         self.assertEqual(
             sum(asset.kind is AssetKind.TIE for asset in catalog.assets),
             2048,
+        )
+        self.assertEqual(
+            sum(asset.kind is AssetKind.SHADER for asset in catalog.assets),
+            10521,
         )
         self.assertTrue(
             all(len(asset.levels) == 1 for asset in catalog.assets)
