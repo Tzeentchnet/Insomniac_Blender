@@ -6,10 +6,11 @@ generations through one parser. Each supported game owns its archive,
 resource, geometry, animation, material, and level-placement chain behind a
 shared Blender-facing interface.
 
-The extension supports **Resistance 2** and **Resistance 3** on PlayStation 3
-through separate game readers and a shared Blender workflow. It also includes
-an explicitly experimental static-model reader for **Resistance: Burning
-Skies** on PlayStation Vita.
+The extension supports **Ratchet & Clank Future: Tools of Destruction**,
+**Resistance 2**, and **Resistance 3** on PlayStation 3 through separate game
+readers and a shared Blender workflow. It also includes an explicitly
+experimental static-model reader for **Resistance: Burning Skies** on
+PlayStation Vita.
 
 > [!NOTE]
 > **Glossary**
@@ -21,6 +22,31 @@ Skies** on PlayStation Vita.
 > - **UFrag:** A fragment of terrain or other level geometry.
 > - **Zone:** A portion of a level containing terrain and static-object placements.
 > - **TUID:** An identifier used to locate an asset or resource.
+
+## Ratchet & Clank Future: Tools of Destruction support
+
+Tools of Destruction uses the older `main.dat`-centric PS3 layout. Support is
+currently scoped to the USA `BCUS98127` v02.00 disc; the add-on validates both
+fields from `PARAM.SFO` before extraction.
+
+| Feature | Status |
+|---|---|
+| Direct decrypted ISO source | Supported with exact disc-build validation |
+| Level archive topology | Cached, uncached, and texture PSARCs are paired automatically |
+| Moby models, skeletons, and skin weights | Supported |
+| Inline Moby animations | Supported, including compressed 8-bit tracks and TOD pair-frame clips |
+| Tie static meshes | Supported |
+| USA v02.00 import catalog | 5,060 level-scoped assets across 20 levels |
+| DXT1/3/5 and common uncompressed textures | Supported, including streamed high-resolution mips |
+| Diffuse, reconstructed normal, packed, masked, and blended materials | Supported |
+| Level terrain (`UFrag`) and Tie placement | Supported |
+| Gameplay Moby placement | Supported as linked static mesh instances |
+| Retail names | Deterministic `Moby_XXXX` and `Tie_XXXXXXXX` names; retail debug names are absent |
+| Moby/level collision, shrubs, foliage, lighting, VFX, and cubemaps | Not yet implemented |
+
+See [Tools of Destruction formats](docs/formats/ratchet_tod.md) and
+[known issues](docs/known_issues.md) for the verified old-engine layouts and
+remaining limitations.
 
 ## Resistance 2 support
 
@@ -114,7 +140,7 @@ distributed with the extension.
 
 2. In Blender, open **Edit > Preferences > Get Extensions**.
 3. Use **Install from Disk** and choose
-   `dist\insomniac_asset_io-0.4.3.zip`.
+   `dist\insomniac_asset_io-0.5.0.zip`.
 4. Open the **Insomniac** tab in the 3D View sidebar.
 
 Blender includes NumPy; no external Python package is required at runtime.
@@ -123,7 +149,8 @@ Blender includes NumPy; no external Python package is required at runtime.
 
 ### Import a model or static mesh
 
-1. Select **Resistance 2** or **Resistance 3** in the sidebar. In Add-on
+1. Select **Ratchet & Clank Future: Tools of Destruction**,
+   **Resistance 2**, or **Resistance 3** in the sidebar. In Add-on
    Preferences, select the corresponding decrypted ISO and a local
    extraction-cache directory.
 2. In the **Insomniac** sidebar, click the asset button to open a scrollable

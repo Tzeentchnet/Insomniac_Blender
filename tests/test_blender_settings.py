@@ -33,6 +33,7 @@ class BlenderSettingsTests(unittest.TestCase):
             resistance_2_last_source_path="",
             resistance_3_last_source_path="",
             resistance_burning_skies_last_source_path="",
+            ratchet_tod_last_source_path="",
         )
         self.preferences_patch = mock.patch.object(
             scene_properties,
@@ -186,6 +187,21 @@ class BlenderSettingsTests(unittest.TestCase):
             restored.source_path,
             r"E:\Tests\persisted_resistance_3.iso",
         )
+
+    def test_switching_to_tod_uses_level_scoped_catalog_selection(self) -> None:
+        settings = bpy.context.scene.insomniac_asset_io
+        self.preferences.ratchet_tod_last_source_path = (
+            r"E:\Tests\ratchet_tod.iso"
+        )
+
+        settings.game = "RATCHET_TOD"
+
+        self.assertEqual(
+            settings.source_path,
+            r"E:\Tests\ratchet_tod.iso",
+        )
+        self.assertEqual(settings.level_id, "apogee_space_station")
+        self.assertEqual(len(settings.asset_tuid.split(":")), 3)
 
 
 if __name__ == "__main__":

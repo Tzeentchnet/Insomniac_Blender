@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "insomniac_asset_io"
-version = "0.4.3"
+version = "0.5.0"
 name = "Insomniac Asset IO"
 tagline = "Import Insomniac game assets through game-specific IO chains"
 maintainer = "Insomniac Asset IO contributors"
@@ -20,6 +20,8 @@ paths_exclude_pattern = [
   "/.git/",
   "/.gitignore",
   "/.github/",
+  "/.pytest_cache/",
+  "/.ruff_cache/",
   "/tests/",
   "/tools/",
   "/dist/",

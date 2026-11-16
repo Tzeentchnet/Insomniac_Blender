@@ -713,7 +713,13 @@ class Resistance2Reader:
         section = ighw.section(SECT_MOBY_SKELETON)
         if section is None:
             return None
-        base = section.offset
+        return self._read_skeleton_at(ighw, section.offset)
+
+    def _read_skeleton_at(
+        self,
+        ighw: IghwFile,
+        base: int,
+    ) -> Skeleton | None:
         bone_count = ighw.u16(base)
         root_bone = ighw.u16(base + 2)
         bones_offset = ighw.u32(base + 4)

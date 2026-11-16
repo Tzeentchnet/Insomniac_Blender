@@ -14,6 +14,8 @@ _PACKED_ROOT = PurePosixPath("PS3_GAME/USRDIR/packed")
 _ISO_SECTOR_SIZE = 2048
 _MAX_ISO_ENTRIES = 200_000
 _MAX_DIRECTORY_DEPTH = 128
+_MAX_PARAM_SFO_SIZE = 1024 * 1024
+_MAX_PARAM_SFO_ENTRIES = 1024
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,6 +92,25 @@ class _Iso9660Image:
             if temporary_path is not None:
                 temporary_path.unlink(missing_ok=True)
             raise
+
+    def read(self, member: str, *, max_size: int) -> bytes:
+        normalized = _normalize_iso_path(member)
+        try:
+            entry = self._entries[normalized]
+        except KeyError as exc:
+            raise MissingResourceError(
+                f"{self.path}: ISO member was not found: {member}"
+            ) from exc
+        if entry.is_directory:
+            raise MissingResourceError(
+                f"{self.path}: ISO member is a directory: {member}"
+            )
+        if entry.size > max_size:
+            raise InsomniacError(
+                f"{self.path}: ISO member {member} is {entry.size} bytes; "
+                f"limit is {max_size}"
+            )
+        return self._read_extents(entry.extents)
 
     def _load(self) -> None:
         primary = None
@@ -515,6 +536,163 @@ def extract_game_iso_member(
     return output
 
 
+def read_game_iso_member(
+    iso_path: str | Path,
+    member: str,
+    *,
+    game_label: str,
+    max_size: int,
+) -> bytes:
+    """Read one bounded ISO member without retaining an extracted copy."""
+
+    iso = _iso_path(iso_path, game_label)
+    try:
+        with _Iso9660Image(iso) as image:
+            return image.read(member, max_size=max_size)
+    except (InsomniacError, OSError) as iso_error:
+        try:
+            with tempfile.TemporaryDirectory(
+                prefix="insomniac_iso_member_"
+            ) as temporary:
+                output = Path(temporary) / PurePosixPath(member).name
+                _extract_members_with_tar(
+                    iso,
+                    {member: output},
+                    game_label,
+                )
+                size = output.stat().st_size
+                if size > max_size:
+                    raise InsomniacError(
+                        f"{iso}: ISO member {member} is {size} bytes; "
+                        f"limit is {max_size}"
+                    )
+                return output.read_bytes()
+        except (InsomniacError, OSError) as tar_error:
+            raise InsomniacError(
+                f"Could not read {member} from the {game_label} ISO {iso}. "
+                f"ISO9660 reader: {iso_error}. tar fallback: {tar_error}"
+            ) from tar_error
+
+
+def parse_param_sfo(
+    data: bytes,
+    *,
+    label: str = "PARAM.SFO",
+) -> dict[str, str]:
+    """Parse bounded string fields from a PlayStation PARAM.SFO."""
+
+    if len(data) > _MAX_PARAM_SFO_SIZE:
+        raise InsomniacError(
+            f"{label}: file is {len(data)} bytes; "
+            f"limit is {_MAX_PARAM_SFO_SIZE}"
+        )
+    if len(data) < 20 or data[:4] != b"\0PSF":
+        raise InsomniacError(f"{label}: invalid PARAM.SFO header")
+    key_table = int.from_bytes(data[8:12], "little")
+    value_table = int.from_bytes(data[12:16], "little")
+    entry_count = int.from_bytes(data[16:20], "little")
+    if entry_count > _MAX_PARAM_SFO_ENTRIES:
+        raise InsomniacError(
+            f"{label}: unreasonable entry count {entry_count}"
+        )
+    table_end = 20 + entry_count * 16
+    if (
+        table_end > len(data)
+        or key_table < table_end
+        or key_table > len(data)
+        or value_table < key_table
+        or value_table > len(data)
+    ):
+        raise InsomniacError(f"{label}: invalid PARAM.SFO table offsets")
+
+    values: dict[str, str] = {}
+    for index in range(entry_count):
+        entry = 20 + index * 16
+        key_offset = int.from_bytes(data[entry : entry + 2], "little")
+        value_format = int.from_bytes(
+            data[entry + 2 : entry + 4],
+            "little",
+        )
+        value_length = int.from_bytes(
+            data[entry + 4 : entry + 8],
+            "little",
+        )
+        value_capacity = int.from_bytes(
+            data[entry + 8 : entry + 12],
+            "little",
+        )
+        value_offset = int.from_bytes(
+            data[entry + 12 : entry + 16],
+            "little",
+        )
+        key_start = key_table + key_offset
+        if key_start >= value_table:
+            raise InsomniacError(
+                f"{label}: entry {index} has an invalid key offset"
+            )
+        key_end = data.find(b"\0", key_start, value_table)
+        if key_end < 0:
+            raise InsomniacError(
+                f"{label}: entry {index} has an unterminated key"
+            )
+        value_start = value_table + value_offset
+        if (
+            value_length > value_capacity
+            or value_start > len(data)
+            or value_length > len(data) - value_start
+            or value_capacity > len(data) - value_start
+        ):
+            raise InsomniacError(
+                f"{label}: entry {index} has an invalid value range"
+            )
+        if value_format not in {0x0004, 0x0204}:
+            continue
+        try:
+            key = data[key_start:key_end].decode("utf-8")
+            value = data[
+                value_start : value_start + value_length
+            ].rstrip(b"\0").decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise InsomniacError(
+                f"{label}: entry {index} is not valid UTF-8"
+            ) from exc
+        values[key] = value
+    return values
+
+
+def validate_game_iso(
+    iso_path: str | Path,
+    *,
+    game_label: str,
+    expected_title_id: str | None = None,
+    expected_version: str | None = None,
+) -> dict[str, str]:
+    """Validate a disc build against adapter-declared SFO identity."""
+
+    values = parse_param_sfo(
+        read_game_iso_member(
+            iso_path,
+            "PS3_GAME/PARAM.SFO",
+            game_label=game_label,
+            max_size=_MAX_PARAM_SFO_SIZE,
+        ),
+        label=f"{iso_path}: PS3_GAME/PARAM.SFO",
+    )
+    actual_title_id = values.get("TITLE_ID")
+    if expected_title_id is not None and actual_title_id != expected_title_id:
+        raise InsomniacError(
+            f"{game_label} requires TITLE_ID {expected_title_id}, "
+            f"but the selected ISO reports {actual_title_id or 'no TITLE_ID'}"
+        )
+    actual_version = values.get("VERSION") or values.get("APP_VER")
+    if expected_version is not None and actual_version != expected_version:
+        raise InsomniacError(
+            f"{game_label} requires version {expected_version}, "
+            f"but the selected ISO reports {actual_version or 'no version'}"
+        )
+    return values
+
+
 def prepare_game_level(
     iso_path: str | Path,
     level_name: str,
@@ -522,10 +700,27 @@ def prepare_game_level(
     *,
     cache_key: str,
     game_label: str,
+    level_archives: tuple[str, ...] = (
+        "level_cached.psarc",
+        "level_uncached.psarc",
+    ),
+    global_archives: tuple[str, ...] = (
+        "global_cached.psarc",
+        "global_uncached.psarc",
+    ),
+    expected_title_id: str | None = None,
+    expected_version: str | None = None,
 ) -> Path:
     """Extract the selected level and global PSARCs into the local cache."""
 
     iso = _iso_path(iso_path, game_label)
+    if expected_title_id is not None or expected_version is not None:
+        validate_game_iso(
+            iso,
+            game_label=game_label,
+            expected_title_id=expected_title_id,
+            expected_version=expected_version,
+        )
     level = _level_path(level_name, game_label)
     output = game_level_cache_root(
         cache_directory,
@@ -536,18 +731,27 @@ def prepare_game_level(
     output.mkdir(parents=True, exist_ok=True)
 
     base = _PACKED_ROOT.as_posix()
-    members = (
-        f"{base}/game/global_cached.psarc",
-        f"{base}/game/global_uncached.psarc",
-        f"{base}/levels/{level.as_posix()}/level_cached.psarc",
-        f"{base}/levels/{level.as_posix()}/level_uncached.psarc",
+    members = tuple(
+        f"{base}/game/{name}" for name in global_archives
+    ) + tuple(
+        f"{base}/levels/{level.as_posix()}/{name}"
+        for name in level_archives
     )
+    if not level_archives:
+        raise InsomniacError(
+            f"{game_label} adapter declares no level archives"
+        )
     extracted_root = output / "PS3_GAME" / "USRDIR" / "packed"
     expected = tuple(
         extracted_root / Path(*PurePosixPath(member).parts[3:])
         for member in members
     )
-    cached_level = expected[2]
+    level_start = len(global_archives)
+    try:
+        cached_index = level_archives.index("level_cached.psarc")
+    except ValueError:
+        cached_index = 0
+    cached_level = expected[level_start + cached_index]
     if all(path.is_file() for path in expected):
         return cached_level
 

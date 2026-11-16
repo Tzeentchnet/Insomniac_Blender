@@ -28,6 +28,102 @@ def _track_mask(bone: int, component: int, kind: int = 0) -> int:
 
 
 class AnimationTests(unittest.TestCase):
+    @staticmethod
+    def _single_bone_skeleton() -> Skeleton:
+        bind = np.identity(4, dtype=np.float32)[None]
+        return Skeleton(
+            root_bone=0,
+            bones=(Bone(0, -1, 0xFFFF, 0xFFFF),),
+            bind_local=bind.copy(),
+            bind_world=bind.copy(),
+            bind_world_inverse=bind.copy(),
+            scale_shift=0,
+            translation_shift=0,
+        )
+
+    def test_tod_scales_signed_8_bit_deltas_by_four(self) -> None:
+        data = bytearray(0x140)
+        struct.pack_into(">4sHHI", data, 0, b"IGHW", 1, 1, 0)
+        control_offset = 0x40
+        frames_offset = 0x100
+        struct.pack_into(">4h", data, control_offset, 0, 0, 0, 32767)
+        position_x = _track_mask(0, 0, kind=2)
+        struct.pack_into(">H", data, control_offset + 0x10, position_x)
+        struct.pack_into(">h", data, control_offset + 0x20, 1000)
+        data[control_offset + 0x30] = 0xFF
+        struct.pack_into(">b", data, frames_offset, 2)
+        header = AnimationHeader(
+            index=0,
+            flags=0x04,
+            bone_count=1,
+            frame_count=1,
+            name="tod_delta",
+            frame_rate=30.0,
+            linear_speed=0.0,
+            frame_stride=0x11,
+            reference_value_count=0,
+            track16_count=0,
+            track8_count=1,
+            control_offset=control_offset,
+            frames_offset=frames_offset,
+        )
+
+        clip = _decode_clip(
+            IghwFile(data),
+            header,
+            self._single_bone_skeleton(),
+            profile=AnimationProfile.RATCHET_TOD,
+        )
+
+        self.assertAlmostEqual(
+            float(clip.translations[0, 0, 0]),
+            1008.0 / 32768.0,
+        )
+
+    def test_tod_simple_clips_decode_real_half_rate_frames(self) -> None:
+        data = bytearray(0x180)
+        struct.pack_into(">4sHHI", data, 0, b"IGHW", 1, 1, 0)
+        control_offset = 0x40
+        frames_offset = 0x100
+        struct.pack_into(">4h", data, control_offset, 0, 0, 0, 32767)
+        position_x = _track_mask(0, 0, kind=2)
+        struct.pack_into(">H", data, control_offset + 0x10, position_x)
+        data[control_offset + 0x20] = 0xFF
+        for index, value in enumerate((111, 200, 222, 400, 333)):
+            struct.pack_into(
+                ">h",
+                data,
+                frames_offset + index * 0x10,
+                value,
+            )
+        header = AnimationHeader(
+            index=0,
+            flags=0x04,
+            bone_count=1,
+            frame_count=5,
+            name="tod_pairs",
+            frame_rate=60.0,
+            linear_speed=0.0,
+            frame_stride=0x10,
+            reference_value_count=0,
+            track16_count=1,
+            track8_count=0,
+            control_offset=control_offset,
+            frames_offset=frames_offset,
+        )
+
+        clip = _decode_clip(
+            IghwFile(data),
+            header,
+            self._single_bone_skeleton(),
+            profile=AnimationProfile.RATCHET_TOD,
+        )
+
+        self.assertEqual(clip.frame_rate, 30.0)
+        np.testing.assert_allclose(
+            clip.translations[:, 0, 0],
+            np.asarray((200, 400), dtype=np.float32) / 32768.0,
+        )
     def test_additive_subset_uses_full_skeleton_control_layout(self) -> None:
         data = bytearray(0x120)
         struct.pack_into(">4sHHI", data, 0, b"IGHW", 1, 1, 0)

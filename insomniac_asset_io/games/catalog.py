@@ -251,6 +251,7 @@ def _load_catalog_cached(
     game_label: str,
 ) -> GameCatalog:
     path = Path(path_text)
+    adapter = get_game_adapter(game_id)
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -281,7 +282,7 @@ def _load_catalog_cached(
             raise InsomniacError(f"{path}: malformed catalog name entry")
         names[identifier] = source_name
     level_ids: list[str] = []
-    owners: dict[tuple[AssetKind, int], list[str]] = {}
+    owners: dict[tuple[str, AssetKind, int], list[str]] = {}
     for raw_level in raw_levels:
         if not isinstance(raw_level, dict):
             raise InsomniacError(f"{path}: malformed level catalog entry")
@@ -304,7 +305,15 @@ def _load_catalog_cached(
                     raise InsomniacError(
                         f"{path}: invalid {field} TUID {value!r}"
                     ) from exc
-                owners.setdefault((kind, tuid), []).append(level_id)
+                identifier = adapter.catalog_identifier(
+                    kind,
+                    tuid,
+                    level_id,
+                )
+                owners.setdefault(
+                    (identifier, kind, tuid),
+                    [],
+                ).append(level_id)
 
     levels = tuple(
         sorted(
@@ -314,7 +323,7 @@ def _load_catalog_cached(
     )
     assets = tuple(
         CatalogAsset(
-            identifier=f"{kind.name}:{tuid:016X}",
+            identifier=identifier,
             kind=kind,
             tuid=tuid,
             levels=tuple(
@@ -326,17 +335,17 @@ def _load_catalog_cached(
                     ),
                 )
             ),
-            source_name=names.get(f"{kind.name}:{tuid:016X}"),
+            source_name=names.get(identifier),
             game_label=game_label,
         )
-        for (kind, tuid), asset_levels in sorted(
+        for (identifier, kind, tuid), asset_levels in sorted(
             owners.items(),
             key=lambda item: (
                 "lobby" not in {
                     level.casefold() for level in item[1]
                 },
-                item[0][0] is not AssetKind.MOBY,
-                item[0][1],
+                item[0][1] is not AssetKind.MOBY,
+                item[0][0].casefold(),
             ),
         )
     )
@@ -365,6 +374,7 @@ def build_catalog_from_iso(
         raise MissingResourceError(
             f"{adapter.label} ISO was not found: {iso}"
         )
+    adapter.validate_iso(iso)
     levels = list_game_levels(iso, game_label=adapter.label)
     work_parent = (
         Path(work_directory).expanduser().resolve()
@@ -403,8 +413,10 @@ def build_catalog_from_iso(
                         (AssetKind.TIE, tie_pointers),
                     ):
                         for pointer in pointers:
-                            identifier = (
-                                f"{kind.name}:{pointer.tuid:016X}"
+                            identifier = adapter.catalog_identifier(
+                                kind,
+                                pointer.tuid,
+                                level,
                             )
                             if identifier in asset_names:
                                 continue
@@ -453,7 +465,11 @@ def build_catalog_from_iso(
     temporary_output.replace(output)
 
     unique_assets = {
-        (kind, value)
+        adapter.catalog_identifier(
+            AssetKind[kind],
+            int(value, 16),
+            str(level["id"]),
+        )
         for level in catalog_levels
         for kind, field in (("MOBY", "mobys"), ("TIE", "ties"))
         for value in level[field]
@@ -466,8 +482,14 @@ def build_catalog_from_iso(
             for level in catalog_levels
         ),
         "unique_assets": len(unique_assets),
-        "mobys": sum(kind == "MOBY" for kind, _value in unique_assets),
-        "ties": sum(kind == "TIE" for kind, _value in unique_assets),
+        "mobys": sum(
+            identifier.startswith("MOBY:")
+            for identifier in unique_assets
+        ),
+        "ties": sum(
+            identifier.startswith("TIE:")
+            for identifier in unique_assets
+        ),
         "named_assets": len(asset_names),
         "named_mobys": sum(
             identifier.startswith("MOBY:") for identifier in asset_names

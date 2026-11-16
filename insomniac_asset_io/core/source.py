@@ -144,19 +144,25 @@ class GameSource:
     def _paired_archives(path: Path) -> list[Path]:
         paths = [path]
         lower = path.name.casefold()
-        if lower == "level_cached.psarc":
-            sibling = path.with_name("level_uncached.psarc")
-        elif lower == "level_uncached.psarc":
-            sibling = path.with_name("level_cached.psarc")
+        level_names = (
+            "level_cached.psarc",
+            "level_uncached.psarc",
+            "level_textures.psarc",
+        )
+        if lower in level_names:
+            siblings = tuple(
+                path.with_name(name)
+                for name in level_names
+                if name != lower
+            )
         elif lower == "global_cached.psarc":
-            sibling = path.with_name("global_uncached.psarc")
+            siblings = (path.with_name("global_uncached.psarc"),)
         elif lower == "global_uncached.psarc":
-            sibling = path.with_name("global_cached.psarc")
+            siblings = (path.with_name("global_cached.psarc"),)
         else:
-            sibling = None
-        if sibling is not None and sibling.is_file():
-            paths.append(sibling)
-        if lower in {"level_cached.psarc", "level_uncached.psarc"}:
+            siblings = ()
+        paths.extend(sibling for sibling in siblings if sibling.is_file())
+        if lower in level_names:
             packed = next(
                 (
                     parent

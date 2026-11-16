@@ -46,6 +46,22 @@ class GameSourceTests(unittest.TestCase):
 
         self.assertEqual(actual, expected)
 
+    def test_tod_level_archive_discovers_texture_sibling(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            level = Path(temporary)
+            selected = level / "level_cached.psarc"
+            expected = [
+                selected,
+                level / "level_uncached.psarc",
+                level / "level_textures.psarc",
+            ]
+            for path in expected:
+                path.touch()
+
+            actual = GameSource._paired_archives(selected)
+
+        self.assertEqual(actual, expected)
+
     def test_discovers_extracted_sibling_level_archives(self):
         with tempfile.TemporaryDirectory() as temporary:
             levels = Path(temporary) / "packed" / "levels"

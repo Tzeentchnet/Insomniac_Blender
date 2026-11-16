@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 
 from ..core.iso import (
     game_cached_level_path,
     prepare_game_level,
+    validate_game_iso,
 )
 from ..core.source import GameSource
 
@@ -25,6 +27,17 @@ class GameAdapter:
     supports_iso: bool = True
     supports_levels: bool = True
     experimental: bool = False
+    level_archives: tuple[str, ...] = (
+        "level_cached.psarc",
+        "level_uncached.psarc",
+    )
+    global_archives: tuple[str, ...] = (
+        "global_cached.psarc",
+        "global_uncached.psarc",
+    )
+    iso_title_id: str | None = None
+    iso_version: str | None = None
+    level_local_asset_ids: bool = False
 
     @property
     def iso_preference_name(self) -> str:
@@ -48,7 +61,34 @@ class GameAdapter:
             cache_directory,
             cache_key=self.cache_key,
             game_label=self.label,
+            level_archives=self.level_archives,
+            global_archives=self.global_archives,
+            expected_title_id=self.iso_title_id,
+            expected_version=self.iso_version,
         )
+
+    def validate_iso(self, iso_path: str | Path) -> dict[str, str]:
+        if not self.supports_iso:
+            raise ValueError(f"{self.label} does not use ISO sources")
+        if self.iso_title_id is None and self.iso_version is None:
+            return {}
+        return validate_game_iso(
+            iso_path,
+            game_label=self.label,
+            expected_title_id=self.iso_title_id,
+            expected_version=self.iso_version,
+        )
+
+    def catalog_identifier(
+        self,
+        kind: Enum,
+        tuid: int,
+        level: str,
+    ) -> str:
+        kind_name = kind.name
+        if self.level_local_asset_ids:
+            return f"{kind_name}:{level}:{tuid:016X}"
+        return f"{kind_name}:{tuid:016X}"
 
     def cached_level_path(
         self,
@@ -89,10 +129,40 @@ def _create_burning_skies_catalog(path: str | Path | None):
     return build_source_catalog(path)
 
 
+def _create_ratchet_tod_reader(source: GameSource):
+    from .ratchet_tod.reader import RatchetTodReader
+
+    return RatchetTodReader(source)
+
+
 _GAMES_ROOT = Path(__file__).parent
 
 
 GAME_ADAPTERS = {
+    "RATCHET_TOD": GameAdapter(
+        id="RATCHET_TOD",
+        label="Ratchet & Clank Future: Tools of Destruction",
+        engine="Insomniac Engine v1 (PS3)",
+        engine_id="V1",
+        cache_key="ratchet_tod",
+        asset_prefix="TOD",
+        bundled_catalog_path=(
+            _GAMES_ROOT
+            / "ratchet_tod"
+            / "data"
+            / "ratchet_tod_us_v0200_catalog.json"
+        ),
+        create_reader=_create_ratchet_tod_reader,
+        level_archives=(
+            "level_cached.psarc",
+            "level_uncached.psarc",
+            "level_textures.psarc",
+        ),
+        global_archives=(),
+        iso_title_id="BCUS98127",
+        iso_version="02.00",
+        level_local_asset_ids=True,
+    ),
     "RESISTANCE_2": GameAdapter(
         id="RESISTANCE_2",
         label="Resistance 2",

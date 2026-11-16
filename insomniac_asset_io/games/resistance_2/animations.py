@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import Enum
 
 import numpy as np
@@ -20,6 +20,7 @@ SECT_ANIMATION = 0xF000
 
 
 class AnimationProfile(Enum):
+    RATCHET_TOD = "RATCHET_TOD"
     RESISTANCE_2 = "RESISTANCE_2"
     RESISTANCE_3 = "RESISTANCE_3"
 
@@ -393,6 +394,32 @@ def _stored_frame_index(
     return mapped if mapped < header.frame_count else frame
 
 
+def _effective_header(
+    header: AnimationHeader,
+    profile: AnimationProfile,
+) -> AnimationHeader:
+    if profile is not AnimationProfile.RATCHET_TOD:
+        return header
+    disk_stride = _pad(header.frame_stride, 16)
+    minimum_stride = _pad(
+        _pad(header.track16_count * 2, 16) + header.track8_count,
+        16,
+    )
+    if (
+        header.track8_count == 0
+        and header.frame_count > 1
+        and disk_stride == minimum_stride
+    ):
+        return replace(
+            header,
+            frame_count=header.frame_count // 2,
+            frame_rate=header.frame_rate * 0.5,
+            frames_offset=header.frames_offset + disk_stride,
+            frame_stride=disk_stride * 2,
+        )
+    return replace(header, frame_stride=disk_stride)
+
+
 def _decode_clip(
     ighw: IghwFile,
     header: AnimationHeader,
@@ -400,6 +427,7 @@ def _decode_clip(
     *,
     profile: AnimationProfile = AnimationProfile.RESISTANCE_2,
 ) -> DecodedClip:
+    header = _effective_header(header, profile)
     frame_count = header.frame_count
     bone_count = skeleton.bone_count
     if frame_count <= 0:
@@ -512,7 +540,10 @@ def _decode_clip(
                 if index < len(control.track8_bases)
                 else 0
             )
-            value = _wrap_i16(base, int(delta))
+            delta_value = int(delta)
+            if profile is AnimationProfile.RATCHET_TOD:
+                delta_value <<= 2
+            value = _wrap_i16(base, delta_value)
             _assign_track(
                 frame,
                 value,
@@ -580,7 +611,11 @@ def _decode_clip(
 
     if (
         header.additive
-        and profile is AnimationProfile.RESISTANCE_2
+        and profile
+        in {
+            AnimationProfile.RATCHET_TOD,
+            AnimationProfile.RESISTANCE_2,
+        }
     ):
         rotations = _quat_multiply(bind_q[None, :, :], rotations)
         blend_enabled = np.ones(bone_count, dtype=np.bool_)
@@ -957,4 +992,27 @@ def decode_animset(
         )
     if profile is AnimationProfile.RESISTANCE_3:
         _compose_r3_overlays(clips, skeleton)
+    return clips
+
+
+def decode_inline_animations(
+    data: bytes,
+    offsets: list[int] | tuple[int, ...],
+    skeleton: Skeleton,
+    *,
+    profile: AnimationProfile,
+    label: str = "inline animations",
+) -> list[DecodedClip]:
+    ighw = IghwFile(data, label=label)
+    clips: list[DecodedClip] = []
+    for offset in offsets:
+        ighw.require(offset, 0x3A, purpose="animation header")
+        clips.append(
+            _decode_clip(
+                ighw,
+                _read_header(ighw, offset),
+                skeleton,
+                profile=profile,
+            )
+        )
     return clips

@@ -1,5 +1,28 @@
 # Known issues
 
+## Ratchet & Clank Future: Tools of Destruction
+
+Support is intentionally restricted to the USA `BCUS98127` v02.00 disc.
+Other regions or revisions fail disc validation rather than being parsed with
+unverified offsets.
+
+The retail disc's `DEBUG.PSARC` has no usable name database. Catalog and
+Blender names therefore use stable level-local fallbacks (`Moby_XXXX` and
+`Tie_XXXXXXXX`). Numeric identities can collide between levels; catalog
+identifiers include the owner level to keep those assets distinct.
+
+Inline animations are decoded in both observed forms. Complex clips apply
+the runtime's signed 8-bit delta scaling, while simple clips discard paired
+filler frames and use the effective half frame rate. Gameplay instances in a
+level remain static linked meshes, as with R2/R3; import an individual Moby
+to edit its skeleton and Actions.
+
+Old Moby secondary-bangle semantics, damage permutations, authored lower
+LODs, and Moby collision are not yet independently verified. `collision.dat`
+also uses a separate non-IGHW level layout and is not imported. Shrub and
+foliage geometry, lighting, VFX, cubemaps, and audio are outside the current
+level importer.
+
 ## Resistance: Burning Skies (experimental)
 
 Burning Skies render packets import as static bind-pose geometry; skin

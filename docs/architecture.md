@@ -25,16 +25,17 @@ lookups fail rather than choosing an arbitrary level. PSARC reads operate on
 individual compression blocks, so a Moby pointer can read a small slice from
 a large `mobys.dat` entry.
 
-Selecting a level archive opens its cached/uncached pair and, when present in
-the standard disc hierarchy, the global pair. Global texture bundles are
-indexed by their resource hashes using bounded slice reads; large texel files
-are not loaded merely to build the index.
+Selecting a level archive opens its cached/uncached pair and, when present,
+the level texture archive and standard global pair. Global texture bundles
+are indexed by their resource hashes using bounded slice reads; large texel
+files are not loaded merely to build the index.
 
-Selecting a decrypted R2 or R3 ISO resolves through the same source path after
-the selected level/global archive pairs are extracted. A bounded internal
+Selecting a supported decrypted PS3 ISO resolves through the same source path
+after the adapter-declared archive set is extracted. A bounded internal
 ISO9660 reader handles ordinary images and R3's hybrid image; `tar` remains a
-fallback. A complete game-specific extraction is reused, so inspect and
-import operators can accept the ISO directly without repeating the copy.
+fallback. Adapters can require exact `PARAM.SFO` title and version values.
+A complete game-specific extraction is reused, so inspect and import
+operators can accept the ISO directly without repeating the copy.
 
 The sidebar selectors are backed by per-game metadata-only disc catalogs. The
 bundled USA catalogs record level IDs, source names, and Moby/Tie TUID
@@ -43,6 +44,11 @@ first resolves against its manual source override, then extracted owner
 levels, then the active game's configured ISO. Level selection follows the
 same cache-first resolution. A background catalog worker can replace either
 bundled catalog with a locally generated catalog for a different disc.
+
+Catalog identity is adapter-driven. R2 and R3 retain globally meaningful
+TUIDs, while Tools of Destruction includes the owner level in each catalog
+identifier because its Moby indices, Tie offsets, shader indices, and texture
+record offsets are level-local.
 
 If a shader texture is absent from both domains, the R2 adapter lazily indexes
 already-extracted sibling `level_cached.psarc` files under the same
@@ -69,6 +75,26 @@ NumPy is used for:
 - bind matrices;
 - animation tracks;
 - Morton-unswizzled texture arrays.
+
+## Tools of Destruction adapter
+
+`RatchetTodReader` is isolated from the R2/R3 pointer-table reader. It loads
+the selected level's `main.dat` metadata and uses bounded slices from
+`vertices.dat`, `textures.dat`, and `texstream.dat`. Mobys are addressed by
+their local table index; Ties use the byte offset of their `main.dat` header.
+Mesh shader indices are localized before entering the shared Blender bridge,
+so an import only builds materials it actually uses.
+
+TOD animations are inline in `main.dat`. They reuse the shared typed
+animation output but have a dedicated playback profile: signed 8-bit deltas
+are shifted left by two before adding their 16-bit bases, frame strides are
+16-byte aligned, and simple zero-8-bit-track clips discard alternating filler
+records and play at half the disk rate. No bind-pose fallback is used for
+compressed clips.
+
+The old level layout has one zone. Its UFrag terrain and Tie placements are
+decoded from `main.dat` plus the level vertex/index sections; `gameplay.dat`
+provides one `art` region of placed Mobys.
 
 ## Blender bridge
 

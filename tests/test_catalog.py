@@ -226,6 +226,73 @@ class Resistance2CatalogTests(unittest.TestCase):
             "Moby 0x0000000000001234 - legacy",
         )
 
+    def test_tod_catalog_keeps_level_local_ids_separate(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            path = root / "ratchet_tod" / "disc_catalog.json"
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "game": "RATCHET_TOD",
+                        "region": "Test",
+                        "names": {},
+                        "levels": [
+                            {
+                                "id": "level_a",
+                                "mobys": ["0x0000000000000001"],
+                                "ties": [],
+                            },
+                            {
+                                "id": "level_b",
+                                "mobys": ["0x0000000000000001"],
+                                "ties": [],
+                            },
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            catalog = load_game_catalog(
+                root,
+                "RATCHET_TOD",
+            )
+
+        self.assertEqual(len(catalog.assets), 2)
+        self.assertEqual(
+            {asset.identifier for asset in catalog.assets},
+            {
+                "MOBY:level_a:0000000000000001",
+                "MOBY:level_b:0000000000000001",
+            },
+        )
+        self.assertTrue(
+            all(len(asset.levels) == 1 for asset in catalog.assets)
+        )
+
+    def test_loads_bundled_tod_usa_v0200_catalog(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            catalog = load_game_catalog(
+                Path(temporary),
+                "RATCHET_TOD",
+            )
+
+        self.assertEqual(catalog.region, "USA v02.00")
+        self.assertEqual(len(catalog.levels), 20)
+        self.assertEqual(len(catalog.assets), 5060)
+        self.assertEqual(
+            sum(asset.kind is AssetKind.MOBY for asset in catalog.assets),
+            3012,
+        )
+        self.assertEqual(
+            sum(asset.kind is AssetKind.TIE for asset in catalog.assets),
+            2048,
+        )
+        self.assertTrue(
+            all(len(asset.levels) == 1 for asset in catalog.assets)
+        )
+
     def test_loads_bundled_resistance_3_usa_catalog(self):
         with tempfile.TemporaryDirectory() as temporary:
             catalog = load_game_catalog(

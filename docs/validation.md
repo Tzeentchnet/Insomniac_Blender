@@ -19,6 +19,46 @@ The smoke test reports resource counts and decodes one Moby, skeleton,
 animset, diffuse texture, Tie, zone, and gameplay region without writing game
 data to the repository.
 
+Run the environment-gated Tools of Destruction Metropolis regression against
+an extracted archive trio:
+
+```powershell
+$env:TOD_LEVEL_SOURCE = "E:\tests\InsomniacAssetIO\ratchet_tod\cache\ratchet_tod\metropolis\PS3_GAME\USRDIR\packed\levels\metropolis"
+$env:TOD_ISO_PATH = "E:\path\to\Ratchet-and-Clank-Future-Tools-of-Destruction-v02.00.dec.iso"
+python -m unittest discover -s tests -p "test_real_tod.py" -v
+Remove-Item Env:TOD_LEVEL_SOURCE
+Remove-Item Env:TOD_ISO_PATH
+```
+
+This checks the representative compressed and pair-frame animations, a shader
+texture, a Tie, UFrag terrain, Tie placements, gameplay Moby placements, the
+exact `BCUS98127`/`02.00` disc identity, and the 20-level disc inventory.
+Each source-specific test is skipped when its corresponding environment
+variable is not set.
+
+Validate Tools of Destruction imports with Blender 5.2. All generated
+`.blend` files must use a disposable output directory outside the repository,
+for example `E:\tests\InsomniacAssetIO\ratchet_tod`:
+
+```powershell
+& "D:\Blender Foundation\Blender 5.2\blender.exe" --background `
+  --factory-startup --python-exit-code 1 `
+  --python tools\blender_smoke_tod.py -- `
+  --source "E:\tests\InsomniacAssetIO\ratchet_tod\cache\...\level_cached.psarc" `
+  --output "E:\tests\InsomniacAssetIO\ratchet_tod\imports\moby.blend" `
+  --kind moby --tuid 22 --materials --animations
+
+& "D:\Blender Foundation\Blender 5.2\blender.exe" --background `
+  --factory-startup --python-exit-code 1 `
+  --python tools\blender_smoke_tod.py -- `
+  --source "E:\tests\InsomniacAssetIO\ratchet_tod\cache\...\level_cached.psarc" `
+  --output "E:\tests\InsomniacAssetIO\ratchet_tod\imports\level.blend" `
+  --kind level
+```
+
+The TOD smoke tool also accepts `--kind tie --tuid <header-offset>`. It fails
+if a requested import produces no mesh, no material, or no Action.
+
 Diffuse lookup first uses the level texture tables, then the global archive's
 per-TUID texture bundles, then already-extracted sibling level pairs under the
 same `packed/levels` tree. A missing/stale texture ID can also resolve through
@@ -91,6 +131,15 @@ object dependency, and packed game image:
 
 The current implementation was validated in Blender 5.2.2 LTS with:
 
+- Tools of Destruction USA v02.00 Metropolis: 201 Mobys, 193 Ties,
+  631 shaders, 1,297 textures, 1,987 UFrags, 4,848 Tie placements, and
+  1,378 gameplay Moby placements;
+- a compressed TOD Moby Action using 8-bit tracks, with 151 finite decoded
+  frames across a 38-bone skeleton;
+- TOD `animate_spin`, reduced from 8,001 paired disk records to 4,000 Action
+  frames at 15 fps;
+- a saved TOD Metropolis level containing 6,228 objects and 313 mesh
+  datablocks, plus separate saved Moby and Tie material imports;
 - a 16,150-vertex Moby containing 44 bones and 21 Actions;
 - a 4,129-vertex Moby containing 62 bones, 2 Actions, and an RG8 tangent
   normal, including Cycles render compilation before and after reopening;

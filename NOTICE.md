@@ -2,15 +2,24 @@
 
 Insomniac Asset IO is licensed under GPL-3.0-or-later.
 
-The Resistance 2 and Resistance 3 implementations were independently written
-in Python from publicly documented structures, observed behavior, and
-bounded analysis of legally obtained game data. They incorporate format
-knowledge published by GPL-licensed projects, primarily:
+The Tools of Destruction, Resistance 2, and Resistance 3 implementations were
+independently written in Python from publicly documented structures, observed
+behavior, and bounded analysis of legally obtained game data. They incorporate
+format knowledge published by GPL-licensed projects, primarily:
 
 - **InsomniaToolset**, PredatorCZ and contributors  
   <https://github.com/PredatorCZ/InsomniaToolset>
 - **ReChimera**, ReChimera contributors  
   <https://github.com/Mrroboto9819/ReChimera>
+- **ReLunacy**, ReLunacy contributors
+  <https://github.com/Mrroboto9819/ReLunacy>
+
+Tools of Destruction animation behavior was additionally checked through
+bounded static control-flow analysis using the MIT-licensed **Qwark's
+Awakening** recompilation framework:
+
+- **Qwark's Awakening**, undecuple and contributors
+  <https://github.com/undecuple/qwarks-awakening>
 
 Additional architectural and community references:
 

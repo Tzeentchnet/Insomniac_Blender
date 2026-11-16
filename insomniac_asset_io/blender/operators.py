@@ -100,6 +100,15 @@ def _source_contains_asset(
 ) -> bool:
     with GameSource.open(source_path) as source:
         reader = adapter.create_reader(source)
+        if adapter.level_local_asset_ids:
+            normalized = reader.resource_prefix.replace(
+                "\\",
+                "/",
+            ).casefold()
+            owner_level = asset.levels[0].replace("\\", "/").casefold()
+            expected = f"/levels/{owner_level}"
+            if not normalized.endswith(expected):
+                return False
         return any(
             pointer.tuid == asset.tuid
             for pointer in reader.asset_pointers(asset.kind)

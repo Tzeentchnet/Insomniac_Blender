@@ -48,6 +48,14 @@ class InsomniacAddonPreferences(bpy.types.AddonPreferences):
         ),
         subtype="FILE_PATH",
     )
+    ratchet_tod_iso_path: bpy.props.StringProperty(
+        name="Tools of Destruction ISO",
+        description=(
+            "A legally obtained decrypted BCUS98127 v02.00 ISO used for "
+            "Ratchet & Clank Future: Tools of Destruction imports"
+        ),
+        subtype="FILE_PATH",
+    )
     last_game: bpy.props.EnumProperty(
         name="Last selected game",
         items=[
@@ -70,6 +78,10 @@ class InsomniacAddonPreferences(bpy.types.AddonPreferences):
         options={"HIDDEN"},
     )
     resistance_burning_skies_last_source_path: bpy.props.StringProperty(
+        subtype="FILE_PATH",
+        options={"HIDDEN"},
+    )
+    ratchet_tod_last_source_path: bpy.props.StringProperty(
         subtype="FILE_PATH",
         options={"HIDDEN"},
     )
@@ -204,6 +216,7 @@ class InsomniacAddonPreferences(bpy.types.AddonPreferences):
         layout = self.layout
         source = layout.box()
         source.label(text="Game sources and extraction", icon="DISC")
+        source.prop(self, "ratchet_tod_iso_path")
         source.prop(self, "resistance_2_iso_path")
         source.prop(self, "resistance_3_iso_path")
         source.prop(self, "asset_cache_directory")

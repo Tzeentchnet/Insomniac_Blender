@@ -1748,8 +1748,9 @@ def import_level(
         if unsupported_shrubs or unsupported_foliage:
             warnings.append(
                 f"Skipped {unsupported_shrubs} shrub and "
-                f"{unsupported_foliage} foliage placements; their R2 "
-                "geometry chains are documented but not implemented yet"
+                f"{unsupported_foliage} foliage placements; their "
+                f"{_reader_game_label(reader)} geometry chains are "
+                "documented but not implemented yet"
             )
 
     if options.gameplay:

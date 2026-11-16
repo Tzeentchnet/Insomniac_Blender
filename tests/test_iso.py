@@ -1,21 +1,55 @@
-from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
+from insomniac_asset_io.core.errors import InsomniacError
 from insomniac_asset_io.core.iso import (
     extract_game_iso_member,
     find_resistance_2_iso,
     list_resistance_2_levels,
     list_resistance_3_levels,
+    parse_param_sfo,
     prepare_resistance_2_level,
     resolve_resistance_2_source,
+    validate_game_iso,
 )
-from insomniac_asset_io.core.errors import InsomniacError
 
 
 SECTOR_SIZE = 2048
+
+
+def _param_sfo(values: dict[str, str]) -> bytes:
+    keys = bytearray()
+    encoded_values = bytearray()
+    entries = bytearray()
+    key_offsets: dict[str, int] = {}
+    value_offsets: dict[str, int] = {}
+    for key, value in values.items():
+        key_offsets[key] = len(keys)
+        keys.extend(key.encode("utf-8") + b"\0")
+        value_offsets[key] = len(encoded_values)
+        encoded_values.extend(value.encode("utf-8") + b"\0")
+    key_table = 20 + len(values) * 16
+    value_table = (key_table + len(keys) + 3) & ~3
+    for key, value in values.items():
+        length = len(value.encode("utf-8")) + 1
+        entries.extend(key_offsets[key].to_bytes(2, "little"))
+        entries.extend((0x0204).to_bytes(2, "little"))
+        entries.extend(length.to_bytes(4, "little"))
+        entries.extend(length.to_bytes(4, "little"))
+        entries.extend(value_offsets[key].to_bytes(4, "little"))
+    payload = bytearray(value_table + len(encoded_values))
+    payload[:4] = b"\0PSF"
+    payload[4:8] = (0x00000101).to_bytes(4, "little")
+    payload[8:12] = key_table.to_bytes(4, "little")
+    payload[12:16] = value_table.to_bytes(4, "little")
+    payload[16:20] = len(values).to_bytes(4, "little")
+    payload[20 : 20 + len(entries)] = entries
+    payload[key_table : key_table + len(keys)] = keys
+    payload[value_table:] = encoded_values
+    return bytes(payload)
 
 
 def _directory_record(
@@ -144,6 +178,52 @@ def _minimal_game_iso(path: Path) -> bytes:
 
 
 class Resistance2IsoTests(unittest.TestCase):
+    def test_parses_bounded_param_sfo_strings(self):
+        values = parse_param_sfo(
+            _param_sfo(
+                {
+                    "TITLE_ID": "BCUS98127",
+                    "VERSION": "02.00",
+                }
+            )
+        )
+
+        self.assertEqual(values["TITLE_ID"], "BCUS98127")
+        self.assertEqual(values["VERSION"], "02.00")
+
+    def test_rejects_invalid_param_sfo_ranges(self):
+        data = bytearray(_param_sfo({"TITLE_ID": "BCUS98127"}))
+        data[8:12] = (0xFFFF).to_bytes(4, "little")
+
+        with self.assertRaisesRegex(
+            InsomniacError,
+            "invalid PARAM.SFO table offsets",
+        ):
+            parse_param_sfo(bytes(data))
+
+    def test_tod_iso_identity_mismatch_fails_explicitly(self):
+        with (
+            mock.patch(
+                "insomniac_asset_io.core.iso.read_game_iso_member",
+                return_value=_param_sfo(
+                    {
+                        "TITLE_ID": "BCES00001",
+                        "VERSION": "01.00",
+                    }
+                ),
+            ),
+            self.assertRaisesRegex(
+                InsomniacError,
+                "requires TITLE_ID BCUS98127",
+            ),
+        ):
+            validate_game_iso(
+                "wrong.iso",
+                game_label="Tools of Destruction",
+                expected_title_id="BCUS98127",
+                expected_version="02.00",
+            )
+
     def test_lists_nested_and_spaced_levels(self):
         with tempfile.TemporaryDirectory() as temporary:
             iso = Path(temporary) / "game.iso"
