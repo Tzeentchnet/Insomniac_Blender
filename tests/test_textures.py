@@ -34,6 +34,27 @@ class TextureTests(unittest.TestCase):
         self.assertEqual(rgba.shape, (4, 4, 4))
         np.testing.assert_array_equal(rgba[0, 0], [255, 0, 0, 255])
 
+    def test_interpolates_dxt_four_color_palette_without_byte_wrap(self):
+        selectors = sum(3 << (2 * pixel) for pixel in range(16))
+        block = struct.pack("<HHI", 0xF800, 0x07E0, selectors)
+        info = TextureInfo(
+            id=8,
+            tuid=8,
+            format_code=0x06,
+            mip_count=1,
+            width=4,
+            height=4,
+            offset=0,
+            length=8,
+        )
+
+        rgba = decode_texture(info, block).rgba
+
+        np.testing.assert_array_equal(
+            rgba,
+            np.full((4, 4, 4), (85, 170, 0, 255), dtype=np.uint8),
+        )
+
     def test_decodes_dxt1_block_layout_and_transparency(self):
         selectors = sum(
             (pixel % 4) << (2 * pixel) for pixel in range(16)

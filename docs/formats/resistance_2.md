@@ -590,8 +590,9 @@ slot without the flag. In a decoded 24-map Chicxulub sample, only one detail
 texture was grayscale. Most were multi-channel data centered near 128,
 consistent with detail normals or other signed/packed perturbations rather
 than a simple color overlay. Vector 4 Z likely controls scale, but the exact
-composition and per-family differences remain unverified. Detail images and
-metadata are preserved but intentionally left out of the Blender node graph.
+composition and per-family differences remain unverified. Bound detail images
+are created as unconnected Non-Color nodes, preserving the source data in the
+Blender material without assigning speculative rendering semantics.
 
 R2 texture format bytes:
 

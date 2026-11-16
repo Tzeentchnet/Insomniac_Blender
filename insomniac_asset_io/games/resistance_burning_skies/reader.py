@@ -296,7 +296,7 @@ class BurningSkiesReader:
             texture_lookup_paths=texture_paths,
             material_values=(textures.diffuse_tint,),
             normal_texture_encoding="DIRECT",
-            specular_texture_semantics="GLOSS",
+            specular_texture_semantics=textures.specular_semantics,
             emissive_texture_id=emissive_texture_id,
             emissive_texture_lookup_path=emissive_path,
             alpha_texture_id=alpha_texture_id,

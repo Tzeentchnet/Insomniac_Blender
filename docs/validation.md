@@ -80,7 +80,8 @@ inverted into roughness when the shader enables gloss in either game. Packed
 green connects to Principled specular only when the corresponding shader flag
 is present; that flag is absent from the current R2 corpus. Additional
 material-vector emission tint, authored emission strength, packed alpha, and
-detail-map composition remain under research.
+detail-map composition remain under research. Bound detail textures are still
+imported as unconnected Non-Color nodes for inspection and downstream authoring.
 
 Analyze one extracted cached archive, or every cached level archive in an ISO:
 

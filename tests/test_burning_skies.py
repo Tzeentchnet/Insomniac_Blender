@@ -644,6 +644,21 @@ class BurningSkiesFormatTests(unittest.TestCase):
             np.full((4, 4, 4), (255, 0, 0, 255), dtype=np.uint8),
         )
 
+    def test_decodes_ubc1_four_color_interpolation_without_byte_wrap(self):
+        selectors = sum(3 << (2 * pixel) for pixel in range(16))
+        payload = struct.pack("<HHI", 0xF800, 0x07E0, selectors)
+
+        texture = decode_p2t(
+            _texture_resource(FORMAT_UBC1, payload=payload),
+            label="textures/TestUbc1Interpolation.p2t",
+            texture_id=126,
+        )
+
+        np.testing.assert_array_equal(
+            texture.rgba,
+            np.full((4, 4, 4), (85, 170, 0, 255), dtype=np.uint8),
+        )
+
     def test_decodes_32_bit_bgra_channel_order(self):
         texture = decode_p2t(
             _texture_resource(
@@ -706,6 +721,7 @@ class BurningSkiesFormatTests(unittest.TestCase):
             b"g_DiffuseMapTexture\0Test_CLR\0"
             b"g_NormalMapTexture\0Test_NRM\0"
             b"g_GlossMapTexture\0Test_GLS\0"
+            b"g_DetailMapTexture\0Test_DTL\0"
             b"g_EmissiveMapTexture\0Test_GLO\0"
             b"g_AlphaMapTexture\0Test_APH\0"
         )
@@ -718,6 +734,7 @@ class BurningSkiesFormatTests(unittest.TestCase):
                 "test_clr": "textures/Test_CLR.p2t",
                 "test_nrm": "textures/Test_NRM.p2t",
                 "test_gls": "textures/Test_GLS.p2t",
+                "test_dtl": "textures/Test_DTL.p2t",
                 "test_glo": "textures/Test_GLO.p2t",
                 "test_aph": "textures/Test_APH.p2t",
             },
@@ -726,8 +743,26 @@ class BurningSkiesFormatTests(unittest.TestCase):
         self.assertEqual(textures.albedo, "textures/Test_CLR.p2t")
         self.assertEqual(textures.normal, "textures/Test_NRM.p2t")
         self.assertEqual(textures.specular, "textures/Test_GLS.p2t")
+        self.assertEqual(textures.specular_semantics, "GLOSS")
+        self.assertEqual(textures.detail, "textures/Test_DTL.p2t")
         self.assertEqual(textures.emissive, "textures/Test_GLO.p2t")
         self.assertEqual(textures.alpha, "textures/Test_APH.p2t")
+
+    def test_distinguishes_bmx_specular_map_from_gloss(self):
+        data = _resource(0x09, DATA_BASE, "TestMaterial")
+        strings = b"g_SpecularMapTexture\0Test_SPC\0"
+        data[0x100 : 0x100 + len(strings)] = strings
+
+        textures = decode_material_texture_paths(
+            bytes(data),
+            label="materials/Test.bmx",
+            texture_paths_by_stem={
+                "test_spc": "textures/Test_SPC.p2t",
+            },
+        )
+
+        self.assertEqual(textures.specular, "textures/Test_SPC.p2t")
+        self.assertEqual(textures.specular_semantics, "SPECULAR")
 
     def test_decodes_color_only_opaque_emissive_material(self):
         data = _resource(0x09, DATA_BASE + 0x300, "TestEmissive")

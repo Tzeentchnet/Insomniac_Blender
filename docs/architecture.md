@@ -75,7 +75,8 @@ NumPy is used for:
 - skin palettes and weights;
 - bind matrices;
 - animation tracks;
-- Morton-unswizzled texture arrays.
+- Morton-unswizzled texture arrays;
+- shared vectorized BC1, BC2, and BC3 block decoding.
 
 ## Tools of Destruction adapter
 
@@ -114,7 +115,11 @@ Blender custom properties. The indices distinguish active bindings from stale
 or runtime-only reference fields. R3's two additional texture slots, two
 pre-control words, and three trailing material values are retained without
 assigning speculative rendering semantics. Diffuse images are color data.
-Reconstructed normal and packed auxiliary images are non-color data.
+Reconstructed normal, packed auxiliary, dedicated scalar, and detail images
+are non-color data. Blender 5.2 creates these datablocks with `is_data=True`
+so their colorspace is correct before pixel upload. Authored lookup paths and
+the ToD level scope participate in image reuse, preventing equal 32-bit IDs
+from aliasing unrelated textures.
 Packed blue gates the corresponding diffuse color into emission for both
 games, preserving authored hues while suppressing all-zero masks.
 
@@ -124,8 +129,11 @@ nodes work in Eevee and Cycles. A default-off **Enhanced source materials**
 preference additionally applies safe source color factors; it does not change
 the scene render engine. No metalness channel is inferred. Packed green is
 connected only when the shader's specular flag is present; that flag is absent
-from the current R2 corpus. Unverified packed-alpha, detail-map, and R3 overlay
-semantics remain disconnected.
+from the current R2 corpus. Bound detail maps are exposed as unconnected
+Non-Color image nodes; unverified packed-alpha, detail composition, and R3
+overlay semantics remain disconnected. Decoded RGBA reader caches are cleared
+after each material while compact format/emission analysis and Blender image
+references remain cached for reuse.
 
 Moby skeletons use stable `bone_NNN` names because R2 does not provide a
 reliable bone-name table in this chain. The original index and flags are

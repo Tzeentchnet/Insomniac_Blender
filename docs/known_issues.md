@@ -93,7 +93,8 @@ the normalized blue mask drives intensity at Principled strength `1.0`.
 
 Detail maps are often signed multi-channel data and likely use values from the
 material parameter block for scale and blending. Their exact composition is
-not yet proven and they remain metadata-only.
+not yet proven. Bound maps are preserved as unconnected Non-Color image nodes
+instead of being blended speculatively.
 
 Blend mode 1 is used by several deferred decal and surface-overlay families,
 but its exact source framebuffer equation is not named by the available
@@ -185,8 +186,9 @@ same alpha channel to authored mask and blend modes.
 Packed green remains disconnected because the public `useSpecular` bit is
 absent from every shader in the whole-disc corpus. Detail maps are
 multi-channel in most tested cases; their exact blend and scale semantics are
-not proven, so they also remain disconnected. Foliage uses a distinct
-material-vector family, but foliage geometry is not imported yet.
+not proven, so their imported Non-Color image nodes remain disconnected.
+Foliage uses a distinct material-vector family, but foliage geometry is not
+imported yet.
 
 The source of any additional emission tint and intensity within the six
 `0x5000` material vectors is not yet proven. Emissive color therefore uses the

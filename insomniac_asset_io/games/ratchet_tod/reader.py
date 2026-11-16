@@ -86,6 +86,7 @@ class RatchetTodReader(Resistance2Reader):
     asset_prefix = "TOD"
     animation_profile = AnimationProfile.RATCHET_TOD
     material_surface_channels_by_default = True
+    material_base_color_factor_supported = False
     material_emission_uses_albedo = False
 
     def __init__(self, source: GameSource) -> None:
@@ -625,8 +626,9 @@ class RatchetTodReader(Resistance2Reader):
         base = self._pointer(AssetKind.SHADER, tuid).offset
         texture_ids = tuple(
             self.main.u32(base + offset) or None
-            for offset in (0, 4, 8)
+            for offset in (0, 4, 8, 0x0C)
         )
+        material_word = self.main.u32(base + 0x10)
         rendering_mode = self.main.u8(base + 0x11)
         alpha_mode = {
             0: "OPAQUE",
@@ -649,9 +651,21 @@ class RatchetTodReader(Resistance2Reader):
             albedo_texture_id=texture_ids[0],
             normal_texture_id=texture_ids[1],
             specular_texture_id=texture_ids[2],
-            detail_texture_id=None,
+            detail_texture_id=texture_ids[3],
+            material_word=material_word,
+            material_values=tuple(
+                tuple(
+                    self.main.f32(
+                        base
+                        + 0x20
+                        + vector_index * 0x10
+                        + component_index * 4
+                    )
+                    for component_index in range(4)
+                )
+                for vector_index in range(6)
+            ),
             alpha_mode_override=alpha_mode,
-            material_tail_values=(self.main.f32(base + 0x20),),
         )
         self._shader_cache[tuid] = shader
         return shader

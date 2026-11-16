@@ -89,7 +89,7 @@ See [Resistance 2 formats](docs/formats/resistance_2.md) and
 | USA model/level import catalog | 5,820 named assets and 27 levels bundled as metadata |
 | Blender Asset Browser library | Locally generated Moby/Tie Collections, standalone Materials, and optional Actions |
 | Diffuse, reconstructed normal, packed red-gloss response, albedo-colored packed-blue emission, and the Goliath wet-leg overlay | Supported in the default material mode |
-| Detail and additional shader references | Preserved as metadata; runtime composition is not yet proven |
+| Detail and additional shader references | Bound detail images are preserved as unconnected Non-Color nodes; R3 effect slots remain metadata-only because runtime composition is not yet proven |
 | DXT and common uncompressed textures | Supported, including global texture bundles |
 | Zone Tie placement and terrain (`UFrag`) | Supported |
 | Gameplay Moby placement | Supported as linked static mesh instances |
@@ -114,8 +114,8 @@ experimental game adapter.
 | Lower LODs | Authored groups decoded; optional, disabled by default, and kept in a separate Collection |
 | Shadow-only and collision GBuffer packets | 156 auxiliary packets are excluded by default and available through the Collision geometry option |
 | BMX material references | Exact serialized packet maps decoded for all 798 GBuffer SMFs |
-| BMX surface channels | Diffuse tint, direct RGB normals, dedicated red-channel gloss, specular power, and dedicated emissive color/strength are supported |
-| Vita GXT textures | UBC1, UBC2, UBC3, 32-bit color, and PVRTC-II 4bpp supported |
+| BMX surface channels | Diffuse tint, direct RGB normals, dedicated gloss/specular data, detail data, specular power, alpha, and dedicated emissive color/strength are supported |
+| Vita GXT textures | NumPy-vectorized UBC1, UBC2, UBC3, 32-bit color, and PVRTC-II 4bpp supported |
 | Skeleton-only SMFs | 17 files import as bind-pose armatures, including `CH_PHYS_ADrone` |
 | Skin weights and animation | Not yet supported |
 | Geometry-less SMFs | Six files have no recoverable skeleton and fail explicitly |
@@ -333,8 +333,10 @@ rebuild existing materials or change the active scene render engine.
 
 Packed green remains disconnected because the corresponding R2 specular flag
 is absent from every shader in both current whole-disc corpora. Neither game
-provides a verified metalness channel. Detail maps and R3 effect-overlay slots
-are preserved as metadata rather than connected speculatively.
+provides a verified metalness channel. Bound detail maps are imported as
+unconnected Non-Color image nodes so their signed/packed values remain
+available without inventing a blend. R3 effect-overlay slots remain metadata
+rather than speculative node connections.
 
 ## Project layout
 

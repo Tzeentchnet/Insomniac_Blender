@@ -118,8 +118,15 @@ def _write_fixture(root: Path) -> None:
     struct.pack_into(">H", main, 0x792, 3)
     struct.pack_into(">H", main, 0x7A8, 0)
 
-    struct.pack_into(">I", main, 0x340, 0x440)
+    struct.pack_into(">4I", main, 0x340, *(0x440,) * 4)
+    main[0x350] = 0x1C
     main[0x351] = 0
+    struct.pack_into(
+        ">24f",
+        main,
+        0x360,
+        *(float(index) / 8.0 for index in range(24)),
+    )
     struct.pack_into(">I", main, 0x3C0, 0x440)
     main[0x3D1] = 4
     struct.pack_into(">f", main, 0x3E0, 0.5)
@@ -203,6 +210,18 @@ class RatchetTodReaderTests(unittest.TestCase):
                 self.assertEqual(shader.alpha_mode, "MASK")
                 texture = reader.read_texture(shader.albedo_texture_id)
                 self.assertEqual(texture.rgba.shape, (4, 4, 4))
+
+                surface_shader = reader.read_shader(0)
+                self.assertEqual(surface_shader.detail_texture_id, 0x440)
+                self.assertEqual(surface_shader.material_flags, 0x1C)
+                self.assertTrue(surface_shader.use_glossiness)
+                self.assertTrue(surface_shader.use_normal_map)
+                self.assertTrue(surface_shader.use_detail_map)
+                self.assertEqual(len(surface_shader.material_values), 6)
+                self.assertEqual(
+                    surface_shader.material_values[-1],
+                    (2.5, 2.625, 2.75, 2.875),
+                )
 
                 tie_id = reader.asset_pointers(AssetKind.TIE)[0].tuid
                 tie = reader.read_tie(tie_id)

@@ -66,6 +66,9 @@ if bpy is not None:
             )
             self.resource_prefix = ""
             self.material_surface_channels_by_default = True
+            self.material_base_color_factor_supported = (
+                game_id != "RATCHET_TOD"
+            )
             self.material_uses_base_color_factor_by_default = (
                 game_id == "RESISTANCE_BURNING_SKIES"
             )
@@ -80,6 +83,8 @@ if bpy is not None:
             )
             self.shader = shader
             self.textures = textures
+            self.texture_reads: list[tuple[int, str | None]] = []
+            self.clear_texture_cache_calls = 0
 
         def read_shader(self, _tuid: int) -> ShaderInfo:
             return self.shader
@@ -90,10 +95,11 @@ if bpy is not None:
             *,
             lookup_path: str | None = None,
         ) -> DecodedTexture:
+            self.texture_reads.append((texture_id, lookup_path))
             return self.textures[texture_id]
 
         def clear_texture_cache(self) -> None:
-            pass
+            self.clear_texture_cache_calls += 1
 
 
 @unittest.skipUnless(bpy is not None, "Blender Python is not available")
@@ -192,6 +198,296 @@ class BlenderMaterialTests(unittest.TestCase):
         _MaterialFactory._apply_colorspace(image, "color")
 
         self.assertEqual(image.alpha_mode, "CHANNEL_PACKED")
+
+    def test_all_supported_games_import_verified_data_maps(self) -> None:
+        texture_ids = {
+            "albedo": 0x710,
+            "normal": 0x720,
+            "surface": 0x730,
+            "detail": 0x740,
+        }
+        textures = {
+            role: self._decoded_texture(
+                texture_id,
+                format_code=0x08 if role == "normal" else 0x06,
+                value=128 if role == "normal" else 255,
+            )
+            for role, texture_id in texture_ids.items()
+        }
+        by_id = {
+            texture.info.id: texture for texture in textures.values()
+        }
+
+        for index, game_id in enumerate(
+            (
+                "RATCHET_TOD",
+                "RESISTANCE_2",
+                "RESISTANCE_3",
+                "RESISTANCE_BURNING_SKIES",
+            )
+        ):
+            with self.subTest(game_id=game_id):
+                is_vita = game_id == "RESISTANCE_BURNING_SKIES"
+                shader = ShaderInfo(
+                    tuid=0x200 + index,
+                    albedo_texture_id=texture_ids["albedo"],
+                    normal_texture_id=texture_ids["normal"],
+                    specular_texture_id=texture_ids["surface"],
+                    detail_texture_id=texture_ids["detail"],
+                    texture_lookup_paths=(
+                        "fixture/albedo",
+                        "fixture/normal",
+                        "fixture/surface",
+                        "fixture/detail",
+                    ),
+                    texture_map_indices=(0, 1, 2, 3),
+                    material_word=0x1C00_0000,
+                    normal_texture_encoding=(
+                        "DIRECT" if is_vita else "RECONSTRUCTED"
+                    ),
+                    specular_texture_semantics=(
+                        "GLOSS" if is_vita else "PACKED"
+                    ),
+                )
+                reader = _MaterialReader(game_id, shader, by_id)
+                material = _MaterialFactory(
+                    reader,
+                    True,
+                    [],
+                ).material(shader.tuid)
+                data_nodes = (
+                    material.node_tree.nodes[
+                        f"Normal_{texture_ids['normal']:08X}"
+                    ],
+                    material.node_tree.nodes[
+                        (
+                            "Gloss"
+                            if is_vita
+                            else "Packed"
+                        )
+                        + f"_{texture_ids['surface']:08X}"
+                    ],
+                    material.node_tree.nodes[
+                        f"Detail_{texture_ids['detail']:08X}"
+                    ],
+                )
+                diffuse = material.node_tree.nodes[
+                    f"Diffuse_{texture_ids['albedo']:08X}"
+                ]
+                detail = data_nodes[-1]
+
+                self.assertEqual(
+                    diffuse.image.colorspace_settings.name,
+                    "sRGB",
+                )
+                for node in data_nodes:
+                    self.assertEqual(
+                        node.image.colorspace_settings.name,
+                        "Non-Color",
+                    )
+                    self.assertEqual(
+                        node.image.alpha_mode,
+                        "CHANNEL_PACKED",
+                    )
+                self.assertFalse(detail.outputs["Color"].is_linked)
+                self.assertTrue(material["insomniac_detail_data_only"])
+                self.assertEqual(reader.clear_texture_cache_calls, 1)
+
+    def test_burning_skies_connects_dedicated_specular_data(self) -> None:
+        texture_id = 0x750
+        shader = ShaderInfo(
+            tuid=0x250,
+            albedo_texture_id=None,
+            normal_texture_id=None,
+            specular_texture_id=texture_id,
+            detail_texture_id=None,
+            texture_lookup_paths=(None, None, "fixture/specular", None),
+            specular_texture_semantics="SPECULAR",
+        )
+        reader = _MaterialReader(
+            "RESISTANCE_BURNING_SKIES",
+            shader,
+            {
+                texture_id: self._decoded_texture(
+                    texture_id,
+                    format_code=0x85000000,
+                )
+            },
+        )
+        material = _MaterialFactory(reader, True, []).material(shader.tuid)
+        principled = material.node_tree.nodes["Principled BSDF"]
+        specular = material.node_tree.nodes[f"Specular_{texture_id:08X}"]
+
+        self.assertEqual(
+            specular.image.colorspace_settings.name,
+            "Non-Color",
+        )
+        self.assertEqual(
+            material["insomniac_specular_texture_id"],
+            f"0x{texture_id:08X}",
+        )
+        self.assertTrue(
+            self._has_link(
+                material,
+                specular,
+                principled,
+                "Specular IOR Level",
+                from_socket="Color",
+            )
+        )
+        self.assertIsNone(
+            material.node_tree.nodes.get(f"Gloss_{texture_id:08X}")
+        )
+
+    def test_tod_texture_images_are_level_scoped(self) -> None:
+        texture_id = 0x760
+        shader = ShaderInfo(texture_id, texture_id, None, None, None)
+        metropolis = _MaterialReader(
+            "RATCHET_TOD",
+            shader,
+            {texture_id: self._decoded_texture(texture_id, value=64)},
+        )
+        metropolis.resource_prefix = (
+            "PS3_GAME/USRDIR/packed/levels/metropolis"
+        )
+        apogee = _MaterialReader(
+            "RATCHET_TOD",
+            shader,
+            {texture_id: self._decoded_texture(texture_id, value=192)},
+        )
+        apogee.resource_prefix = (
+            "PS3_GAME/USRDIR/packed/levels/apogee_space_station"
+        )
+
+        metropolis_material = _MaterialFactory(
+            metropolis,
+            True,
+            [],
+        ).material(shader.tuid)
+        apogee_material = _MaterialFactory(
+            apogee,
+            True,
+            [],
+        ).material(shader.tuid)
+        metropolis_image = metropolis_material.node_tree.nodes[
+            f"Diffuse_{texture_id:08X}"
+        ].image
+        apogee_image = apogee_material.node_tree.nodes[
+            f"Diffuse_{texture_id:08X}"
+        ].image
+
+        self.assertIsNot(metropolis_image, apogee_image)
+        self.assertIn("metropolis", metropolis_image.name)
+        self.assertIn("apogee_space_station", apogee_image.name)
+        self.assertEqual(
+            metropolis_image["insomniac_asset_scope"],
+            "metropolis",
+        )
+        self.assertEqual(
+            apogee_image["insomniac_asset_scope"],
+            "apogee_space_station",
+        )
+
+    def test_tod_raw_vectors_are_not_applied_as_base_color(self) -> None:
+        shader = ShaderInfo(
+            0x265,
+            None,
+            None,
+            None,
+            None,
+            material_values=((0.25, 0.5, 0.75, 1.0),),
+        )
+        reader = _MaterialReader("RATCHET_TOD", shader, {})
+
+        material = _MaterialFactory(
+            reader,
+            True,
+            [],
+            cycles_materials=True,
+        ).material(shader.tuid)
+
+        self.assertFalse(
+            material["insomniac_base_color_factor_valid"]
+        )
+        self.assertEqual(
+            tuple(material["insomniac_base_color_factor"]),
+            (1.0, 1.0, 1.0, 1.0),
+        )
+        self.assertNotEqual(
+            tuple(
+                material.node_tree.nodes["Principled BSDF"]
+                .inputs["Base Color"]
+                .default_value
+            ),
+            (0.25, 0.5, 0.75, 1.0),
+        )
+
+    def test_lookup_paths_disambiguate_colliding_texture_ids(self) -> None:
+        texture_id = 0x770
+        shader = ShaderInfo(0x270, None, None, None, None)
+        reader = _MaterialReader("RESISTANCE_2", shader, {})
+        textures = {
+            "textures/first": self._decoded_texture(
+                texture_id,
+                tuid=0x1111_1111_0000_0770,
+                value=32,
+            ),
+            "textures/second": self._decoded_texture(
+                texture_id,
+                tuid=0x2222_2222_0000_0770,
+                value=224,
+            ),
+        }
+
+        def read_texture(
+            requested_id: int,
+            *,
+            lookup_path: str | None = None,
+        ) -> DecodedTexture:
+            reader.texture_reads.append((requested_id, lookup_path))
+            return textures[
+                (lookup_path or "").replace("\\", "/").casefold()
+            ]
+
+        reader.read_texture = read_texture
+        factory = _MaterialFactory(reader, True, [])
+        first = factory.image(
+            texture_id,
+            lookup_path="textures/first",
+        )
+        second = factory.image(
+            texture_id,
+            lookup_path="textures/second",
+        )
+        first_again = factory.image(
+            texture_id,
+            lookup_path=r"Textures\First",
+        )
+
+        self.assertIs(first, first_again)
+        self.assertIsNot(first, second)
+        self.assertNotEqual(first.name, second.name)
+        self.assertEqual(
+            first["insomniac_texture_tuid"],
+            "0x1111111100000770",
+        )
+        self.assertEqual(
+            second["insomniac_texture_tuid"],
+            "0x2222222200000770",
+        )
+        self.assertEqual(len(reader.texture_reads), 2)
+
+    def test_reuses_map_analysis_after_releasing_reader_cache(self) -> None:
+        shader, textures = self._surface_fixture(0x280)
+        reader = _MaterialReader("RESISTANCE_2", shader, textures)
+        factory = _MaterialFactory(reader, True, [])
+
+        factory.material(0x280)
+        reads_after_first = len(reader.texture_reads)
+        factory.material(0x281)
+
+        self.assertEqual(len(reader.texture_reads), reads_after_first)
+        self.assertEqual(reader.clear_texture_cache_calls, 2)
 
     def test_r3_standard_material_builds_normal_and_gloss_nodes(self) -> None:
         shader, textures = self._surface_fixture(0x100)
@@ -849,6 +1145,28 @@ class BlenderMaterialTests(unittest.TestCase):
             material_word=material_word,
         )
         return shader, textures
+
+    @staticmethod
+    def _decoded_texture(
+        texture_id: int,
+        *,
+        tuid: int | None = None,
+        format_code: int = 0x06,
+        value: int = 255,
+    ) -> DecodedTexture:
+        return DecodedTexture(
+            TextureInfo(
+                id=texture_id,
+                tuid=texture_id if tuid is None else tuid,
+                format_code=format_code,
+                mip_count=1,
+                width=2,
+                height=2,
+                offset=0,
+                length=0,
+            ),
+            np.full((2, 2, 4), value, dtype=np.uint8),
+        )
 
     @staticmethod
     def _emission_fixture(

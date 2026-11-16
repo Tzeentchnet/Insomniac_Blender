@@ -204,12 +204,15 @@ Standard R3 Blender materials therefore:
 - invert packed red into Principled roughness when gloss bit `0x04` is set;
 - color enabled packed-blue emission with the authored albedo and base-color
   factor;
+- preserve bound detail images as unconnected Non-Color nodes;
 - keep Principled Metallic at zero.
 
 The only normal-slot format outlier is `dark_cable/dark_cable`, which binds a
 BC1 diffuse `*_c` texture. It is reported and left disconnected. Packed green,
 packed alpha, detail-map composition, and the two effect slots remain
-unconnected because their R3 semantics are not independently proven.
+unconnected because their R3 semantics are not independently proven. Unlike
+the two effect slots, bound detail textures are still imported as data-only
+nodes.
 
 ### Goliath wet-leg overlay
 

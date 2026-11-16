@@ -115,11 +115,25 @@ the level-global shader index is at mesh offset `0x28`. Indices address
 
 ## Shaders and textures
 
-Section `0x5000` contains `0x80`-byte shaders. Texture record offsets for
-albedo, normal, and packed/expensive maps are stored at `0x00`, `0x04`, and
-`0x08`. Rendering mode is byte `0x11`; the adapter maps `0`-`2` to opaque,
-`4`-`5` to masked, and `6` to blended. The source alpha-control float at
-`0x20` is retained as material metadata.
+Section `0x5000` contains `0x80`-byte shaders:
+
+| Offset | Type | Meaning |
+|---:|---|---|
+| `0x00` | `u32` | albedo texture-record offset |
+| `0x04` | `u32` | normal texture-record offset |
+| `0x08` | `u32` | packed/expensive texture-record offset |
+| `0x0C` | `u32` | detail texture-record offset |
+| `0x10` | `u8` | surface flags: specular, gloss, normal, and detail |
+| `0x11` | `u8` | rendering mode |
+| `0x12` | `u8[2]` | unknown material controls |
+| `0x20` | `vec4[6]` | raw material parameter vectors |
+
+The adapter maps rendering modes `0`-`2` to opaque, `4`-`5` to masked, and
+`6` to blended. It retains the complete flag/control word and all six vectors
+as material metadata. Verified normal and flagged packed channels use the
+shared Blender material path. Bound detail images are imported as unconnected
+Non-Color nodes because their ToD composition is not yet proven; the raw
+vectors are not treated as a base-color factor.
 
 Section `0x5200` contains `0x20`-byte texture records:
 

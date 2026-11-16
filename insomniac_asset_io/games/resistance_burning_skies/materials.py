@@ -19,6 +19,7 @@ class MaterialTexturePaths:
     albedo: str | None = None
     normal: str | None = None
     specular: str | None = None
+    specular_semantics: str = "GLOSS"
     detail: str | None = None
     emissive: str | None = None
     alpha: str | None = None
@@ -57,7 +58,7 @@ _PARAMETER_ROLES = {
     "g_diffusemaptexture": "albedo",
     "g_albedomaptexture": "albedo",
     "g_normalmaptexture": "normal",
-    "g_glossmaptexture": "specular",
+    "g_glossmaptexture": "gloss",
     "g_specularmaptexture": "specular",
     "g_detailmaptexture": "detail",
     "g_emissivemaptexture": "emissive",
@@ -138,7 +139,13 @@ def decode_material_texture_paths(
     return MaterialTexturePaths(
         albedo=roles.get("albedo"),
         normal=roles.get("normal"),
-        specular=roles.get("specular"),
+        specular=roles.get("gloss") or roles.get("specular"),
+        specular_semantics=(
+            "SPECULAR"
+            if roles.get("gloss") is None
+            and roles.get("specular") is not None
+            else "GLOSS"
+        ),
         detail=roles.get("detail"),
         emissive=roles.get("emissive"),
         alpha=roles.get("alpha"),

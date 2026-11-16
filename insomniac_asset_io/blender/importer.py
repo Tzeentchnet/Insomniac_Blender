@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import math
 import re
+import zlib
 from dataclasses import dataclass
 from typing import Iterable
 
@@ -69,6 +70,10 @@ def _reader_asset_scope(reader: object | None) -> str:
         marker_index = normalized.casefold().index(marker) + len(marker)
         prefix = normalized[marker_index:]
     return _safe_name(prefix.replace("/", "_")) if prefix else ""
+
+
+def _normalized_texture_lookup_path(path: str | None) -> str:
+    return (path or "").replace("\\", "/").strip("/").casefold()
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,15 +157,32 @@ class _MaterialFactory:
                 False,
             )
         )
-        self.use_base_color_factor = cycles_materials or bool(
-            getattr(
-                reader,
-                "material_uses_base_color_factor_by_default",
-                False,
+        self.base_color_factor_supported = bool(
+            getattr(reader, "material_base_color_factor_supported", True)
+        )
+        self.use_base_color_factor = self.base_color_factor_supported and (
+            cycles_materials
+            or bool(
+                getattr(
+                    reader,
+                    "material_uses_base_color_factor_by_default",
+                    False,
+                )
             )
         )
         self.materials: dict[int, bpy.types.Material] = {}
-        self.images: dict[tuple[int, str], bpy.types.Image] = {}
+        self.images: dict[
+            tuple[int, str, str],
+            bpy.types.Image,
+        ] = {}
+        self._normal_map_support: dict[
+            tuple[int, str, str],
+            tuple[bool, int],
+        ] = {}
+        self._emissive_masks: dict[
+            tuple[int, str, str],
+            bool,
+        ] = {}
 
     def material(self, shader_tuid: int) -> bpy.types.Material:
         cached = self.materials.get(shader_tuid)
@@ -217,6 +239,7 @@ class _MaterialFactory:
                         shader,
                         diffuse_color=diffuse_color,
                     )
+                    self._add_detail(material, shader)
                     self._add_dedicated_emission(
                         material,
                         principled,
@@ -246,6 +269,7 @@ class _MaterialFactory:
             )
         )
         self.materials[shader_tuid] = material
+        self.release_decoded_textures()
         return material
 
     def _store_shader_metadata(
@@ -295,11 +319,10 @@ class _MaterialFactory:
             material["insomniac_material_pre_control_values"] = list(
                 shader.material_pre_control_values
             )
-        specular_name = (
-            "gloss"
-            if shader.specular_texture_semantics == "GLOSS"
-            else "packed"
-        )
+        specular_name = {
+            "GLOSS": "gloss",
+            "SPECULAR": "specular",
+        }.get(shader.specular_texture_semantics, "packed")
         texture_names = ("diffuse", "normal", specular_name, "detail")
         texture_ids = (
             shader.albedo_texture_id,
@@ -388,11 +411,18 @@ class _MaterialFactory:
         principled: bpy.types.Node,
         shader: ShaderInfo,
     ) -> None:
-        factor = self._base_color_factor(shader)
+        factor = (
+            self._base_color_factor(shader)
+            if self.base_color_factor_supported
+            else (1.0, 1.0, 1.0, 1.0)
+        )
         material["insomniac_base_color_factor"] = list(factor)
-        valid = self._has_base_color_factor(shader)
+        valid = (
+            self.base_color_factor_supported
+            and self._has_base_color_factor(shader)
+        )
         material["insomniac_base_color_factor_valid"] = valid
-        if self.cycles_materials and not valid:
+        if self.use_base_color_factor and not valid:
             self._warn(
                 f"Shader 0x{shader.tuid:016X} has an unsupported, "
                 "non-finite, or out-of-range base color factor; the enhanced "
@@ -558,24 +588,37 @@ class _MaterialFactory:
         texture_id = shader.normal_texture_id
         if texture_id is None or not shader.is_texture_slot_bound(1):
             return
+        lookup_path = shader.texture_lookup_paths[1]
         try:
             if shader.normal_texture_encoding != "DIRECT":
-                texture = self.reader.read_texture(
+                key = self._texture_key(
                     texture_id,
-                    lookup_path=shader.texture_lookup_paths[1],
+                    "normal",
+                    lookup_path,
                 )
-                if not can_reconstruct_normal_map(texture):
+                support = self._normal_map_support.get(key)
+                if support is None:
+                    texture = self.reader.read_texture(
+                        texture_id,
+                        lookup_path=lookup_path,
+                    )
+                    support = (
+                        can_reconstruct_normal_map(texture),
+                        texture.info.format_code,
+                    )
+                    self._normal_map_support[key] = support
+                if not support[0]:
                     material["insomniac_normal_map_supported"] = False
                     self._warn(
                         f"Shader 0x{shader.tuid:016X} normal map uses "
                         f"unsupported texture format "
-                        f"0x{texture.info.format_code:02X}"
+                        f"0x{support[1]:02X}"
                     )
                     return
             image = self.image(
                 texture_id,
                 role="normal",
-                lookup_path=shader.texture_lookup_paths[1],
+                lookup_path=lookup_path,
             )
         except InsomniacError as exc:
             self._warn(
@@ -607,6 +650,37 @@ class _MaterialFactory:
             principled.inputs["Normal"],
         )
 
+    def _add_detail(
+        self,
+        material: bpy.types.Material,
+        shader: ShaderInfo,
+    ) -> None:
+        texture_id = shader.detail_texture_id
+        if texture_id is None or not shader.is_texture_slot_bound(3):
+            return
+        try:
+            image = self.image(
+                texture_id,
+                role="detail",
+                lookup_path=shader.texture_lookup_paths[3],
+            )
+        except InsomniacError as exc:
+            self._warn(
+                f"Shader 0x{shader.tuid:016X} detail map unavailable: {exc}"
+            )
+            return
+        node = self._texture_node(
+            material,
+            image,
+            name=f"Detail_{texture_id:08X}",
+            label=(
+                f"{_reader_game_label(self.reader)} "
+                "detail data (uncomposed)"
+            ),
+        )
+        node.location = (-600.0, -600.0)
+        material["insomniac_detail_data_only"] = True
+
     def _add_packed(
         self,
         material: bpy.types.Material,
@@ -616,7 +690,7 @@ class _MaterialFactory:
         diffuse_color: bpy.types.NodeSocket | None = None,
     ) -> None:
         texture_id = shader.expensive_texture_id
-        if shader.specular_texture_semantics == "GLOSS":
+        if shader.specular_texture_semantics in {"GLOSS", "SPECULAR"}:
             material["insomniac_emissive_mask"] = False
             material["insomniac_emissive"] = False
             if (
@@ -624,7 +698,12 @@ class _MaterialFactory:
                 and shader.is_texture_slot_bound(2)
                 and self.surface_material_channels
             ):
-                self._add_gloss(
+                add_surface_map = (
+                    self._add_gloss
+                    if shader.specular_texture_semantics == "GLOSS"
+                    else self._add_specular
+                )
+                add_surface_map(
                     material,
                     principled,
                     shader,
@@ -639,16 +718,24 @@ class _MaterialFactory:
         material["insomniac_emissive_channel"] = "B"
         lookup_path = shader.texture_lookup_paths[2]
         try:
-            texture = self.reader.read_texture(
+            key = self._texture_key(
                 texture_id,
-                lookup_path=lookup_path,
+                "packed",
+                lookup_path,
             )
+            emissive_mask = self._emissive_masks.get(key)
+            if emissive_mask is None:
+                texture = self.reader.read_texture(
+                    texture_id,
+                    lookup_path=lookup_path,
+                )
+                emissive_mask = has_emissive_mask(texture)
+                self._emissive_masks[key] = emissive_mask
         except InsomniacError as exc:
             self._warn(
                 f"Shader 0x{shader.tuid:016X} emission unavailable: {exc}"
             )
             return
-        emissive_mask = has_emissive_mask(texture)
         disabled_control_mask = int(
             getattr(
                 self.reader,
@@ -788,6 +875,38 @@ class _MaterialFactory:
             roughness.outputs["Value"],
             principled.inputs["Roughness"],
         )
+
+    def _add_specular(
+        self,
+        material: bpy.types.Material,
+        principled: bpy.types.Node,
+        shader: ShaderInfo,
+        texture_id: int,
+    ) -> None:
+        lookup_path = shader.texture_lookup_paths[2]
+        try:
+            image = self.image(
+                texture_id,
+                role="specular",
+                lookup_path=lookup_path,
+            )
+        except InsomniacError as exc:
+            self._warn(
+                f"Shader 0x{shader.tuid:016X} specular map unavailable: "
+                f"{exc}"
+            )
+            return
+        texture_node = self._texture_node(
+            material,
+            image,
+            name=f"Specular_{texture_id:08X}",
+            label=f"{_reader_game_label(self.reader)} specular",
+        )
+        material.node_tree.links.new(
+            texture_node.outputs["Color"],
+            principled.inputs["Specular IOR Level"],
+        )
+        material["insomniac_specular_map_source"] = "DEDICATED_COLOR"
 
     def _add_dedicated_emission(
         self,
@@ -969,20 +1088,44 @@ class _MaterialFactory:
         material.node_tree.links.new(emissive_mask, combine.inputs[1])
         return combine.outputs["Vector"]
 
+    @staticmethod
+    def _texture_node(
+        material: bpy.types.Material,
+        image: bpy.types.Image,
+        *,
+        name: str,
+        label: str,
+    ) -> bpy.types.Node:
+        node = material.node_tree.nodes.new("ShaderNodeTexImage")
+        node.name = name
+        node.label = label
+        node.image = image
+        return node
+
+    @staticmethod
+    def _texture_key(
+        texture_id: int,
+        role: str,
+        lookup_path: str | None,
+    ) -> tuple[int, str, str]:
+        return (
+            texture_id,
+            role,
+            _normalized_texture_lookup_path(lookup_path),
+        )
+
     def _warn(self, message: str) -> None:
         LOGGER.warning(message)
         self.warnings.append(message)
 
     def release_decoded_textures(self) -> None:
-        # Decoded RGBA arrays are only needed while images are built and
-        # while the alpha and emissive checks run. After that, the Blender
-        # images hold the pixels, so free the reader's texture cache. It
-        # otherwise keeps every texture in memory for the reader's lifetime,
-        # which can reach gigabytes on a level import.
-        # Trade-off: a reader shared across imports, such as the asset cache
-        # build, will decode a texture again if a later import needs it and
-        # its Blender image no longer exists.
-        self.reader.clear_texture_cache()
+        clear_texture_cache = getattr(
+            self.reader,
+            "clear_texture_cache",
+            None,
+        )
+        if callable(clear_texture_cache):
+            clear_texture_cache()
 
     def image(
         self,
@@ -991,7 +1134,7 @@ class _MaterialFactory:
         role: str = "color",
         lookup_path: str | None = None,
     ) -> bpy.types.Image:
-        key = (texture_id, role)
+        key = self._texture_key(texture_id, role, lookup_path)
         cached = self.images.get(key)
         if cached is not None:
             return cached
@@ -1001,13 +1144,25 @@ class _MaterialFactory:
             "packed": "_Packed",
         }
         suffix = suffixes.get(role, f"_{role.title()}")
-        name = (
-            f"{_reader_asset_prefix(self.reader)}_Texture_"
-            f"{texture_id:08X}{suffix}"
+        scope = _reader_asset_scope(self.reader)
+        base_name = "_".join(
+            part
+            for part in (
+                _reader_asset_prefix(self.reader),
+                scope,
+                "Texture",
+                f"{texture_id:08X}",
+            )
+            if part
         )
-        image = bpy.data.images.get(name)
-        if image is not None and _IMAGE_HAS_ALPHA_KEY in image:
-            # Built by an earlier import: reuse it without decoding again.
+        name = f"{base_name}{suffix}"
+        image = self._compatible_image(name, key, scope)
+        if image is None and bpy.data.images.get(name) is not None:
+            discriminator = f"{scope}|{key[2]}|{texture_id:016X}|{role}"
+            digest = zlib.crc32(discriminator.encode("utf-8"))
+            name = f"{name}_{digest:08X}"
+            image = self._compatible_image(name, key, scope)
+        if image is not None:
             self._apply_colorspace(image, role)
             self.images[key] = image
             return image
@@ -1023,10 +1178,8 @@ class _MaterialFactory:
                 height=texture.info.height,
                 alpha=True,
                 float_buffer=False,
+                is_data=role != "color",
             )
-            # Set the colorspace before writing and packing the pixels.
-            # Changing it on a packed image discards the buffer and makes
-            # Blender reload it from the packed PNG.
             self._apply_colorspace(image, role)
             rgba = (
                 reconstruct_normal_map(texture)
@@ -1041,8 +1194,6 @@ class _MaterialFactory:
             image.pixels.foreach_set(pixels)
             image.pack()
             image.update()
-        else:
-            self._apply_colorspace(image, role)
         image["insomniac_texture_tuid"] = f"0x{texture.info.tuid:016X}"
         image["insomniac_requested_texture_id"] = f"0x{texture_id:08X}"
         image["insomniac_resolved_texture_id"] = (
@@ -1055,22 +1206,49 @@ class _MaterialFactory:
             f"0x{texture.info.format_code:02X}"
         )
         image["insomniac_texture_role"] = role
-        # Whether the source texture's alpha is not fully opaque.
+        image["insomniac_texture_lookup_path"] = lookup_path or ""
+        image["insomniac_texture_lookup_key"] = key[2]
+        image["insomniac_asset_scope"] = scope
         image[_IMAGE_HAS_ALPHA_KEY] = bool(
-            np.any(texture.rgba[..., 3] < 255)
+            np.min(texture.rgba[..., 3]) < 255
         )
         self.images[key] = image
         return image
 
     @staticmethod
+    def _compatible_image(
+        name: str,
+        key: tuple[int, str, str],
+        scope: str,
+    ) -> bpy.types.Image | None:
+        requested_id = f"0x{key[0]:08X}"
+        direct = bpy.data.images.get(name)
+        if direct is None:
+            return None
+        candidates = (direct,) + tuple(
+            image
+            for image in bpy.data.images
+            if image.name.startswith(f"{name}.")
+        )
+        for image in candidates:
+            if (
+                _IMAGE_HAS_ALPHA_KEY in image
+                and image.get("insomniac_requested_texture_id")
+                == requested_id
+                and image.get("insomniac_texture_role") == key[1]
+                and image.get("insomniac_texture_lookup_key", "") == key[2]
+                and image.get("insomniac_asset_scope", "") == scope
+            ):
+                return image
+        return None
+
+    @staticmethod
     def _apply_colorspace(image: bpy.types.Image, role: str) -> None:
         if image.alpha_mode != "CHANNEL_PACKED":
             image.alpha_mode = "CHANNEL_PACKED"
-        if role == "color":
-            return
-        # Only assign when it changes; every assignment frees the buffer.
-        if image.colorspace_settings.name != "Non-Color":
-            image.colorspace_settings.name = "Non-Color"
+        colorspace = "sRGB" if role == "color" else "Non-Color"
+        if image.colorspace_settings.name != colorspace:
+            image.colorspace_settings.name = colorspace
 
 
 def import_materials(

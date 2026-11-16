@@ -165,6 +165,7 @@ of current texture parameters such as:
 - `g_DiffuseMapTexture`;
 - `g_NormalMapTexture`;
 - `g_GlossMapTexture`;
+- `g_SpecularMapTexture`;
 - `g_EmissiveMapTexture`;
 - `g_AlphaMapTexture`; and
 - `g_DetailMapTexture`.
@@ -173,8 +174,11 @@ The bridge applies `diffuse_tint`, preserves `specular_power` as a fallback
 roughness, connects direct RGB tangent normals, inverts the dedicated gloss
 map's red channel into Principled roughness, and connects dedicated emissive
 maps with `emissive_color` and `emissive_factor`. `Use_Emissive_Texture`
-disables stale emissive references. Separate alpha maps are connected only
-when a supported authored render state identifies blending or masking.
+disables stale emissive references. Explicit specular maps remain Non-Color
+and drive Principled specular level rather than being misread as gloss.
+Detail maps are preserved as unconnected Non-Color nodes because their blend
+is not yet proven. Separate alpha maps are connected only when a supported
+authored render state identifies blending or masking.
 
 `OpaqueEmissive` and `GunEmissive` materials remain emissive when
 `Use_Emissive_Texture` is false. In that mode, `diffuse_color` supplies the
@@ -215,7 +219,8 @@ Linear, swizzled, and arbitrary-swizzled top-level layouts are handled.
 Swizzled pixels or compression blocks use the Vita rectangular Morton order,
 with Y in the even Morton bits and X in the odd bits. Reversing that order
 produces a coherent but transposed atlas and therefore visibly incorrect UV
-mapping.
+mapping. UBC1, UBC2, and UBC3 use the same shared NumPy-vectorized BC decoder
+as the PS3 adapters after Vita block layout is resolved.
 PVRTC-II decoding implements interpolated endpoints, hard-transition local
 endpoints and neighbor palettes, and punch-through alpha. Its output matches
 the PowerVR/Vita3K reference decoder byte-for-byte on the verified car normal
