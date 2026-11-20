@@ -17,6 +17,8 @@ reader for **Resistance: Burning Skies** on PlayStation Vita.
 >
 > - **Moby:** A gameplay object, such as a character, vehicle, or interactive
 >   prop. Individual Mobys can have skeletons and animations.
+> - **Bangle:** A non-base Moby render segment selected by a draw-mask bit,
+>   commonly used for character attachments, customization, or alternate parts.
 > - **Tie:** A static environment mesh, such as a building or scenery prop;
 >   levels often reuse it in multiple placements.
 > - **UFrag:** A fragment of terrain or other level geometry.
