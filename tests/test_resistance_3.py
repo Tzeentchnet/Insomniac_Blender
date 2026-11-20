@@ -1,16 +1,15 @@
 from __future__ import annotations
 
-from pathlib import Path
 import struct
 import tempfile
 import unittest
+from pathlib import Path
 
 from insomniac_asset_io.core.binary import IghwFile
 from insomniac_asset_io.core.source import GameSource
-from insomniac_asset_io.games.resistance_2.reader import Resistance2Reader
 from insomniac_asset_io.games.resistance_2.formats import AssetKind
+from insomniac_asset_io.games.resistance_2.reader import Resistance2Reader
 from insomniac_asset_io.games.resistance_3.reader import Resistance3Reader
-
 
 SHADER_TUID = 0x1234_5678_90AB_CDEF
 TEXTURE_IDS = (
@@ -25,6 +24,7 @@ MATERIAL_WORD = 0x1C04_1328
 MATERIAL_PRE_CONTROL_VALUES = (0x1234_5678, 0x9ABC_DEF0)
 FOLIAGE_TUID = 0x1122_3344_5566_7788
 HIGHLIGHT_TUID = 0x8877_6655_4433_2211
+EMBEDDED_TEXTURE_TUID = 0xFA8D_164F_8843_ADA3
 
 
 def _assetlookup(shader_length: int) -> bytes:
@@ -103,6 +103,32 @@ def _extended_assetlookup() -> bytes:
     return bytes(data)
 
 
+def _embedded_texture_assetlookup() -> bytes:
+    data = bytearray(0x80)
+    struct.pack_into(">4sHHI", data, 0, b"IGHW", 1, 1, 3)
+    struct.pack_into(">IIII", data, 0x20, 0x1D140, 0x50, 1, 4)
+    struct.pack_into(">IIII", data, 0x30, 0x1D180, 0x60, 1, 0x10)
+    struct.pack_into(">IIII", data, 0x40, 0x1D1C0, 0x70, 1, 0x10)
+    struct.pack_into(">4B", data, 0x50, 0x86, 1, 2, 2)
+    struct.pack_into(
+        ">QII",
+        data,
+        0x60,
+        EMBEDDED_TEXTURE_TUID,
+        0,
+        8,
+    )
+    struct.pack_into(
+        ">QII",
+        data,
+        0x70,
+        EMBEDDED_TEXTURE_TUID,
+        0,
+        0,
+    )
+    return bytes(data)
+
+
 class Resistance3Tests(unittest.TestCase):
     def test_scopes_luminance_alpha_to_goliath_wet_overlay(self):
         shader_tuid = 0x5966_249F_D0D6_149B
@@ -173,6 +199,26 @@ class Resistance3Tests(unittest.TestCase):
 
                 self.assertEqual(collision.positions.shape, (8, 3))
                 self.assertEqual(collision.indices.tolist(), [[0, 1, 2]])
+
+    def test_decodes_embedded_texture_when_high_mip_is_absent(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "assetlookup.dat").write_bytes(
+                _embedded_texture_assetlookup()
+            )
+            (root / "textures.dat").write_bytes(
+                struct.pack("<HHI", 0xF800, 0x001F, 0)
+            )
+            (root / "highmips.dat").write_bytes(b"")
+
+            with GameSource.open(root) as source:
+                texture = Resistance3Reader(source).read_texture(
+                    EMBEDDED_TEXTURE_TUID & 0xFFFF_FFFF
+                )
+
+        self.assertEqual(texture.info.tuid, EMBEDDED_TEXTURE_TUID)
+        self.assertEqual(texture.info.length, 8)
+        self.assertEqual(texture.rgba.shape, (4, 4, 4))
 
     def test_reads_recomp_verified_resource_companions(self):
         with tempfile.TemporaryDirectory() as temporary:

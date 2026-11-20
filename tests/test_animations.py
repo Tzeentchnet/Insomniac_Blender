@@ -368,6 +368,58 @@ class AnimationTests(unittest.TestCase):
             atol=1e-6,
         )
 
+    def test_r3_additive_positions_rebase_from_clip_reference(self) -> None:
+        data = bytearray(0x120)
+        struct.pack_into(">4sHHI", data, 0, b"IGHW", 1, 1, 0)
+        control_offset = 0x40
+        frames_offset = 0x100
+        struct.pack_into(">4h", data, control_offset, 0, 0, 0, 32767)
+        position_x = _track_mask(0, 0, kind=2)
+        struct.pack_into(">h", data, control_offset + 0x10, 1000)
+        struct.pack_into(">H", data, control_offset + 0x20, position_x)
+        struct.pack_into(">H", data, control_offset + 0x30, position_x)
+        data[control_offset + 0x40] = 0xFF
+        struct.pack_into(">h", data, frames_offset, 1100)
+
+        bind = np.identity(4, dtype=np.float32)[None]
+        bind[0, 0, 3] = 2.0
+        skeleton = Skeleton(
+            root_bone=0,
+            bones=(Bone(0, -1, 0xFFFF, 0xFFFF),),
+            bind_local=bind.copy(),
+            bind_world=bind.copy(),
+            bind_world_inverse=np.linalg.inv(bind).astype(np.float32),
+            scale_shift=0,
+            translation_shift=0,
+        )
+        header = AnimationHeader(
+            index=0,
+            flags=0x06,
+            bone_count=1,
+            frame_count=1,
+            name="r3_additive_position",
+            frame_rate=30.0,
+            linear_speed=0.0,
+            frame_stride=0x10,
+            reference_value_count=1,
+            track16_count=1,
+            track8_count=0,
+            control_offset=control_offset,
+            frames_offset=frames_offset,
+        )
+
+        clip = _decode_clip(
+            IghwFile(data),
+            header,
+            skeleton,
+            profile=AnimationProfile.RESISTANCE_3,
+        )
+
+        self.assertAlmostEqual(
+            float(clip.translations[0, 0, 0]),
+            2.0 + 100.0 / 32768.0,
+        )
+
     def test_r3_partial_overlay_is_baked_over_sighted_idle(self) -> None:
         bind = np.repeat(
             np.identity(4, dtype=np.float32)[None], 2, axis=0

@@ -68,8 +68,8 @@ Resistance 2 playback rule unchanged. ReChimera's independently developed R3
 profile identifies these differences:
 
 - header `+0x0C` can point to a `u16` logical-to-stored frame table;
-- non-delta positions are rebased from the clip reference to the target
-  skeleton bind position;
+- non-delta positions, including additive facial-overlay positions, are
+  rebased from the clip reference to the target skeleton bind position;
 - additive rotations use R3-specific bind fallback and blend-mask behavior;
 - facial, expression, and some other additive clips are runtime overlays over
   an idle Action.
@@ -85,7 +85,8 @@ validated Resistance 2 path. It:
 - accepts a header `+0x0C` frame map only when the table ends in the alignment
   block immediately before the frame data and every mapped index is in range;
 - rebases authored non-delta positions as
-  `bind + (decoded - clipReference)`;
+  `bind + (decoded - clipReference)`, including additive expression channels
+  whose reference values are absolute local facial-bone positions;
 - treats animated additive rotations as direct clip values and uses skeleton
   bind only for untracked standalone channels;
 - decodes `0x0200` position and scale values as bind-relative additive
@@ -155,6 +156,14 @@ word and parameter values:
 The two pre-control words, five vectors, and three trailing values are
 retained separately as Blender custom properties. Base color uses the first
 complete vector after the control word in enhanced source-material mode.
+
+Some level-local textures have a zero-length entry in the high-mip pointer
+table while their texture TUID still owns a complete mip-zero payload in
+`textures.dat`. The reader uses that bounded asset payload before trying
+global or sibling-level fallbacks. Capelli's
+`cap_hair_planes/cap_hair_planes` shader (`0xC89EC8F70464D875`) exercises this
+layout: its 256x256 BC3 albedo is a 65,536-byte embedded texture rather than a
+`highmips.dat` slice.
 
 ### Material channel evidence
 

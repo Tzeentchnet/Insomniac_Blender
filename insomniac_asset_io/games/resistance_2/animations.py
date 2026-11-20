@@ -580,11 +580,14 @@ def _decode_clip(
     )
     rebase_positions = (
         profile is AnimationProfile.RESISTANCE_3
-        and not header.additive
         and not delta_position_scale
     )
     if rebase_positions:
-        translated = decoded_positions
+        translated = (
+            bind_t[None, :, :] + decoded_positions
+            if header.additive
+            else decoded_positions
+        )
         rebased = (
             bind_t[None, :, :]
             + (

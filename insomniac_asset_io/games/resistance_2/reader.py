@@ -1124,9 +1124,37 @@ class Resistance2Reader:
             self._texture_cache[texture_id] = texture
             return texture
         if not info.length:
-            raise MissingResourceError(
-                f"Texture 0x{texture_id:08X} has no high-mip payload"
+            try:
+                raw = self._asset_bytes(AssetKind.TEXTURE, info.tuid)
+            except MissingResourceError as exc:
+                raise MissingResourceError(
+                    f"Texture 0x{texture_id:08X} has neither a high-mip "
+                    "nor an embedded level payload"
+                ) from exc
+            required = texture_mip_size(
+                info.width,
+                info.height,
+                info.format_code,
             )
+            if len(raw) < required:
+                raise FormatError(
+                    f"Texture 0x{texture_id:08X} embedded payload is "
+                    f"{len(raw)} bytes, but its {info.width}x{info.height} "
+                    f"format requires at least {required}"
+                )
+            info = TextureInfo(
+                id=info.id,
+                tuid=info.tuid,
+                format_code=info.format_code,
+                mip_count=info.mip_count,
+                width=info.width,
+                height=info.height,
+                offset=0,
+                length=len(raw),
+            )
+            texture = decode_texture(info, raw)
+            self._texture_cache[texture_id] = texture
+            return texture
         raw = self.source.read_slice(
             self.resource_path("highmips.dat"),
             info.offset,

@@ -20,6 +20,20 @@ The smoke test reports resource counts and decodes one Moby, skeleton,
 animset, diffuse texture, Tie, zone, and gameplay region without writing game
 data to the repository.
 
+Run the Capelli R3 Game Head material and facial-animation regression against
+an extracted owner level:
+
+```powershell
+$env:R3_CAPELLI_SOURCE = "C:\path\to\haven_town_center\level_cached.psarc"
+python -m unittest discover -s tests -p "test_real_r3.py" -v
+Remove-Item Env:R3_CAPELLI_SOURCE
+```
+
+This decodes the embedded 256x256 BC3 albedo for shader
+`0xC89EC8F70464D875` and verifies that `exp_dead_intro_upper` is baked over
+`head_idle` without double-applying the absolute eyebrow-bone reference
+positions.
+
 Run the environment-gated Resistance: Fall of Man level 20 regression:
 
 ```powershell

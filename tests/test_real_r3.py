@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 import unittest
+from pathlib import Path
 
 import numpy as np
 
@@ -10,10 +10,10 @@ from insomniac_asset_io.core.source import GameSource
 from insomniac_asset_io.games.resistance_2.formats import AssetKind
 from insomniac_asset_io.games.resistance_3.reader import Resistance3Reader
 
-
 REAL_SOURCE = os.environ.get("R3_LEVEL_SOURCE")
 RAVAGER_SOURCE = os.environ.get("R3_RAVAGER_SOURCE")
 STALKER_SOURCE = os.environ.get("R3_STALKER_SOURCE")
+CAPELLI_SOURCE = os.environ.get("R3_CAPELLI_SOURCE")
 
 
 @unittest.skipUnless(REAL_SOURCE, "R3_LEVEL_SOURCE is not set")
@@ -66,6 +66,36 @@ class RealResistance3Tests(unittest.TestCase):
             self.assertTrue(reader.read_tie(first_tie.tuid).meshes)
             self.assertTrue(reader.read_zones())
             self.assertTrue(reader.read_gameplay_regions())
+
+
+@unittest.skipUnless(CAPELLI_SOURCE, "R3_CAPELLI_SOURCE is not set")
+class RealCapelliTests(unittest.TestCase):
+    def test_embedded_hair_material_and_facial_overlays(self):
+        with GameSource.open(Path(CAPELLI_SOURCE)) as source:
+            reader = Resistance3Reader(source)
+            moby = reader.read_moby(0x6E7A8CE904E0DBC0)
+            shader = reader.read_shader(0xC89EC8F70464D875)
+            albedo = reader.read_texture(
+                shader.albedo_texture_id,
+                lookup_path=shader.texture_lookup_paths[0],
+            )
+            clips = {
+                clip.name: clip for clip in reader.read_animations(moby)
+            }
+
+        self.assertEqual(albedo.rgba.shape, (256, 256, 4))
+        self.assertEqual(albedo.info.length, 65_536)
+        self.assertGreater(int(np.ptp(albedo.rgba[..., 3])), 0)
+
+        bind_translations = moby.skeleton.bind_local[:, :3, 3]
+        dead_intro = clips["exp_dead_intro_upper"]
+        translation_delta = np.linalg.norm(
+            dead_intro.translations - bind_translations[None],
+            axis=2,
+        )
+        self.assertEqual(dead_intro.overlay_base_name, "head_idle")
+        self.assertLess(float(translation_delta.max()), 0.01)
+        self.assertTrue(np.isfinite(dead_intro.rotations_xyzw).all())
 
 
 @unittest.skipUnless(RAVAGER_SOURCE, "R3_RAVAGER_SOURCE is not set")
