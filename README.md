@@ -130,7 +130,9 @@ both fields from `PARAM.SFO`.
 | Lighting, level collision, VFX, and cubemaps | Not yet implemented |
 
 See [Resistance 3 formats](docs/formats/resistance_3.md) for the verified
-layout differences from Resistance 2.
+layout differences from Resistance 2 and
+[Resistance 3 character asset findings](docs/assets/resistance_3_characters.md)
+for Ravager composition and Capelli body/head evidence.
 
 ## Experimental Resistance: Burning Skies support
 
@@ -175,7 +177,7 @@ distributed with the extension.
 
 2. In Blender, open **Edit > Preferences > Get Extensions**.
 3. Use **Install from Disk** and choose
-   `dist\insomniac_asset_io-0.7.5.zip`.
+   `dist\insomniac_asset_io-0.7.6.zip`.
 4. Open the **Insomniac** tab in the 3D View sidebar.
 
 Blender includes NumPy; no external Python package is required at runtime.

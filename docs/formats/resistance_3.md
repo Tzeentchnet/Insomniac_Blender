@@ -132,6 +132,10 @@ keys without changing sampled Action values.
 
 ## Character segments and companion models
 
+See [Resistance 3 character asset findings](../assets/resistance_3_characters.md)
+for the asset TUIDs, owner-level sets, segment topology, direct-reference scan,
+and body/head compatibility evidence.
+
 The Ravager Moby does not reference an external head Moby. Its model has seven
 render segments and a default draw mask of `0x7F`; segments 1 through 6 contain
 the authored head, eyes, and upper attachments. **Show source-default character
