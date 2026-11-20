@@ -1512,10 +1512,19 @@ class Resistance2Reader:
         if moby.skeleton is None or moby.animset_hash is None:
             return []
         data = self._asset_bytes(AssetKind.ANIMSET, moby.animset_hash)
+        path_components = {
+            component.casefold()
+            for component in moby.name.replace("\\", "/").split("/")
+            if component
+        }
         return decode_animset(
             data,
             moby.skeleton,
             profile=self.animation_profile,
+            bind_untracked_rotations=(
+                self.animation_profile is AnimationProfile.RESISTANCE_3
+                and "gameheads" in path_components
+            ),
         )
 
     def read_zones(self) -> list[Zone]:

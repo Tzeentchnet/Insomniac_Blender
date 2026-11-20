@@ -7,6 +7,7 @@ from pathlib import Path
 import numpy as np
 
 from insomniac_asset_io.core.source import GameSource
+from insomniac_asset_io.games.resistance_2.animations import _bind_trs
 from insomniac_asset_io.games.resistance_2.formats import AssetKind
 from insomniac_asset_io.games.resistance_3.reader import Resistance3Reader
 
@@ -89,12 +90,23 @@ class RealCapelliTests(unittest.TestCase):
 
         bind_translations = moby.skeleton.bind_local[:, :3, 3]
         dead_intro = clips["exp_dead_intro_upper"]
+        head_idle = clips["head_idle"]
         translation_delta = np.linalg.norm(
             dead_intro.translations - bind_translations[None],
             axis=2,
         )
+        bind_rotations = _bind_trs(moby.skeleton)[1]
+        untracked = ~head_idle.rotation_animated_bones
         self.assertEqual(dead_intro.overlay_base_name, "head_idle")
         self.assertLess(float(translation_delta.max()), 0.01)
+        np.testing.assert_allclose(
+            head_idle.rotations_xyzw[:, untracked],
+            np.broadcast_to(
+                bind_rotations[None, untracked],
+                head_idle.rotations_xyzw[:, untracked].shape,
+            ),
+            atol=1e-5,
+        )
         self.assertTrue(np.isfinite(dead_intro.rotations_xyzw).all())
 
 

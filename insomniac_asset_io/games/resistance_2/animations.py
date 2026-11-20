@@ -426,6 +426,7 @@ def _decode_clip(
     skeleton: Skeleton,
     *,
     profile: AnimationProfile = AnimationProfile.RESISTANCE_2,
+    bind_untracked_rotations: bool = False,
 ) -> DecodedClip:
     header = _effective_header(header, profile)
     frame_count = header.frame_count
@@ -631,6 +632,9 @@ def _decode_clip(
         excluded = ~rotation_touched & ~blend_enabled
         rotations[:, excluded] = bind_q[excluded]
     elif header.additive or delta_position_scale:
+        untouched = ~rotation_touched
+        rotations[:, untouched] = bind_q[untouched]
+    if bind_untracked_rotations:
         untouched = ~rotation_touched
         rotations[:, untouched] = bind_q[untouched]
     if (
@@ -989,13 +993,20 @@ def decode_animset(
     skeleton: Skeleton,
     *,
     profile: AnimationProfile = AnimationProfile.RESISTANCE_2,
+    bind_untracked_rotations: bool = False,
 ) -> list[DecodedClip]:
     ighw = IghwFile(data, label="animset")
     clips: list[DecodedClip] = []
     for offset in animation_offsets(ighw):
         header = _read_header(ighw, offset)
         clips.append(
-            _decode_clip(ighw, header, skeleton, profile=profile)
+            _decode_clip(
+                ighw,
+                header,
+                skeleton,
+                profile=profile,
+                bind_untracked_rotations=bind_untracked_rotations,
+            )
         )
     if profile is AnimationProfile.RESISTANCE_3:
         _compose_r3_overlays(clips, skeleton)

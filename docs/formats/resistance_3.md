@@ -89,6 +89,10 @@ validated Resistance 2 path. It:
   whose reference values are absolute local facial-bone positions;
 - treats animated additive rotations as direct clip values and uses skeleton
   bind only for untracked standalone channels;
+- retargets untracked rotations in `characters/gameheads` animsets to the
+  imported character's bind skeleton; their shared clip reference
+  quaternions can describe a different source head and otherwise snap the
+  complete head when an Action starts;
 - decodes `0x0200` position and scale values as bind-relative additive
   offsets;
 - retains per-channel authored masks, per-bone blend weights, source flags,
