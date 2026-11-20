@@ -33,7 +33,8 @@ This decodes the embedded 256x256 BC3 albedo for shader
 `0xC89EC8F70464D875` and verifies that `exp_dead_intro_upper` is baked over
 `head_idle` without double-applying the absolute eyebrow-bone reference
 positions or applying source-head reference rotations to Capelli's untracked
-root/head bones.
+root/head bones. It also verifies that the trackless, blend-masked
+`eyes_left` reference pose remains active after retargeting.
 
 Run the environment-gated Resistance: Fall of Man level 20 regression:
 

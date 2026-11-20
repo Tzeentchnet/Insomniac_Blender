@@ -93,6 +93,9 @@ validated Resistance 2 path. It:
   imported character's bind skeleton; their shared clip reference
   quaternions can describe a different source head and otherwise snap the
   complete head when an Action starts;
+- retains clip-reference rotations on blend-enabled bones for pose-only
+  additive game-head clips such as `eyes_left`, `eyes_right`, `eyes_up`, and
+  `eyes_down`; those Actions intentionally contain no per-frame tracks;
 - decodes `0x0200` position and scale values as bind-relative additive
   offsets;
 - retains per-channel authored masks, per-bone blend weights, source flags,

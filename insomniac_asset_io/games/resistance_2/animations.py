@@ -633,8 +633,17 @@ def _decode_clip(
         rotations[:, excluded] = bind_q[excluded]
     elif header.additive or delta_position_scale:
         untouched = ~rotation_touched
+        if (
+            bind_untracked_rotations
+            and header.additive
+            and profile is AnimationProfile.RESISTANCE_3
+        ):
+            blend_enabled = np.ones(bone_count, dtype=np.bool_)
+            copied = min(bone_count, len(control.blend_masks))
+            blend_enabled[:copied] = control.blend_masks[:copied] != 0
+            untouched &= ~blend_enabled
         rotations[:, untouched] = bind_q[untouched]
-    if bind_untracked_rotations:
+    elif bind_untracked_rotations:
         untouched = ~rotation_touched
         rotations[:, untouched] = bind_q[untouched]
     if (

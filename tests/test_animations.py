@@ -483,6 +483,80 @@ class AnimationTests(unittest.TestCase):
         )
         self.assertFalse(retargeted.rotation_animated_bones[0])
 
+    def test_r3_retargeted_head_keeps_blended_additive_pose(self) -> None:
+        data = bytearray(0x120)
+        struct.pack_into(">4sHHI", data, 0, b"IGHW", 1, 1, 0)
+        control_offset = 0x40
+        frames_offset = 0x100
+        reference_rotation = (12539, 0, 0, 30273)
+        struct.pack_into(
+            ">8h",
+            data,
+            control_offset,
+            *reference_rotation,
+            *reference_rotation,
+        )
+        data[control_offset + 0x10 : control_offset + 0x12] = (
+            b"\xFF\x00"
+        )
+        bind = np.repeat(
+            np.identity(4, dtype=np.float32)[None],
+            2,
+            axis=0,
+        )
+        skeleton = Skeleton(
+            root_bone=0,
+            bones=(
+                Bone(0, -1, 0xFFFF, 0xFFFF),
+                Bone(0, -1, 0xFFFF, 0xFFFF),
+            ),
+            bind_local=bind.copy(),
+            bind_world=bind.copy(),
+            bind_world_inverse=bind.copy(),
+            scale_shift=0,
+            translation_shift=0,
+        )
+        header = AnimationHeader(
+            index=0,
+            flags=0x06,
+            bone_count=2,
+            frame_count=1,
+            name="eyes_left",
+            frame_rate=30.0,
+            linear_speed=0.0,
+            frame_stride=0x10,
+            reference_value_count=0,
+            track16_count=0,
+            track8_count=0,
+            control_offset=control_offset,
+            frames_offset=frames_offset,
+        )
+
+        clip = _decode_clip(
+            IghwFile(data),
+            header,
+            skeleton,
+            profile=AnimationProfile.RESISTANCE_3,
+            bind_untracked_rotations=True,
+        )
+
+        expected_reference = np.asarray(
+            reference_rotation,
+            dtype=np.float32,
+        )
+        expected_reference /= np.linalg.norm(expected_reference)
+        np.testing.assert_allclose(
+            clip.rotations_xyzw[0, 0],
+            expected_reference,
+            atol=1e-5,
+        )
+        np.testing.assert_allclose(
+            clip.rotations_xyzw[0, 1],
+            np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float32),
+            atol=1e-5,
+        )
+        self.assertFalse(clip.rotation_animated_bones.any())
+
     def test_r3_partial_overlay_is_baked_over_sighted_idle(self) -> None:
         bind = np.repeat(
             np.identity(4, dtype=np.float32)[None], 2, axis=0

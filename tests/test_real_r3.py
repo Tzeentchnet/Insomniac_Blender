@@ -91,6 +91,7 @@ class RealCapelliTests(unittest.TestCase):
         bind_translations = moby.skeleton.bind_local[:, :3, 3]
         dead_intro = clips["exp_dead_intro_upper"]
         head_idle = clips["head_idle"]
+        eyes_left = clips["eyes_left"]
         translation_delta = np.linalg.norm(
             dead_intro.translations - bind_translations[None],
             axis=2,
@@ -104,6 +105,25 @@ class RealCapelliTests(unittest.TestCase):
             np.broadcast_to(
                 bind_rotations[None, untracked],
                 head_idle.rotations_xyzw[:, untracked].shape,
+            ),
+            atol=1e-5,
+        )
+        eyes_left_dot = np.abs(
+            np.sum(
+                eyes_left.rotations_xyzw
+                * bind_rotations[None],
+                axis=2,
+            )
+        )
+        eyes_left_angle = np.degrees(
+            2.0 * np.arccos(np.clip(eyes_left_dot, -1.0, 1.0))
+        )
+        self.assertGreater(float(eyes_left_angle.max()), 40.0)
+        np.testing.assert_allclose(
+            eyes_left.rotations_xyzw[:, :3],
+            np.broadcast_to(
+                bind_rotations[None, :3],
+                eyes_left.rotations_xyzw[:, :3].shape,
             ),
             atol=1e-5,
         )
