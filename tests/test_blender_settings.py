@@ -321,6 +321,42 @@ class BlenderSettingsTests(unittest.TestCase):
 
         self.assertEqual(picker.clip_index, -1)
 
+    def test_import_completion_selects_new_asset_collection(self) -> None:
+        scene = bpy.context.scene
+        collection = bpy.data.collections.new("Focused_Import")
+        scene.collection.children.link(collection)
+        root = bpy.data.objects.new("Focused_Import_Root", None)
+        collection.objects.link(root)
+        mesh = bpy.data.meshes.new("Focused_Import_Mesh")
+        mesh.from_pydata(
+            [(0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)],
+            [],
+            [(0, 1, 2)],
+        )
+        mesh_object = bpy.data.objects.new("Focused_Import", mesh)
+        collection.objects.link(mesh_object)
+        unrelated = bpy.data.objects.new("Previously_Selected", None)
+        scene.collection.objects.link(unrelated)
+
+        try:
+            bpy.context.view_layer.objects.active = unrelated
+            unrelated.select_set(True)
+
+            operators._focus_imported_asset(bpy.context, root)
+
+            self.assertEqual(
+                set(bpy.context.selected_objects),
+                {root, mesh_object},
+            )
+            self.assertIs(bpy.context.view_layer.objects.active, mesh_object)
+            self.assertFalse(unrelated.select_get())
+        finally:
+            bpy.data.objects.remove(unrelated, do_unlink=True)
+            bpy.data.objects.remove(mesh_object, do_unlink=True)
+            bpy.data.objects.remove(root, do_unlink=True)
+            bpy.data.meshes.remove(mesh)
+            bpy.data.collections.remove(collection)
+
 
 if __name__ == "__main__":
     unittest.main(argv=[sys.argv[0]])

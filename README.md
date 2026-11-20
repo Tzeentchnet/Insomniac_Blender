@@ -175,7 +175,7 @@ distributed with the extension.
 
 2. In Blender, open **Edit > Preferences > Get Extensions**.
 3. Use **Install from Disk** and choose
-   `dist\insomniac_asset_io-0.7.3.zip`.
+   `dist\insomniac_asset_io-0.7.4.zip`.
 4. Open the **Insomniac** tab in the 3D View sidebar.
 
 Blender includes NumPy; no external Python package is required at runtime.
@@ -199,7 +199,8 @@ Blender includes NumPy; no external Python package is required at runtime.
      kind, TUID, and owning levels. Space-separated fragments are all
      required, so `entities objects architecture nb_lobby_skyline_1` resolves
      the matching Tie.
-4. Click **Import Asset**.
+4. Click **Import Asset**. Model imports select and frame the new asset in the
+   3D View, including when the viewport is in Local View.
 
 Material entries create a persistent Blender Material with decoded textures
 and source metadata but do not add a placeholder object. Select a Moby and use

@@ -198,6 +198,47 @@ def _source_matches_level(
         return normalized.endswith(f"/levels/{level_name.casefold()}")
 
 
+def _focus_imported_asset(
+    context: bpy.types.Context,
+    root: bpy.types.Object,
+) -> None:
+    collection = root.users_collection[0]
+    imported_objects = tuple(collection.objects)
+    space = (
+        context.space_data
+        if context.area is not None and context.area.type == "VIEW_3D"
+        else None
+    )
+    if space is not None and space.local_view is not None:
+        for obj in imported_objects:
+            obj.local_view_set(space, True)
+
+    for obj in context.selected_objects:
+        obj.select_set(False)
+    for obj in imported_objects:
+        obj.select_set(True)
+
+    context.view_layer.objects.active = next(
+        (obj for obj in imported_objects if obj.type == "MESH"),
+        root,
+    )
+    if context.area is None or context.area.type != "VIEW_3D":
+        return
+    window_region = next(
+        (
+            region
+            for region in context.area.regions
+            if region.type == "WINDOW"
+        ),
+        None,
+    )
+    if window_region is None:
+        return
+    with context.temp_override(area=context.area, region=window_region):
+        if bpy.ops.view3d.view_selected.poll():
+            bpy.ops.view3d.view_selected(use_all_regions=False)
+
+
 def _resolved_level_source(
     context: bpy.types.Context,
     level_name: str,
@@ -719,6 +760,8 @@ class INSOMNIAC_OT_import_asset(bpy.types.Operator):
                         options,
                         source_path=original_path,
                     )
+            if asset.kind is not AssetKind.SHADER:
+                _focus_imported_asset(context, result.root)
             _report_warnings(self, result.warnings)
             settings.last_message = result.summary()
             self.report({"INFO"}, settings.last_message)
