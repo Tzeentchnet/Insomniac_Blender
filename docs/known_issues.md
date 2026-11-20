@@ -121,6 +121,16 @@ preserves the underlying leg plus the overlay's verified normal and gloss.
 Other mode-1 shaders retain their existing source-alpha behavior until their
 families can be validated independently.
 
+### Character body/head assembly
+
+R3 entity files inspected for the Ravager and Capelli do not contain direct
+references to a separate companion Moby. The Ravager head is internal and can
+be revealed with **Show source-default character parts**. Capelli body and
+head assets are separate, have no embedded pairing, and use incompatible bone
+indices and bind skeletons. They are not automatically combined until a
+validated attachment profile can identify both the intended companion and its
+animation relationship.
+
 ### R3-specific animation playback
 
 Resistance 3 uses the shared V2 animset structures with a separate playback

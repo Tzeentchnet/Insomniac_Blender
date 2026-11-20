@@ -107,8 +107,38 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
             self.assertFalse(
                 properties["asset_import_collision_geometry"].default
             )
+            self.assertFalse(
+                properties["asset_import_source_default_parts"].default
+            )
         finally:
             bpy.utils.unregister_class(InsomniacAddonPreferences)
+
+    def test_source_default_customizations_can_be_shown(self) -> None:
+        result = import_moby(
+            bpy.context,
+            _Reader(self._asset()),
+            1,
+            AssetImportOptions(
+                materials=False,
+                animations=False,
+                source_default_parts=True,
+            ),
+            source_path="fixture",
+        )
+        asset_collection = result.root.users_collection[0]
+        customization_collection = next(
+            child
+            for child in asset_collection.children
+            if child.get("insomniac_geometry_kind") == "CUSTOMIZATIONS"
+        )
+        bangle_collection = customization_collection.children[0]
+
+        self.assertTrue(
+            bangle_collection["insomniac_source_default_visible"]
+        )
+        self.assertFalse(bangle_collection.hide_viewport)
+        self.assertFalse(bangle_collection.hide_render)
+        self.assertFalse(bangle_collection.hide_select)
 
     def test_optional_geometry_uses_dedicated_collections(self) -> None:
         result = import_moby(

@@ -38,6 +38,7 @@ _LINEAR_INTERPOLATION = (
     .enum_items["LINEAR"]
     .value
 )
+_ACTION_VALUE_EPSILON = 1e-6
 
 
 def _reader_game_id(reader: object | None) -> str:
@@ -93,6 +94,7 @@ class AssetImportOptions:
     damage_permutations: bool = False
     lower_lods: bool = False
     collision_geometry: bool = False
+    source_default_parts: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -1401,8 +1403,11 @@ def import_moby(
             segment_collection["insomniac_source_default_visible"] = (
                 source_default_visible
             )
-            segment_collection.hide_viewport = True
-            segment_collection.hide_render = True
+            source_default_enabled = (
+                options.source_default_parts and source_default_visible
+            )
+            segment_collection.hide_viewport = not source_default_enabled
+            segment_collection.hide_render = not source_default_enabled
 
             object_name = (
                 f"{_safe_name(asset.name)}_Bangle_{segment_index:02d}"
@@ -2520,13 +2525,19 @@ def _create_actions(
             (frame_count, skeleton.bone_count, 3),
             dtype=np.float32,
         )
+        animated_order = _required_bone_order(
+            skeleton,
+            order,
+            clip.animated_bones,
+        )
         absolute: list[Matrix] = [Matrix.Identity(4)] * skeleton.bone_count
         blender_pose: list[Matrix] = [Matrix.Identity(4)] * skeleton.bone_count
         for frame_index in range(frame_count):
             unscaled_absolute: list[Matrix | None] = (
                 [None] * skeleton.bone_count
             )
-            for bone_index in order:
+            frame_order = order if frame_index == 0 else animated_order
+            for bone_index in frame_order:
                 translation = Vector(
                     clip.translations[frame_index, bone_index]
                 )
@@ -2563,6 +2574,11 @@ def _create_actions(
                     @ source_bind_inverses[bone_index]
                     @ blender_rest[bone_index]
                 )
+                if (
+                    frame_index > 0
+                    and not clip.animated_bones[bone_index]
+                ):
+                    continue
                 data_bone = data_bones[bone_index]
                 pose_bone = pose_bones[bone_index]
                 if source_bone.has_parent(
@@ -2593,33 +2609,59 @@ def _create_actions(
                 )
                 scales[frame_index, bone_index] = pose_bone.scale
 
+        location_defaults, location_constants = _action_curve_masks(
+            locations,
+            (0.0, 0.0, 0.0),
+            clip.animated_bones,
+        )
+        rotation_defaults, rotation_constants = _action_curve_masks(
+            rotations,
+            (1.0, 0.0, 0.0, 0.0),
+            clip.animated_bones,
+        )
+        scale_defaults, scale_constants = _action_curve_masks(
+            scales,
+            (1.0, 1.0, 1.0),
+            clip.animated_bones,
+        )
         for bone_index, pose_bone in enumerate(pose_bones):
             sample_count = (
                 frame_count if clip.animated_bones[bone_index] else 1
             )
             if not sample_count:
                 continue
-            group = channelbag.groups.new(pose_bone.name)
-            _write_action_curves(
+            group = _write_action_curves(
                 channelbag,
-                group,
+                None,
+                pose_bone.name,
                 pose_bone.path_from_id("location"),
                 frames[:sample_count],
                 locations[:sample_count, bone_index],
+                (0.0, 0.0, 0.0),
+                location_defaults[bone_index],
+                location_constants[bone_index],
             )
-            _write_action_curves(
+            group = _write_action_curves(
                 channelbag,
                 group,
+                pose_bone.name,
                 pose_bone.path_from_id("rotation_quaternion"),
                 frames[:sample_count],
                 rotations[:sample_count, bone_index],
+                (1.0, 0.0, 0.0, 0.0),
+                rotation_defaults[bone_index],
+                rotation_constants[bone_index],
             )
             _write_action_curves(
                 channelbag,
                 group,
+                pose_bone.name,
                 pose_bone.path_from_id("scale"),
                 frames[:sample_count],
                 scales[:sample_count, bone_index],
+                (1.0, 1.0, 1.0),
+                scale_defaults[bone_index],
+                scale_constants[bone_index],
             )
         action.frame_range = (float(frames[0]), float(frames[-1]))
     armature.animation_data.action = None
@@ -2629,6 +2671,31 @@ def _create_actions(
     context.scene.frame_set(original_frame)
     context.view_layer.update()
     return len(clips)
+
+
+def _action_curve_masks(
+    values: np.ndarray,
+    defaults: tuple[float, ...],
+    animated_bones: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    defaults_array = np.asarray(defaults, dtype=values.dtype)
+    default_mask = (
+        np.abs(values[0] - defaults_array) <= _ACTION_VALUE_EPSILON
+    )
+    constant_mask = np.ones_like(default_mask)
+    if np.any(animated_bones):
+        animated_values = values[:, animated_bones]
+        default_mask[animated_bones] = np.all(
+            np.abs(animated_values - defaults_array)
+            <= _ACTION_VALUE_EPSILON,
+            axis=0,
+        )
+        constant_mask[animated_bones] = np.all(
+            np.abs(animated_values - animated_values[:1])
+            <= _ACTION_VALUE_EPSILON,
+            axis=0,
+        )
+    return default_mask, constant_mask
 
 
 def _tag_action(
@@ -2648,29 +2715,42 @@ def _tag_action(
 
 def _write_action_curves(
     channelbag: bpy.types.ActionChannelbag,
-    group: bpy.types.ActionGroup,
+    group: bpy.types.ActionGroup | None,
+    group_name: str,
     data_path: str,
     frames: np.ndarray,
     values: np.ndarray,
-) -> None:
-    coordinates = np.empty((len(frames), 2), dtype=np.float64)
-    coordinates[:, 0] = frames
-    interpolation = np.full(
-        len(frames),
-        _LINEAR_INTERPOLATION,
-        dtype=np.int32,
-    )
-    for component in range(values.shape[1]):
-        coordinates[:, 1] = values[:, component]
+    defaults: tuple[float, ...],
+    default_mask: np.ndarray,
+    constant_mask: np.ndarray,
+) -> bpy.types.ActionGroup | None:
+    for component, _default in enumerate(defaults):
+        component_values = values[:, component]
+        if default_mask[component]:
+            continue
+        if constant_mask[component]:
+            component_frames = frames[:1]
+            component_values = component_values[:1]
+        else:
+            component_frames = frames
+        if group is None:
+            group = channelbag.groups.new(group_name)
+        coordinates = np.column_stack((component_frames, component_values))
+        interpolation = np.full(
+            len(component_frames),
+            _LINEAR_INTERPOLATION,
+            dtype=np.int32,
+        )
         fcurve = channelbag.fcurves.new(data_path, index=component)
         fcurve.group = group
-        fcurve.keyframe_points.add(len(frames))
+        fcurve.keyframe_points.add(len(component_frames))
         fcurve.keyframe_points.foreach_set("co", coordinates.reshape(-1))
         fcurve.keyframe_points.foreach_set(
             "interpolation",
             interpolation,
         )
         fcurve.update()
+    return group
 
 
 def _bone_order(skeleton: Skeleton) -> list[int]:
@@ -2689,6 +2769,25 @@ def _bone_order(skeleton: Skeleton) -> list[int]:
     for index in range(skeleton.bone_count):
         visit(index)
     return order
+
+
+def _required_bone_order(
+    skeleton: Skeleton,
+    order: list[int],
+    animated_bones: np.ndarray,
+) -> list[int]:
+    required = set(np.flatnonzero(animated_bones).tolist())
+    pending = list(required)
+    while pending:
+        index = pending.pop()
+        bone = skeleton.bones[index]
+        if (
+            bone.has_parent(index, skeleton.bone_count)
+            and bone.parent_index not in required
+        ):
+            required.add(bone.parent_index)
+            pending.append(bone.parent_index)
+    return [index for index in order if index in required]
 
 
 def _create_instance_object(

@@ -123,6 +123,28 @@ Baked Actions preserve `insomniac_additive_source = true` and add
 `insomniac_overlay_baked = true` plus the
 `insomniac_overlay_base` clip name.
 
+Imported Actions omit channels that remain at Blender's default value and use
+one key for constant non-default channels. Varying channels retain every
+decoded sample. Pose conversion after the first frame evaluates only tracked
+bones and their required ancestors. On the 78-bone Ravager this reduces the
+Action library from 81,900 to 29,053 FCurves and from 1,144,360 to 428,826
+keys without changing sampled Action values.
+
+## Character segments and companion models
+
+The Ravager Moby does not reference an external head Moby. Its model has seven
+render segments and a default draw mask of `0x7F`; segments 1 through 6 contain
+the authored head, eyes, and upper attachments. **Show source-default character
+parts** exposes those six Collections on import while leaving them separately
+selectable.
+
+Raw entity scans also found no direct body-to-head Moby reference in the
+Capelli hero body, NPC body, or game-head entities. Compatible bodies and
+heads can share owner levels and character-space placement, but their
+skeleton indices and bind poses differ. The importer therefore does not guess
+a companion or merge head weights into a body rig. A future animated assembly
+feature needs an explicit data-driven pairing and attachment profile.
+
 ## Shader references
 
 Shader section `0x5D00` is `0x40` bytes in Resistance 3 and contains six

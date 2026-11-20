@@ -171,6 +171,13 @@ Run the synthetic Blender rig regression test without game data:
   --python-exit-code 1 --python tests\test_blender_rig.py
 ```
 
+Run the optional-geometry and source-default-parts regression:
+
+```powershell
+& "C:\path\to\blender.exe" --background --factory-startup `
+  --python-exit-code 1 --python tests\test_blender_optional_geometry.py
+```
+
 Run the standalone Material/Action catalog metadata regression:
 
 ```powershell
@@ -236,4 +243,16 @@ The current implementation was validated in Blender 5.2.2 LTS with:
   3,355 unique shader payloads, and no mismatched duplicate payloads.
 - all 27 R3 cached level archives: 33,860 shader references, 4,579 unique
   shader payloads, exact normal-flag/binding agreement, and no mismatched
-  duplicate payloads.
+  duplicate payloads;
+- a full Ravager import with 9 objects, 7 meshes, 19 materials, 23 images,
+  105 Actions, and all six source-default head/attachment Collections shown;
+- sampled parity for all 105 Ravager Actions across 245,700 dense-reference
+  values, with maximum absolute error below `1e-6`;
+- sampled parity for all 39 Capelli game-head Actions across 63,180
+  dense-reference values, including eye direction, blink, expressions, and
+  visemes, with maximum absolute error below `1e-6`;
+- cached Ravager import time reduced from 4.53 seconds to 3.03-3.51 seconds,
+  and its saved file reduced from 21,668,857 to 16,229,606 bytes;
+- real `mine_town_approach` preparation reduced from 29.88 to 9.37 seconds
+  when the 1.68 GB global archives were already present in a verified sibling
+  level cache.

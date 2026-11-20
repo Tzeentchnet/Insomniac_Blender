@@ -85,7 +85,7 @@ both fields from `PARAM.SFO`.
 | Direct decrypted ISO sources | Supported through a reusable local extraction cache |
 | `assetlookup.dat` discovery | Supported |
 | Moby models | Supported |
-| Moby bangles/customizations | Each non-base segment imports into its own hidden, selectable Collection |
+| Moby bangles/customizations | Each non-base segment imports into its own selectable Collection; authored source-default parts can optionally be shown |
 | Moby damage permutations | Optional; disabled by default and kept in a separate Collection |
 | Moby primitive and triangle collision | Optional wire helpers; disabled by default |
 | Moby skeletons and skin weights | Supported |
@@ -116,7 +116,7 @@ both fields from `PARAM.SFO`.
 | PS3 zlib PSARC reading | Supported, including random entry slices |
 | `assetlookup.dat` discovery | Supported |
 | Moby models, skeletons, skin weights, and animations | Supported, including the R3 playback profile and standalone baking for matched runtime overlays |
-| Moby bangles/customizations | Each non-base segment imports into its own hidden, selectable Collection |
+| Moby bangles/customizations | Each non-base segment imports into its own selectable Collection; authored source-default parts can optionally be shown |
 | Moby damage permutations and collision geometry | Optional; disabled by default |
 | Tie static meshes | Supported |
 | USA model/level import catalog | 5,820 named assets and 27 levels bundled as metadata |
@@ -175,7 +175,7 @@ distributed with the extension.
 
 2. In Blender, open **Edit > Preferences > Get Extensions**.
 3. Use **Install from Disk** and choose
-   `dist\insomniac_asset_io-0.7.4.zip`.
+   `dist\insomniac_asset_io-0.7.5.zip`.
 4. Open the **Insomniac** tab in the 3D View sidebar.
 
 Blender includes NumPy; no external Python package is required at runtime.
@@ -256,7 +256,11 @@ animation layers. These Actions retain
 R2/R3 Moby bangles and outfitter add-ons are always preserved under
 **Customizations**. Each non-base render segment gets its own **Bangle NN**
 Collection, hidden from the viewport and renders by default but selectable
-and independently revealable in the Outliner.
+and independently revealable in the Outliner. Enable **Show source-default
+character parts** to reveal only the segments enabled by the Moby's authored
+default draw mask. This assembles models such as the Resistance 3 Ravager,
+whose head is stored in six internal customization segments, while retaining
+the default-hidden behavior needed by multiplayer outfitter models.
 
 Damage permutations, lower LODs, and collision geometry are independently
 disabled by default. Enabling them in Add-on Preferences puts each damage
@@ -292,8 +296,10 @@ unknown or wrong-version discs before extraction. RFoM reads selected entries
 directly from the root `GAME.PSARC`; later games extract the required
 level/global archive set. Each prepared level records the source disc identity
 and declared resource set in its cache. Verified complete extractions are
-reused; legacy caches or caches produced from a different ISO are refreshed
-once before use.
+reused; global archives from another verified level cache for the same disc
+are reused with NTFS hard links instead of being extracted and duplicated for
+every level. Legacy caches or caches produced from a different ISO are
+refreshed once before use.
 **Extract Selected Level Now**
 remains available when an explicit extracted source is useful for external
 tools. When **Inspect Source** needs ISO extraction, the sidebar and status
@@ -309,7 +315,8 @@ the games and live in Add-on Preferences rather than the sidebar. ISO paths
 and generated catalogs remain game-specific:
 
 - model materials, Moby animations, animation limit, axis conversion, and
-  default-off damage-permutation, lower-LOD, and collision-geometry import;
+  default-off source-default character parts, damage-permutation, lower-LOD,
+  and collision-geometry import;
 - asset-selector duplicate suppression, TUID visibility, and owner-level
   visibility;
 - level materials, terrain, static props, gameplay instances, and axis

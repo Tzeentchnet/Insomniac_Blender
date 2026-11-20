@@ -210,6 +210,7 @@ class BlenderRigTests(unittest.TestCase):
         frame_rate = 30.0
         translations = np.zeros((frame_count, 1, 3), dtype=np.float32)
         translations[:, 0, 0] = np.arange(frame_count, dtype=np.float32)
+        translations[:, 0, 1] = 2.0
         clip = DecodedClip(
             name="motion",
             frame_rate=frame_rate,
@@ -242,12 +243,24 @@ class BlenderRigTests(unittest.TestCase):
         self.assertEqual(action.slots.active, action.slots[0])
 
         channelbag = action.layers[0].strips[0].channelbags[0]
-        self.assertEqual(len(channelbag.fcurves), 10)
-        self.assertTrue(
-            all(
-                len(fcurve.keyframe_points) == frame_count
-                for fcurve in channelbag.fcurves
-            )
+        self.assertEqual(len(channelbag.fcurves), 2)
+        self.assertEqual(
+            channelbag.fcurves[0].data_path,
+            'pose.bones["bone_000"].location',
+        )
+        self.assertEqual(channelbag.fcurves[0].array_index, 0)
+        self.assertEqual(
+            len(channelbag.fcurves[0].keyframe_points),
+            frame_count,
+        )
+        self.assertEqual(channelbag.fcurves[1].array_index, 1)
+        self.assertEqual(
+            len(channelbag.fcurves[1].keyframe_points),
+            1,
+        )
+        self.assertAlmostEqual(
+            channelbag.fcurves[1].keyframe_points[0].co.y,
+            2.0,
         )
         self.assertTrue(
             all(

@@ -46,6 +46,7 @@ class AssetCacheOptions:
     damage_permutations: bool = False
     lower_lods: bool = False
     collision_geometry: bool = False
+    source_default_parts: bool = False
     asset_limit: int = 0
 
 
@@ -129,6 +130,8 @@ def run_asset_cache_worker(
         command.append("--lower-lods")
     if options.collision_geometry:
         command.append("--collision-geometry")
+    if options.source_default_parts:
+        command.append("--source-default-parts")
     if not options.generate_previews:
         command.append("--no-previews")
     if options.asset_limit:
@@ -230,6 +233,9 @@ def generate_asset_library(
                             ),
                             lower_lods=options.lower_lods,
                             collision_geometry=options.collision_geometry,
+                            source_default_parts=(
+                                options.source_default_parts
+                            ),
                         )
                         if kind is AssetKind.MOBY:
                             result = import_moby(
@@ -450,6 +456,7 @@ def generate_asset_library(
                 "damage_permutations": options.damage_permutations,
                 "lower_lods": options.lower_lods,
                 "collision_geometry": options.collision_geometry,
+                "source_default_parts": options.source_default_parts,
                 "asset_limit": options.asset_limit,
             },
             "assets": assets,

@@ -174,6 +174,15 @@ class InsomniacAddonPreferences(bpy.types.AddonPreferences):
         description=("Import model collision shapes into a separate Collection"),
         default=False,
     )
+    asset_import_source_default_parts: bpy.props.BoolProperty(
+        name="Show source-default character parts",
+        description=(
+            "Show customization segments enabled by the model's authored "
+            "default draw mask; useful for composite characters such as the "
+            "Resistance 3 Ravager"
+        ),
+        default=False,
+    )
     asset_animation_clip_limit: bpy.props.IntProperty(
         name="Animation limit",
         description="Maximum clips to create; zero imports every clip",
@@ -254,6 +263,7 @@ class InsomniacAddonPreferences(bpy.types.AddonPreferences):
         model.prop(self, "asset_import_damage_permutations")
         model.prop(self, "asset_import_lower_lods")
         model.prop(self, "asset_import_collision_geometry")
+        model.prop(self, "asset_import_source_default_parts")
         if self.asset_import_animations:
             model.prop(self, "asset_animation_clip_limit")
         model.prop(self, "asset_convert_axes")

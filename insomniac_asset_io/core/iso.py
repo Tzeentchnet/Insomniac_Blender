@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import shutil
 import subprocess
 import tempfile
@@ -957,6 +958,64 @@ def _write_cache_provenance(
         ) from exc
 
 
+def _reuse_verified_global_archives(
+    cache_root: Path,
+    target_provenance: Path,
+    *,
+    cache_key: str,
+    source_identity: dict[str, int | str | None],
+    global_outputs: dict[str, Path],
+) -> set[str]:
+    if not global_outputs or not cache_root.is_dir():
+        return set()
+    required = set(global_outputs)
+    for provenance_path in sorted(
+        cache_root.rglob(_CACHE_PROVENANCE_FILENAME)
+    ):
+        if provenance_path == target_provenance:
+            continue
+        provenance = _read_cache_provenance(provenance_path)
+        if (
+            provenance is None
+            or provenance.get("schema_version")
+            != _CACHE_PROVENANCE_SCHEMA_VERSION
+            or provenance.get("cache_key") != cache_key
+            or provenance.get("source") != source_identity
+        ):
+            continue
+        resources = provenance.get("resources")
+        if (
+            not isinstance(resources, list)
+            or not required.issubset(resources)
+        ):
+            continue
+        source_root = (
+            provenance_path.parent
+            / "PS3_GAME"
+            / "USRDIR"
+            / "packed"
+            / "game"
+        )
+        sources = {
+            member: source_root / PurePosixPath(member).name
+            for member in global_outputs
+        }
+        if not all(path.is_file() for path in sources.values()):
+            continue
+        reused: set[str] = set()
+        for member, target in global_outputs.items():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                target.unlink(missing_ok=True)
+                os.link(sources[member], target)
+            except OSError:
+                target.unlink(missing_ok=True)
+            else:
+                reused.add(member)
+        return reused
+    return set()
+
+
 def prepare_game_level(
     iso_path: str | Path,
     level_name: str,
@@ -1062,6 +1121,25 @@ def prepare_game_level(
         }
     else:
         pending = dict(zip(members, expected))
+    global_outputs = dict(
+        zip(
+            members[: len(global_archives)],
+            expected[: len(global_archives)],
+        )
+    )
+    reused_globals = _reuse_verified_global_archives(
+        Path(cache_directory).expanduser() / cache_key,
+        provenance_path,
+        cache_key=cache_key,
+        source_identity=source_identity,
+        global_outputs={
+            member: path
+            for member, path in global_outputs.items()
+            if member in pending
+        },
+    )
+    for member in reused_globals:
+        pending.pop(member, None)
     if container_member is None:
         extract_game_iso_members(
             iso,

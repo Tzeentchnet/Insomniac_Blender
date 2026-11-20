@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 import struct
 import subprocess
 import tempfile
@@ -567,6 +568,77 @@ class Resistance2IsoTests(unittest.TestCase):
 
         self.assertEqual(extract.call_count, 2)
         self.assertEqual(actual, b"generation 2")
+
+    def test_reuses_verified_global_archives_across_levels(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            iso = root / "game.iso"
+            iso.write_bytes(b"same disc")
+            cache = root / "cache"
+            extracted_members: list[set[str]] = []
+
+            def extract_members(_iso, outputs, *, game_label):
+                self.assertEqual(game_label, "Resistance 3")
+                extracted_members.append(set(outputs))
+                for member, path in outputs.items():
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(member.encode())
+
+            with mock.patch(
+                "insomniac_asset_io.core.iso.extract_game_iso_members",
+                side_effect=extract_members,
+            ):
+                prepare_game_level(
+                    iso,
+                    "first",
+                    cache,
+                    cache_key="resistance_3",
+                    game_label="Resistance 3",
+                )
+                prepare_game_level(
+                    iso,
+                    "second",
+                    cache,
+                    cache_key="resistance_3",
+                    game_label="Resistance 3",
+                )
+
+            first_global = (
+                cache
+                / "resistance_3"
+                / "first"
+                / "PS3_GAME"
+                / "USRDIR"
+                / "packed"
+                / "game"
+                / "global_cached.psarc"
+            )
+            second_global = (
+                cache
+                / "resistance_3"
+                / "second"
+                / "PS3_GAME"
+                / "USRDIR"
+                / "packed"
+                / "game"
+                / "global_cached.psarc"
+            )
+            globals_are_linked = os.path.samefile(
+                first_global,
+                second_global,
+            )
+
+        self.assertEqual(len(extracted_members), 2)
+        self.assertEqual(
+            extracted_members[1],
+            {
+                "PS3_GAME/USRDIR/packed/levels/second/"
+                "level_cached.psarc",
+                "PS3_GAME/USRDIR/packed/levels/second/"
+                "level_uncached.psarc",
+            },
+        )
+        self.assertTrue(globals_are_linked)
 
     def test_refreshes_cache_with_wrong_title_provenance(self):
         with tempfile.TemporaryDirectory() as temporary:

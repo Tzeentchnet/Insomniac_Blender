@@ -737,6 +737,9 @@ class INSOMNIAC_OT_import_asset(bpy.types.Operator):
                     collision_geometry=(
                         preferences.asset_import_collision_geometry
                     ),
+                    source_default_parts=(
+                        preferences.asset_import_source_default_parts
+                    ),
                 )
                 if asset.kind is AssetKind.MOBY:
                     result = import_moby(
@@ -1160,6 +1163,9 @@ class INSOMNIAC_OT_rebuild_asset_library(bpy.types.Operator):
                     lower_lods=preferences.asset_import_lower_lods,
                     collision_geometry=(
                         preferences.asset_import_collision_geometry
+                    ),
+                    source_default_parts=(
+                        preferences.asset_import_source_default_parts
                     ),
                 ),
             )

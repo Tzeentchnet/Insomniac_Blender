@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
 import sys
 import traceback
+from pathlib import Path
 
 import bpy
 
@@ -26,6 +26,7 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--damage-permutations", action="store_true")
     parser.add_argument("--lower-lods", action="store_true")
     parser.add_argument("--collision-geometry", action="store_true")
+    parser.add_argument("--source-default-parts", action="store_true")
     parser.add_argument("--no-previews", action="store_true")
     parser.add_argument("--asset-limit", type=int, default=0)
     return parser.parse_args(arguments)
@@ -63,6 +64,7 @@ def main() -> int:
                 damage_permutations=args.damage_permutations,
                 lower_lods=args.lower_lods,
                 collision_geometry=args.collision_geometry,
+                source_default_parts=args.source_default_parts,
                 asset_limit=max(args.asset_limit, 0),
             ),
         )
