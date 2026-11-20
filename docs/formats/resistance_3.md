@@ -1,7 +1,8 @@
 # Resistance 3 format notes
 
-Status: verified against the decrypted US Resistance 3 PS3 disc
-(`En,Fr,Es`) and real campaign and lobby archives.
+Status: verified against the decrypted USA `BCUS98176` v01.00 Resistance 3
+PS3 disc (`En,Fr,Es`) and real campaign and lobby archives. The add-on
+validates both `PARAM.SFO` identity fields before extraction.
 
 ## Disc and archive layout
 

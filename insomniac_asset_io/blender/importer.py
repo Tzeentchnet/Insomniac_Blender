@@ -61,9 +61,16 @@ def _reader_axis_conversion_x_degrees(reader: object | None) -> float:
 
 
 def _reader_asset_scope(reader: object | None) -> str:
-    if _reader_game_id(reader) != "RATCHET_TOD":
+    level_local = getattr(reader, "level_local_asset_ids", None)
+    if level_local is None:
+        level_local = _reader_game_id(reader) == "RATCHET_TOD"
+    if not bool(level_local):
         return ""
     prefix = str(getattr(reader, "resource_prefix", "")).replace("\\", "/")
+    if not prefix:
+        source = getattr(reader, "source", None)
+        root = getattr(source, "root", None)
+        prefix = str(getattr(root, "name", ""))
     marker = "/levels/"
     normalized = "/" + prefix.lstrip("/")
     if marker in normalized.casefold():
@@ -1312,10 +1319,15 @@ def import_moby(
     ]
     # All materials are built; see _MaterialFactory.release_decoded_textures.
     materials.release_decoded_textures()
+    customization_segments = frozenset(asset.customization_segments)
     base_meshes = [
         mesh
         for mesh in asset.meshes
-        if not mesh.is_damage_permutation and mesh.lod_level == 0
+        if (
+            not mesh.is_damage_permutation
+            and mesh.segment_index not in customization_segments
+            and mesh.lod_level == 0
+        )
     ]
     combined = _build_mesh(
         f"{_safe_name(asset.name)}_Mesh",
@@ -1346,10 +1358,93 @@ def import_moby(
     )
 
     optional_object_count = 0
+    customization_meshes = [
+        mesh
+        for mesh in asset.meshes
+        if (
+            mesh.segment_index in customization_segments
+            and mesh.lod_level == 0
+        )
+    ]
+    if customization_meshes:
+        customization_collection = _child_collection(
+            collection,
+            "Customizations",
+        )
+        customization_collection["insomniac_geometry_kind"] = (
+            "CUSTOMIZATIONS"
+        )
+        if asset.default_draw_mask is not None:
+            customization_collection["insomniac_default_draw_mask"] = (
+                f"0x{asset.default_draw_mask:016X}"
+            )
+        for bangle_index, segment_index in enumerate(
+            sorted({mesh.segment_index for mesh in customization_meshes})
+        ):
+            segment_meshes = [
+                mesh
+                for mesh in customization_meshes
+                if mesh.segment_index == segment_index
+            ]
+            segment_collection = _child_collection(
+                customization_collection,
+                f"Bangle {segment_index:02d}",
+            )
+            segment_collection["insomniac_geometry_kind"] = "CUSTOMIZATION"
+            segment_collection["insomniac_bangle_index"] = bangle_index
+            segment_collection["insomniac_segment_index"] = segment_index
+            source_default_visible = (
+                asset.default_draw_mask is not None
+                and segment_index < 64
+                and bool(asset.default_draw_mask & (1 << segment_index))
+            )
+            segment_collection["insomniac_source_default_visible"] = (
+                source_default_visible
+            )
+            segment_collection.hide_viewport = True
+            segment_collection.hide_render = True
+
+            object_name = (
+                f"{_safe_name(asset.name)}_Bangle_{segment_index:02d}"
+            )
+            customization_combined = _build_mesh(
+                object_name,
+                segment_meshes,
+                blender_materials,
+            )
+            customization_object = bpy.data.objects.new(
+                object_name,
+                customization_combined.mesh,
+            )
+            segment_collection.objects.link(customization_object)
+            customization_object["insomniac_asset_tuid"] = (
+                f"0x{asset.tuid:016X}"
+            )
+            customization_object["insomniac_asset_kind"] = "MOBY"
+            customization_object["insomniac_customization"] = True
+            customization_object["insomniac_bangle_index"] = bangle_index
+            customization_object["insomniac_segment_index"] = segment_index
+            customization_object["insomniac_source_default_visible"] = (
+                source_default_visible
+            )
+            _bind_moby_mesh(
+                customization_object,
+                customization_combined,
+                root,
+                armature,
+                asset.skeleton,
+                _reader_game_label(reader),
+            )
+            optional_object_count += 1
+
     damage_meshes = [
         mesh
         for mesh in asset.meshes
-        if mesh.is_damage_permutation and mesh.lod_level == 0
+        if (
+            mesh.is_damage_permutation
+            and mesh.segment_index not in customization_segments
+            and mesh.lod_level == 0
+        )
     ]
     if options.damage_permutations and damage_meshes:
         damage_collection = _child_collection(
@@ -1400,6 +1495,7 @@ def import_moby(
         mesh
         for mesh in asset.meshes
         if mesh.lod_level > 0
+        and mesh.segment_index not in customization_segments
         and (
             not mesh.is_damage_permutation
             or options.damage_permutations
@@ -2087,6 +2183,9 @@ def import_level(
                 if mesh is None:
                     try:
                         moby = reader.read_moby(instance.asset_tuid)
+                        customization_segments = frozenset(
+                            moby.customization_segments
+                        )
                         moby_materials = [
                             materials.material(shader_tuid)
                             for shader_tuid in moby.shader_tuids
@@ -2097,6 +2196,8 @@ def import_level(
                                 geometry
                                 for geometry in moby.meshes
                                 if not geometry.is_damage_permutation
+                                and geometry.segment_index
+                                not in customization_segments
                             ),
                             moby_materials,
                         ).mesh

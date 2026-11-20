@@ -11,6 +11,7 @@ python -m unittest discover -s tests -v
 Run a real extracted level smoke test:
 
 ```powershell
+python tools\smoke_rfom.py "C:\path\to\level20" --moby 0x03C5
 python tools\smoke_r2.py "C:\path\to\level_cached.psarc"
 python tools\smoke_r3.py "C:\path\to\level_cached.psarc"
 ```
@@ -18,6 +19,39 @@ python tools\smoke_r3.py "C:\path\to\level_cached.psarc"
 The smoke test reports resource counts and decodes one Moby, skeleton,
 animset, diffuse texture, Tie, zone, and gameplay region without writing game
 data to the repository.
+
+Run the environment-gated Resistance: Fall of Man level 20 regression:
+
+```powershell
+$env:RFOM_LEVEL_SOURCE = "E:\tests\InsomniacAssetIO\resistance_fom\cache\resistance_fom\level20\PS3_GAME\USRDIR\packed\levels\level20"
+$env:RFOM_ISO_PATH = "E:\path\to\Resistance-Fall-of-Man-v01.00.dec.iso"
+python -m unittest discover -s tests -p "test_real_resistance_fom.py" -v
+Remove-Item Env:RFOM_LEVEL_SOURCE
+Remove-Item Env:RFOM_ISO_PATH
+```
+
+This checks the exact `BCUS98107`/`01.00` identity, the 41-level inventory,
+an animated 76-bone Moby, material and texture decoding, a Tie, region
+terrain, 4,247 Tie placements, and 533 primary gameplay Moby placements.
+Each source-specific test is skipped when its environment variable is absent.
+
+Validate RFoM imports with Blender 5.2:
+
+```powershell
+& "D:\Blender Foundation\Blender 5.2\blender.exe" --background `
+  --factory-startup --python-exit-code 1 `
+  --python tools\blender_smoke_rfom.py -- `
+  --source "E:\tests\InsomniacAssetIO\resistance_fom\level20" `
+  --output "E:\tests\InsomniacAssetIO\resistance_fom\moby.blend" `
+  --kind moby --tuid 0x03C5 --materials --animations
+
+& "D:\Blender Foundation\Blender 5.2\blender.exe" --background `
+  --factory-startup --python-exit-code 1 `
+  --python tools\blender_smoke_rfom.py -- `
+  --source "E:\tests\InsomniacAssetIO\resistance_fom\level20" `
+  --output "E:\tests\InsomniacAssetIO\resistance_fom\level.blend" `
+  --kind level --materials
+```
 
 Run the environment-gated Tools of Destruction Metropolis regression against
 an extracted archive trio:
@@ -144,6 +178,20 @@ disabled.
 
 The current implementation was validated in Blender 5.2.2 LTS with:
 
+- Resistance: Fall of Man USA v01.00 level 20: all 155 Mobys (961 meshes),
+  222 Ties (1,664 meshes), 633 Materials, 1,384 textures, 1,675 region
+  meshes, 4,247 Tie placements, and 533 primary gameplay Moby placements;
+- all 1,717 inline clips across 37 animated RFoM Mobys, including 155
+  skeletons and a 186-bone asset, decoded without errors;
+- representative RFoM texture decoding for every observed format
+  (`0x81`, `0x85`, `0x86`, `0x87`, `0x88`, and `0x8B`);
+- selective RFoM level extraction directly from the ISO-backed 6.5 GB
+  `GAME.PSARC`, plus a 41-level, 36,034-reference metadata catalog;
+- a saved and reopened animated RFoM Moby with three Materials, ten decoded
+  game images, a 76-bone rig, and one Action;
+- a saved and reopened RFoM level with 4,782 objects, 303 mesh datablocks,
+  486 source Materials, and 1,060 decoded game images, without import
+  warnings;
 - Tools of Destruction USA v02.00 Metropolis: 201 Mobys, 193 Ties,
   631 shaders, 1,297 textures, 1,987 UFrags, 4,848 Tie placements, and
   1,378 gameplay Moby placements;

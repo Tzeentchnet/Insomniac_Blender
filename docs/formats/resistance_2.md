@@ -1,7 +1,8 @@
 # Resistance 2 format notes
 
-Status: verified against a decrypted US Resistance 2 PS3 disc image and the
-public InsomniaToolset/ReChimera research listed below.
+Status: verified against the decrypted USA `BCUS98120` v01.00 Resistance 2
+PS3 disc image and the public InsomniaToolset/ReChimera research listed below.
+The add-on validates both `PARAM.SFO` identity fields before extraction.
 
 ## Disc and archive layout
 
@@ -127,12 +128,17 @@ A segment is `(u32 primitivePointer, u32 primitiveCount)`. A primitive is
 `0x40` bytes. Index offset is in `u16` elements; vertex offset is in bytes.
 The index count at `+0x10` is `u32`, not `u16`.
 
-Bits set in the default segment draw mask identify the intact/default model.
-Clear bits identify optional damage/bangle alternatives. A zero mask is
-treated as unspecified and keeps every segment in the default model. Ordinary
-Moby and gameplay imports use the default geometry. When explicitly enabled,
-Blender keeps each alternate segment as a separate object so mutually
-exclusive runtime permutations are not merged together.
+The default segment draw mask is the Moby class default, not the multiplayer
+outfitter's final selection. Multiplayer heads can set several mutually
+exclusive helmet bits at once because runtime customization replaces that
+mask before drawing.
+
+When `bangle count` is nonzero, segment zero is imported as the base model and
+every nonzero render segment is preserved under its own hidden **Bangle NN**
+Collection. This intentionally exposes render segments rather than guessing
+the undocumented logical grouping used by complex outfitter Mobys. For Mobys
+without bangle metadata, clear default-draw bits continue to identify optional
+damage alternatives; a zero mask remains unspecified.
 
 ### Collision
 

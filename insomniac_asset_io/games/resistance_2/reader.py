@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from functools import cached_property
-import logging
 from pathlib import Path, PurePosixPath
 
 import numpy as np
@@ -37,7 +37,6 @@ from .formats import (
     Zone,
 )
 from .textures import decode_texture, texture_mip_size
-
 
 LOGGER = logging.getLogger(__name__)
 
@@ -336,6 +335,10 @@ class Resistance2Reader:
                 f"{ighw.label}: bangle count {bangle_count} exceeds segment "
                 f"count {segment_count}"
             )
+        customization_segments = (
+            tuple(range(1, segment_count)) if bangle_count else ()
+        )
+        customization_segment_set = frozenset(customization_segments)
 
         name_section = ighw.section(SECT_MOBY_NAME)
         name = (
@@ -391,6 +394,8 @@ class Resistance2Reader:
                             label=ighw.label,
                             segment_index=segment_index,
                             is_damage_permutation=(
+                                segment_index not in customization_segment_set
+                                and
                                 bool(default_draw_mask)
                                 and segment_index < 64
                                 and not (
@@ -423,6 +428,8 @@ class Resistance2Reader:
             bind_pose_inverse_offset=bind_pose_inverse_offset,
             collision_primitives=collision_primitives,
             collision_meshes=collision_meshes,
+            customization_segments=customization_segments,
+            default_draw_mask=default_draw_mask,
         )
 
     @staticmethod

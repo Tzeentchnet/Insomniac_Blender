@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+import io
+import json
 import shutil
 import subprocess
 import tempfile
+from dataclasses import dataclass
+from pathlib import Path, PurePosixPath
 
 from .errors import InsomniacError, MissingResourceError
-
+from .psarc import PsarcArchive
 
 DEFAULT_CACHE_DIRECTORY = Path.home() / "InsomniacAssetIOCache"
 _PACKED_ROOT = PurePosixPath("PS3_GAME/USRDIR/packed")
@@ -16,6 +18,8 @@ _MAX_ISO_ENTRIES = 200_000
 _MAX_DIRECTORY_DEPTH = 128
 _MAX_PARAM_SFO_SIZE = 1024 * 1024
 _MAX_PARAM_SFO_ENTRIES = 1024
+_CACHE_PROVENANCE_FILENAME = ".insomniac-cache.json"
+_CACHE_PROVENANCE_SCHEMA_VERSION = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,6 +31,53 @@ class _IsoEntry:
     @property
     def size(self) -> int:
         return sum(length for _sector, length in self.extents)
+
+
+class _IsoMemberStream(io.RawIOBase):
+    def __init__(self, image: "_Iso9660Image", entry: _IsoEntry) -> None:
+        super().__init__()
+        self._image = image
+        self._entry = entry
+        self._position = 0
+
+    def readable(self) -> bool:
+        return True
+
+    def seekable(self) -> bool:
+        return True
+
+    def tell(self) -> int:
+        self._checkClosed()
+        return self._position
+
+    def seek(self, offset: int, whence: int = io.SEEK_SET) -> int:
+        self._checkClosed()
+        if whence == io.SEEK_SET:
+            position = offset
+        elif whence == io.SEEK_CUR:
+            position = self._position + offset
+        elif whence == io.SEEK_END:
+            position = self._entry.size + offset
+        else:
+            raise ValueError(f"Unsupported seek mode {whence}")
+        if position < 0:
+            raise ValueError("Negative seek position")
+        self._position = position
+        return position
+
+    def read(self, size: int = -1) -> bytes:
+        self._checkClosed()
+        remaining = max(0, self._entry.size - self._position)
+        length = remaining if size is None or size < 0 else min(size, remaining)
+        if not length:
+            return b""
+        data = self._image._read_entry_slice(
+            self._entry,
+            self._position,
+            length,
+        )
+        self._position += len(data)
+        return data
 
 
 class _Iso9660Image:
@@ -61,7 +112,7 @@ class _Iso9660Image:
     def paths(self) -> tuple[str, ...]:
         return tuple(entry.path for entry in self._entries.values())
 
-    def extract(self, member: str, output: Path) -> None:
+    def _entry(self, member: str) -> _IsoEntry:
         normalized = _normalize_iso_path(member)
         try:
             entry = self._entries[normalized]
@@ -73,6 +124,13 @@ class _Iso9660Image:
             raise MissingResourceError(
                 f"{self.path}: ISO member is a directory: {member}"
             )
+        return entry
+
+    def open_member(self, member: str) -> _IsoMemberStream:
+        return _IsoMemberStream(self, self._entry(member))
+
+    def extract(self, member: str, output: Path) -> None:
+        entry = self._entry(member)
 
         output.parent.mkdir(parents=True, exist_ok=True)
         temporary_path: Path | None = None
@@ -94,23 +152,58 @@ class _Iso9660Image:
             raise
 
     def read(self, member: str, *, max_size: int) -> bytes:
-        normalized = _normalize_iso_path(member)
-        try:
-            entry = self._entries[normalized]
-        except KeyError as exc:
-            raise MissingResourceError(
-                f"{self.path}: ISO member was not found: {member}"
-            ) from exc
-        if entry.is_directory:
-            raise MissingResourceError(
-                f"{self.path}: ISO member is a directory: {member}"
-            )
+        entry = self._entry(member)
         if entry.size > max_size:
             raise InsomniacError(
                 f"{self.path}: ISO member {member} is {entry.size} bytes; "
                 f"limit is {max_size}"
             )
         return self._read_extents(entry.extents)
+
+    def _read_entry_slice(
+        self,
+        entry: _IsoEntry,
+        offset: int,
+        length: int,
+    ) -> bytes:
+        if (
+            offset < 0
+            or length < 0
+            or offset + length > entry.size
+        ):
+            raise InsomniacError(
+                f"{self.path}: member read [{offset:#x}, "
+                f"{offset + length:#x}) exceeds {entry.path} "
+                f"({entry.size:#x} bytes)"
+            )
+        chunks: list[bytes] = []
+        logical_start = 0
+        remaining = length
+        cursor = offset
+        for sector, extent_length in entry.extents:
+            logical_end = logical_start + extent_length
+            if cursor >= logical_end:
+                logical_start = logical_end
+                continue
+            relative = max(0, cursor - logical_start)
+            available = extent_length - relative
+            take = min(remaining, available)
+            chunks.append(
+                self._read_at(
+                    sector * self._block_size + relative,
+                    take,
+                )
+            )
+            cursor += take
+            remaining -= take
+            logical_start = logical_end
+            if not remaining:
+                break
+        if remaining:
+            raise InsomniacError(
+                f"{self.path}: short read in ISO member {entry.path}"
+            )
+        return b"".join(chunks)
 
     def _load(self) -> None:
         primary = None
@@ -432,15 +525,37 @@ def list_game_levels(
     iso_path: str | Path,
     *,
     game_label: str,
+    level_marker: str = "level_cached.psarc",
+    container_member: str | None = None,
 ) -> tuple[str, ...]:
     """Return level archive names present in a supported game ISO."""
 
     iso = _iso_path(iso_path, game_label)
-    prefix = f"{_PACKED_ROOT.as_posix()}/levels/".casefold()
-    suffix = "/level_cached.psarc"
+    if container_member is None:
+        raw_paths = _iso_paths(iso, game_label)
+        normalize = _normalize_iso_path
+        prefix = f"{_PACKED_ROOT.as_posix()}/levels/".casefold()
+    else:
+        try:
+            with _Iso9660Image(iso) as image:
+                with PsarcArchive.from_stream(
+                    image.open_member(container_member),
+                    label=f"{iso}!/{container_member}",
+                ) as archive:
+                    raw_paths = tuple(
+                        entry.name for entry in archive.entries
+                    )
+        except (InsomniacError, OSError) as exc:
+            raise InsomniacError(
+                f"Could not read {game_label} archive "
+                f"{container_member} from {iso}: {exc}"
+            ) from exc
+        normalize = PsarcArchive.normalize
+        prefix = "packed/levels/"
+    suffix = f"/{level_marker.casefold()}"
     levels: set[str] = set()
-    for raw_path in _iso_paths(iso, game_label):
-        path = _normalize_iso_path(raw_path)
+    for raw_path in raw_paths:
+        path = normalize(raw_path)
         if not path.startswith(prefix) or not path.endswith(suffix):
             continue
         level_name = path[len(prefix) : -len(suffix)]
@@ -450,7 +565,7 @@ def list_game_levels(
             )
     if not levels:
         raise InsomniacError(
-            f"The ISO contains no {game_label} level_cached.psarc archives"
+            f"The ISO contains no {game_label} {level_marker} resources"
         )
     return tuple(sorted(levels, key=str.casefold))
 
@@ -534,6 +649,61 @@ def extract_game_iso_member(
         game_label=game_label,
     )
     return output
+
+
+def _extract_psarc_members_from_iso(
+    iso: Path,
+    container_member: str,
+    outputs: dict[str, Path],
+    *,
+    game_label: str,
+) -> None:
+    try:
+        with _Iso9660Image(iso) as image:
+            with PsarcArchive.from_stream(
+                image.open_member(container_member),
+                label=f"{iso}!/{container_member}",
+            ) as archive:
+                chunk_size = max(archive.block_size, 8 * 1024 * 1024)
+                chunk_size -= chunk_size % archive.block_size
+                for member, output in outputs.items():
+                    entry = archive.get(member)
+                    output.parent.mkdir(parents=True, exist_ok=True)
+                    temporary_path: Path | None = None
+                    try:
+                        with tempfile.NamedTemporaryFile(
+                            mode="wb",
+                            prefix=f".{output.name}.",
+                            suffix=".tmp",
+                            dir=output.parent,
+                            delete=False,
+                        ) as temporary:
+                            temporary_path = Path(temporary.name)
+                            for offset in range(
+                                0,
+                                entry.uncompressed_size,
+                                chunk_size,
+                            ):
+                                temporary.write(
+                                    archive.read_slice(
+                                        entry,
+                                        offset,
+                                        min(
+                                            chunk_size,
+                                            entry.uncompressed_size - offset,
+                                        ),
+                                    )
+                                )
+                        temporary_path.replace(output)
+                    except Exception:
+                        if temporary_path is not None:
+                            temporary_path.unlink(missing_ok=True)
+                        raise
+    except (InsomniacError, OSError) as exc:
+        raise InsomniacError(
+            f"Could not extract {game_label} resources from "
+            f"{container_member} in {iso}: {exc}"
+        ) from exc
 
 
 def read_game_iso_member(
@@ -693,6 +863,100 @@ def validate_game_iso(
     return values
 
 
+def _cache_source_identity(
+    iso: Path,
+    *,
+    iso_values: dict[str, str],
+    expected_title_id: str | None,
+    expected_version: str | None,
+) -> dict[str, int | str | None]:
+    stat = iso.stat()
+    return {
+        "size": stat.st_size,
+        "modified_ns": stat.st_mtime_ns,
+        "title_id": iso_values.get("TITLE_ID") or expected_title_id,
+        "version": (
+            iso_values.get("VERSION")
+            or iso_values.get("APP_VER")
+            or expected_version
+        ),
+    }
+
+
+def _read_cache_provenance(path: Path) -> dict[str, object] | None:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (FileNotFoundError, OSError, UnicodeError, json.JSONDecodeError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def _cache_provenance_matches(
+    path: Path,
+    *,
+    cache_key: str,
+    level_name: str,
+    source_identity: dict[str, int | str | None],
+    members: tuple[str, ...],
+) -> bool:
+    provenance = _read_cache_provenance(path)
+    if provenance is None:
+        return False
+    if (
+        provenance.get("schema_version") != _CACHE_PROVENANCE_SCHEMA_VERSION
+        or provenance.get("cache_key") != cache_key
+        or provenance.get("level") != level_name
+        or provenance.get("source") != source_identity
+    ):
+        return False
+    resources = provenance.get("resources")
+    if not isinstance(resources, list) or not all(
+        isinstance(resource, str) for resource in resources
+    ):
+        return False
+    return set(members).issubset(resources)
+
+
+def _write_cache_provenance(
+    path: Path,
+    *,
+    cache_key: str,
+    game_label: str,
+    level_name: str,
+    source_identity: dict[str, int | str | None],
+    members: tuple[str, ...],
+) -> None:
+    payload = {
+        "schema_version": _CACHE_PROVENANCE_SCHEMA_VERSION,
+        "cache_key": cache_key,
+        "game": game_label,
+        "level": level_name,
+        "source": source_identity,
+        "resources": list(members),
+    }
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            newline="\n",
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            dir=path.parent,
+            delete=False,
+        ) as temporary:
+            temporary_path = Path(temporary.name)
+            json.dump(payload, temporary, indent=2, sort_keys=True)
+            temporary.write("\n")
+        temporary_path.replace(path)
+    except OSError as exc:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+        raise InsomniacError(
+            f"Could not write extraction cache provenance {path}: {exc}"
+        ) from exc
+
+
 def prepare_game_level(
     iso_path: str | Path,
     level_name: str,
@@ -708,19 +972,24 @@ def prepare_game_level(
         "global_cached.psarc",
         "global_uncached.psarc",
     ),
+    primary_resource: str | None = "level_cached.psarc",
+    container_member: str | None = None,
     expected_title_id: str | None = None,
     expected_version: str | None = None,
+    validate_iso_identity: bool = True,
 ) -> Path:
-    """Extract the selected level and global PSARCs into the local cache."""
+    """Extract selected level resources into the local cache."""
 
     iso = _iso_path(iso_path, game_label)
+    iso_values: dict[str, str] = {}
     if expected_title_id is not None or expected_version is not None:
-        validate_game_iso(
-            iso,
-            game_label=game_label,
-            expected_title_id=expected_title_id,
-            expected_version=expected_version,
-        )
+        if validate_iso_identity:
+            iso_values = validate_game_iso(
+                iso,
+                game_label=game_label,
+                expected_title_id=expected_title_id,
+                expected_version=expected_version,
+            )
     level = _level_path(level_name, game_label)
     output = game_level_cache_root(
         cache_directory,
@@ -730,12 +999,30 @@ def prepare_game_level(
     )
     output.mkdir(parents=True, exist_ok=True)
 
-    base = _PACKED_ROOT.as_posix()
+    base = (
+        "packed"
+        if container_member is not None
+        else _PACKED_ROOT.as_posix()
+    )
     members = tuple(
         f"{base}/game/{name}" for name in global_archives
     ) + tuple(
         f"{base}/levels/{level.as_posix()}/{name}"
         for name in level_archives
+    )
+    source_identity = _cache_source_identity(
+        iso,
+        iso_values=iso_values,
+        expected_title_id=expected_title_id,
+        expected_version=expected_version,
+    )
+    provenance_path = output / _CACHE_PROVENANCE_FILENAME
+    provenance_matches = _cache_provenance_matches(
+        provenance_path,
+        cache_key=cache_key,
+        level_name=level.as_posix(),
+        source_identity=source_identity,
+        members=members,
     )
     if not level_archives:
         raise InsomniacError(
@@ -743,29 +1030,65 @@ def prepare_game_level(
         )
     extracted_root = output / "PS3_GAME" / "USRDIR" / "packed"
     expected = tuple(
-        extracted_root / Path(*PurePosixPath(member).parts[3:])
-        for member in members
+        extracted_root / "game" / name
+        for name in global_archives
+    ) + tuple(
+        extracted_root / "levels" / Path(*level.parts) / name
+        for name in level_archives
     )
     level_start = len(global_archives)
-    try:
-        cached_index = level_archives.index("level_cached.psarc")
-    except ValueError:
-        cached_index = 0
-    cached_level = expected[level_start + cached_index]
-    if all(path.is_file() for path in expected):
+    level_directory = (
+        extracted_root / "levels" / Path(*level.parts)
+    )
+    if primary_resource is None:
+        cached_level = level_directory
+    else:
+        try:
+            primary_index = level_archives.index(primary_resource)
+        except ValueError as exc:
+            raise InsomniacError(
+                f"{game_label} primary resource {primary_resource!r} "
+                "is not declared as a level archive"
+            ) from exc
+        cached_level = expected[level_start + primary_index]
+    if provenance_matches and all(path.is_file() for path in expected):
         return cached_level
 
-    extract_game_iso_members(
-        iso,
-        dict(zip(members, expected)),
-        game_label=game_label,
-    )
+    if provenance_matches:
+        pending = {
+            member: path
+            for member, path in zip(members, expected)
+            if not path.is_file()
+        }
+    else:
+        pending = dict(zip(members, expected))
+    if container_member is None:
+        extract_game_iso_members(
+            iso,
+            pending,
+            game_label=game_label,
+        )
+    else:
+        _extract_psarc_members_from_iso(
+            iso,
+            container_member,
+            pending,
+            game_label=game_label,
+        )
     missing = [str(path) for path in expected if not path.is_file()]
     if missing:
         raise InsomniacError(
             "ISO extraction completed but did not create the expected "
             "archives: " + ", ".join(missing)
         )
+    _write_cache_provenance(
+        provenance_path,
+        cache_key=cache_key,
+        game_label=game_label,
+        level_name=level.as_posix(),
+        source_identity=source_identity,
+        members=members,
+    )
     return cached_level
 
 
@@ -780,15 +1103,91 @@ def game_level_cache_root(
     return Path(cache_directory).expanduser() / cache_key / Path(*level.parts)
 
 
+def game_level_cache_is_verified(
+    cache_directory: str | Path,
+    level_name: str,
+    *,
+    cache_key: str,
+    game_label: str,
+    level_archives: tuple[str, ...],
+    global_archives: tuple[str, ...],
+    container_member: str | None = None,
+    expected_title_id: str | None = None,
+    expected_version: str | None = None,
+) -> bool:
+    level = _level_path(level_name, game_label)
+    output = game_level_cache_root(
+        cache_directory,
+        level.as_posix(),
+        cache_key=cache_key,
+        game_label=game_label,
+    )
+    extracted_root = output / "PS3_GAME" / "USRDIR" / "packed"
+    expected = tuple(
+        extracted_root / "game" / name
+        for name in global_archives
+    ) + tuple(
+        extracted_root / "levels" / Path(*level.parts) / name
+        for name in level_archives
+    )
+    if not expected or not all(path.is_file() for path in expected):
+        return False
+
+    provenance = _read_cache_provenance(
+        output / _CACHE_PROVENANCE_FILENAME
+    )
+    if (
+        provenance is None
+        or provenance.get("schema_version")
+        != _CACHE_PROVENANCE_SCHEMA_VERSION
+        or provenance.get("cache_key") != cache_key
+        or provenance.get("level") != level.as_posix()
+    ):
+        return False
+
+    source = provenance.get("source")
+    if not isinstance(source, dict):
+        return False
+    if (
+        expected_title_id is not None
+        and source.get("title_id") != expected_title_id
+    ):
+        return False
+    if (
+        expected_version is not None
+        and source.get("version") != expected_version
+    ):
+        return False
+
+    base = (
+        "packed"
+        if container_member is not None
+        else _PACKED_ROOT.as_posix()
+    )
+    members = tuple(
+        f"{base}/game/{name}" for name in global_archives
+    ) + tuple(
+        f"{base}/levels/{level.as_posix()}/{name}"
+        for name in level_archives
+    )
+    resources = provenance.get("resources")
+    if not isinstance(resources, list) or not all(
+        isinstance(resource, str) for resource in resources
+    ):
+        return False
+    return set(members).issubset(resources)
+
+
 def game_cached_level_path(
     cache_directory: str | Path,
     level_name: str,
     *,
     cache_key: str,
     game_label: str,
+    primary_resource: str | None = "level_cached.psarc",
 ) -> Path:
     level = _level_path(level_name, game_label)
-    return (
+    level_directory = (
         game_level_cache_root(
             cache_directory,
             level.as_posix(),
@@ -800,8 +1199,10 @@ def game_cached_level_path(
         / "packed"
         / "levels"
         / Path(*level.parts)
-        / "level_cached.psarc"
     )
+    if primary_resource is None:
+        return level_directory
+    return level_directory / primary_resource
 
 
 def resolve_game_source(

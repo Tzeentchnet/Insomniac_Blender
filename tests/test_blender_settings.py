@@ -30,6 +30,7 @@ class BlenderSettingsTests(unittest.TestCase):
         self.preferences = SimpleNamespace(
             last_game="RESISTANCE_2",
             source_paths_initialized=True,
+            resistance_fom_last_source_path="",
             resistance_2_last_source_path="",
             resistance_3_last_source_path="",
             resistance_burning_skies_last_source_path="",
@@ -165,6 +166,49 @@ class BlenderSettingsTests(unittest.TestCase):
             r"E:\Tests\resistance_2.iso",
         )
 
+    def test_selecting_iso_switches_to_detected_game(self) -> None:
+        settings = bpy.context.scene.insomniac_asset_io
+        settings.game = "RESISTANCE_2"
+        settings.source_path = r"E:\Tests\resistance_2.iso"
+        detected = scene_properties.GAME_ADAPTERS["RESISTANCE_3"]
+
+        with (
+            mock.patch.object(
+                operators,
+                "detect_game_iso",
+                return_value=detected,
+            ),
+            mock.patch.object(
+                operators,
+                "addon_preferences",
+                return_value=self.preferences,
+            ),
+        ):
+            adapter, switched = operators._synchronize_iso_game(
+                bpy.context,
+                r"E:\Tests\resistance_3.iso",
+            )
+
+        self.assertIs(adapter, detected)
+        self.assertTrue(switched)
+        self.assertEqual(settings.game, "RESISTANCE_3")
+        self.assertEqual(
+            settings.source_path,
+            r"E:\Tests\resistance_3.iso",
+        )
+        self.assertEqual(
+            self.preferences.resistance_2_last_source_path,
+            r"E:\Tests\resistance_2.iso",
+        )
+        self.assertEqual(
+            self.preferences.resistance_3_last_source_path,
+            r"E:\Tests\resistance_3.iso",
+        )
+        self.assertEqual(
+            self.preferences.resistance_3_iso_path,
+            r"E:\Tests\resistance_3.iso",
+        )
+
     def test_game_and_source_restore_from_preferences(self) -> None:
         self.preferences.last_game = "RESISTANCE_3"
         self.preferences.resistance_3_last_source_path = (
@@ -202,6 +246,42 @@ class BlenderSettingsTests(unittest.TestCase):
         )
         self.assertEqual(settings.level_id, "apogee_space_station")
         self.assertEqual(len(settings.asset_tuid.split(":")), 3)
+
+    def test_switching_to_rfom_uses_level_scoped_catalog_selection(
+        self,
+    ) -> None:
+        settings = bpy.context.scene.insomniac_asset_io
+        self.preferences.resistance_fom_last_source_path = (
+            r"E:\Tests\resistance_fom.iso"
+        )
+
+        settings.game = "RESISTANCE_FOM"
+
+        self.assertEqual(
+            settings.source_path,
+            r"E:\Tests\resistance_fom.iso",
+        )
+        self.assertEqual(settings.level_id, "level100")
+        self.assertEqual(len(settings.asset_tuid.split(":")), 3)
+
+    def test_rfom_material_filter_lists_level_scoped_shaders(self) -> None:
+        settings = bpy.context.scene.insomniac_asset_io
+        settings.game = "RESISTANCE_FOM"
+        settings.asset_kind_filter = "SHADER"
+        settings.asset_level_filter = "level20"
+
+        state = scene_properties.asset_selector_state(
+            settings,
+            bpy.context,
+        )
+
+        self.assertEqual(state.match_count, 633)
+        self.assertTrue(
+            all(
+                identifier.startswith("SHADER:level20:")
+                for identifier, *_rest in state.items
+            )
+        )
 
     def test_tod_material_filter_lists_level_scoped_shaders(self) -> None:
         settings = bpy.context.scene.insomniac_asset_io

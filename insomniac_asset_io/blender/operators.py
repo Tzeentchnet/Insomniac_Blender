@@ -8,7 +8,7 @@ from ..core.errors import InsomniacError
 from ..core.iso import DEFAULT_CACHE_DIRECTORY, find_iso
 from ..core.source import GameSource
 from ..games.catalog import CatalogAsset, load_catalog
-from ..games.registry import get_game_adapter
+from ..games.registry import detect_game_iso, get_game_adapter
 from ..games.resistance_2.formats import AssetKind
 from .asset_cache import (
     AssetCacheOptions,
@@ -78,6 +78,26 @@ def _configured_iso(context: bpy.types.Context) -> str:
         return ""
     iso = find_iso(configured)
     return str(iso) if iso is not None else configured
+
+
+def _synchronize_iso_game(
+    context: bpy.types.Context,
+    iso_path: str,
+):
+    settings = _settings(context)
+    adapter = detect_game_iso(iso_path)
+    switched = settings.game != adapter.id
+    if switched:
+        settings.game = adapter.id
+    settings.source_path = str(iso_path)
+    preferences = addon_preferences(context)
+    if preferences is not None:
+        setattr(
+            preferences,
+            adapter.iso_preference_name,
+            str(iso_path),
+        )
+    return adapter, switched
 
 
 def _catalog(context: bpy.types.Context):
@@ -150,7 +170,7 @@ def _resolved_asset_source(
 
     for level in asset.levels:
         cached = adapter.cached_level_path(cache_directory, level)
-        if cached.is_file():
+        if adapter.is_level_cached(cache_directory, level):
             return str(cached), str(cached)
 
     iso = _configured_iso(context)
@@ -206,7 +226,7 @@ def _resolved_level_source(
         return manual, manual
 
     cached = adapter.cached_level_path(cache_directory, level_name)
-    if cached.is_file():
+    if adapter.is_level_cached(cache_directory, level_name):
         return str(cached), str(cached)
 
     iso = _configured_iso(context)
@@ -286,21 +306,30 @@ class INSOMNIAC_OT_select_source(bpy.types.Operator, ImportHelper):
 
     def execute(self, context):
         settings = _settings(context)
-        adapter = _adapter(context)
-        iso = find_iso(self.filepath)
-        settings.source_path = (
-            str(iso) if iso is not None else self.filepath
-        )
-        if iso is not None and adapter.supports_iso:
-            preferences = addon_preferences(context)
-            if preferences is not None:
-                setattr(
-                    preferences,
-                    adapter.iso_preference_name,
+        try:
+            iso = find_iso(self.filepath)
+            switched = False
+            if iso is not None:
+                adapter, switched = _synchronize_iso_game(
+                    context,
                     str(iso),
                 )
-        result = bpy.ops.insomniac.inspect_source()
-        return {"CANCELLED"} if "CANCELLED" in result else {"FINISHED"}
+            else:
+                settings.source_path = self.filepath
+                adapter = _adapter(context)
+            if switched:
+                self.report(
+                    {"INFO"},
+                    f"Detected {adapter.label}; switched the active game",
+                )
+            result = bpy.ops.insomniac.inspect_source()
+            return (
+                {"CANCELLED"} if "CANCELLED" in result else {"FINISHED"}
+            )
+        except InsomniacError as exc:
+            settings.last_message = str(exc)
+            self.report({"ERROR"}, str(exc))
+            return {"CANCELLED"}
 
 
 class INSOMNIAC_OT_inspect_source(bpy.types.Operator):
@@ -387,13 +416,27 @@ def _inspect_source(operator: bpy.types.Operator, context):
         operator.report({"ERROR"}, "Choose a source first")
         return {"CANCELLED"}
     try:
+        selected_path = bpy.path.abspath(settings.source_path)
+        selected_iso = find_iso(selected_path)
+        switched = False
+        if selected_iso is not None:
+            _detected_adapter, switched = _synchronize_iso_game(
+                context,
+                str(selected_iso),
+            )
         adapter = _adapter(context)
         source_path, _original_path = _resolved_inspection_source(context)
         with GameSource.open(source_path) as source:
             reader = adapter.create_reader(source)
             settings.source_summary = _summary(reader)
+            prefix = (
+                f"Detected {adapter.label}; validated"
+                if switched
+                else "Validated"
+            )
             settings.last_message = (
-                f"Validated {reader.resource_prefix}: {settings.source_summary}"
+                f"{prefix} {reader.resource_prefix}: "
+                f"{settings.source_summary}"
             )
         catalog = _catalog(context)
         set_asset_selection(

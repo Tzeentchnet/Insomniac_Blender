@@ -32,6 +32,14 @@ class InsomniacAddonPreferences(bpy.types.AddonPreferences):
         ),
         default=False,
     )
+    resistance_fom_iso_path: bpy.props.StringProperty(
+        name="Resistance: Fall of Man ISO",
+        description=(
+            "A legally obtained decrypted BCUS98107 v01.00 ISO used for "
+            "selective GAME.PSARC level extraction"
+        ),
+        subtype="FILE_PATH",
+    )
     resistance_2_iso_path: bpy.props.StringProperty(
         name="Resistance 2 ISO",
         description=(
@@ -67,6 +75,10 @@ class InsomniacAddonPreferences(bpy.types.AddonPreferences):
     )
     source_paths_initialized: bpy.props.BoolProperty(
         default=False,
+        options={"HIDDEN"},
+    )
+    resistance_fom_last_source_path: bpy.props.StringProperty(
+        subtype="FILE_PATH",
         options={"HIDDEN"},
     )
     resistance_2_last_source_path: bpy.props.StringProperty(
@@ -219,6 +231,7 @@ class InsomniacAddonPreferences(bpy.types.AddonPreferences):
         layout = self.layout
         source = layout.box()
         source.label(text="Game sources and extraction", icon="DISC")
+        source.prop(self, "resistance_fom_iso_path")
         source.prop(self, "ratchet_tod_iso_path")
         source.prop(self, "resistance_2_iso_path")
         source.prop(self, "resistance_3_iso_path")

@@ -85,6 +85,7 @@ class RatchetTodReader(Resistance2Reader):
     engine_id = "V1"
     asset_prefix = "TOD"
     animation_profile = AnimationProfile.RATCHET_TOD
+    level_local_asset_ids = True
     material_surface_channels_by_default = True
     material_base_color_factor_supported = False
     material_emission_uses_albedo = False

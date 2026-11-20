@@ -2,10 +2,11 @@
 
 Insomniac Asset IO is licensed under GPL-3.0-or-later.
 
-The Tools of Destruction, Resistance 2, and Resistance 3 implementations were
-independently written in Python from publicly documented structures, observed
-behavior, and bounded analysis of legally obtained game data. They incorporate
-format knowledge published by GPL-licensed projects, primarily:
+The Resistance: Fall of Man, Tools of Destruction, Resistance 2, and
+Resistance 3 implementations were independently written in Python from
+publicly documented structures, observed behavior, and bounded analysis of
+legally obtained game data. They incorporate format knowledge published by
+GPL-licensed projects, primarily:
 
 - **InsomniaToolset**, PredatorCZ and contributors  
   <https://github.com/PredatorCZ/InsomniaToolset>
@@ -23,6 +24,10 @@ Awakening** recompilation framework:
 
 Additional architectural and community references:
 
+- Resistance: Fall of Man Recomp, miroslavdanutalexandru-alt and contributors
+  <https://github.com/miroslavdanutalexandru-alt/Resistance-Fall-of-Man-Recomp>
+- resistance-recomp, erikomis and contributors
+  <https://github.com/erikomis/resistance-recomp>
 - Resistance3Port, miroslavdanutalexandru-alt and contributors
 - Insomniac Engine AllExtractor, Lukas Cone
 - WebWorksTools, okangel12345 and contributors

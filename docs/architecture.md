@@ -37,6 +37,12 @@ fallback. Adapters can require exact `PARAM.SFO` title and version values.
 A complete game-specific extraction is reused, so inspect and import
 operators can accept the ISO directly without repeating the copy.
 
+The ISO reader also exposes a bounded seekable view over one file's ordered
+extents. `PsarcArchive` accepts that view as well as an ordinary disk file.
+The RFoM adapter uses this path to parse the root `GAME.PSARC` in place and
+decompress only selected level entries. Catalog preparation can declare a
+smaller metadata-only resource set than interactive imports.
+
 The sidebar selectors are backed by per-game metadata-only disc catalogs. The
 bundled USA catalogs record level IDs, source names, Moby/Tie identities, and
 verified shader identities, but no geometry, textures, or archive payloads.
@@ -47,9 +53,9 @@ replace a bundled catalog with a locally generated catalog for a different
 disc.
 
 Catalog identity is adapter-driven. R2 and R3 retain globally meaningful
-TUIDs, while Tools of Destruction includes the owner level in each catalog
-identifier because its Moby indices, Tie offsets, shader indices, and texture
-record offsets are level-local.
+TUIDs, while RFoM and Tools of Destruction include the owner level in each
+catalog identifier because their Moby IDs/indices, Tie offsets, shader
+indices, and texture record offsets are level-local.
 
 If a shader texture is absent from both domains, the R2 adapter lazily indexes
 already-extracted sibling `level_cached.psarc` files under the same
@@ -98,6 +104,24 @@ The old level layout has one zone. Its UFrag terrain and Tie placements are
 decoded from `main.dat` plus the level vertex/index sections; `gameplay.dat`
 provides one `art` region of placed Mobys.
 
+## Resistance: Fall of Man adapter
+
+`ResistanceFomReader` shares typed geometry, skeleton, animation, texture,
+and Blender-facing outputs with the other PS3 readers but owns its V1 record
+layouts. The selected level directory contains `ps3levelmain.dat`,
+`ps3levelverts.dat`, raw `ps3leveltexs.dat`, and `ps3gameplay.dat`.
+
+Mobys use class IDs from their `0xC0` headers and `0x20`-byte primitive
+records. Their geometry and texture pixels share the raw texel file. Ties and
+`0x1A`-stride region terrain instead address IGHW vertex/index sections.
+Materials use section `0x5001`, textures use `0x5300`, and Tie placements use
+`0x9300`.
+
+RFoM inline animations use a dedicated profile without the Tools of
+Destruction 8-bit delta shift or pair-frame reduction. The adapter exposes
+only the corroborated primary gameplay Moby group; unknown secondary groups
+remain unparsed.
+
 ## Blender bridge
 
 Game coordinates remain untouched inside an imported hierarchy. When axis
@@ -118,8 +142,8 @@ assigning speculative rendering semantics. Diffuse images are color data.
 Reconstructed normal, packed auxiliary, dedicated scalar, and detail images
 are non-color data. Blender 5.2 creates these datablocks with `is_data=True`
 so their colorspace is correct before pixel upload. Authored lookup paths and
-the ToD level scope participate in image reuse, preventing equal 32-bit IDs
-from aliasing unrelated textures.
+the active reader's level-local scope participate in image reuse, preventing
+equal 32-bit IDs from aliasing unrelated textures.
 Packed blue gates the corresponding diffuse color into emission for both
 games, preserving authored hues while suppressing all-zero masks.
 

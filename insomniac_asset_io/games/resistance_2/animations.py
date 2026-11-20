@@ -15,11 +15,11 @@ from .formats import (
     TrackMask,
 )
 
-
 SECT_ANIMATION = 0xF000
 
 
 class AnimationProfile(Enum):
+    RESISTANCE_FOM = "RESISTANCE_FOM"
     RATCHET_TOD = "RATCHET_TOD"
     RESISTANCE_2 = "RESISTANCE_2"
     RESISTANCE_3 = "RESISTANCE_3"
@@ -574,7 +574,10 @@ def _decode_clip(
     decoded_positions = position_raw.astype(np.float32) * position_scale
     decoded_scales = scale_raw.astype(np.float32) * scale_scale
 
-    delta_position_scale = bool(header.flags & 0x0200)
+    delta_position_scale = bool(
+        header.flags & 0x0200
+        and profile is not AnimationProfile.RESISTANCE_FOM
+    )
     rebase_positions = (
         profile is AnimationProfile.RESISTANCE_3
         and not header.additive
@@ -613,6 +616,7 @@ def _decode_clip(
         header.additive
         and profile
         in {
+            AnimationProfile.RESISTANCE_FOM,
             AnimationProfile.RATCHET_TOD,
             AnimationProfile.RESISTANCE_2,
         }

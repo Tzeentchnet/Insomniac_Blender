@@ -565,8 +565,8 @@ class InsomniacSceneSettings(bpy.types.PropertyGroup):
         name="Source",
         description=(
             "A decrypted game ISO, extracted assetlookup.dat, level PSARC, "
-            "Burning Skies build.psa, or folder containing extracted "
-            "resources"
+            "Resistance level data folder, Burning Skies build.psa, or "
+            "folder containing extracted resources"
         ),
         subtype="FILE_PATH",
         update=_update_source_path,

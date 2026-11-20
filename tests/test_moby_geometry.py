@@ -27,7 +27,11 @@ def _single_section_file(section_id: int, payload: bytes) -> IghwFile:
     return IghwFile(data, label="collision fixture")
 
 
-def _moby_fixture() -> IghwFile:
+def _moby_fixture(
+    *,
+    bangle_count: int = 0,
+    default_draw_mask: int = 1,
+) -> IghwFile:
     data = bytearray(0x400)
     sections = (
         (0xD100, 0x100, 1, 0xC0),
@@ -43,8 +47,8 @@ def _moby_fixture() -> IghwFile:
     struct.pack_into(">H", data, header + 0x18, 2)
     struct.pack_into(">I", data, header + 0x24, 0x300)
     struct.pack_into(">f", data, header + 0x70, 1.0)
-    struct.pack_into(">I", data, header + 0x90, 1)
-    struct.pack_into(">Q", data, header + 0x98, 1)
+    struct.pack_into(">I", data, header + 0x90, bangle_count)
+    struct.pack_into(">Q", data, header + 0x98, default_draw_mask)
     struct.pack_into(">Q", data, header + 0xB0, 0x1234)
     data[0x1C0:0x1CC] = b"fixture.irb\0"
     struct.pack_into(">6H", data, 0x200, 0, 1, 2, 0, 1, 2)
@@ -92,6 +96,20 @@ class MobyGeometryTests(unittest.TestCase):
         self.assertEqual(
             [mesh.is_damage_permutation for mesh in asset.meshes],
             [False, True],
+        )
+
+    def test_classifies_non_base_segments_as_customizations(self):
+        reader = Resistance2Reader.__new__(Resistance2Reader)
+        asset = reader._parse_moby(
+            _moby_fixture(bangle_count=1),
+            0,
+        )
+
+        self.assertEqual(asset.customization_segments, (1,))
+        self.assertEqual(asset.default_draw_mask, 1)
+        self.assertEqual(
+            [mesh.is_damage_permutation for mesh in asset.meshes],
+            [False, False],
         )
 
     def test_decodes_collision_primitives(self):

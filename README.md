@@ -6,11 +6,11 @@ generations through one parser. Each supported game owns its archive,
 resource, geometry, animation, material, and level-placement chain behind a
 shared Blender-facing interface.
 
-The extension supports **Ratchet & Clank Future: Tools of Destruction**,
-**Resistance 2**, and **Resistance 3** on PlayStation 3 through separate game
-readers and a shared Blender workflow. It also includes an explicitly
-experimental static-model reader for **Resistance: Burning Skies** on
-PlayStation Vita.
+The extension supports **Resistance: Fall of Man**,
+**Ratchet & Clank Future: Tools of Destruction**, **Resistance 2**, and
+**Resistance 3** on PlayStation 3 through separate game readers and a shared
+Blender workflow. It also includes an explicitly experimental static-model
+reader for **Resistance: Burning Skies** on PlayStation Vita.
 
 > [!NOTE]
 > **Glossary**
@@ -22,6 +22,31 @@ PlayStation Vita.
 > - **UFrag:** A fragment of terrain or other level geometry.
 > - **Zone:** A portion of a level containing terrain and static-object placements.
 > - **TUID:** An identifier used to locate an asset or resource.
+
+## Resistance: Fall of Man support
+
+Resistance: Fall of Man uses an older V1 layout inside one root
+`GAME.PSARC`. Support targets the USA `BCUS98107` v01.00 disc and validates
+both fields from `PARAM.SFO`.
+
+| Feature | Status |
+|---|---|
+| Direct decrypted ISO source | Supported with exact disc-build validation |
+| Root `GAME.PSARC` topology | Read in place across ISO multi-extents; only the selected level resources are decompressed |
+| Moby models, skeletons, skin weights, and inline animations | Supported with an RFoM-specific playback profile |
+| Tie static meshes | Supported |
+| USA v01.00 import catalog | 36,034 level-scoped assets across 41 levels: 5,556 Mobys, 6,714 Ties, and 23,764 Materials |
+| DXT1/3/5 and common uncompressed textures | Supported from raw `ps3leveltexs.dat` payloads |
+| Diffuse, reconstructed normal, packed, detail, masked, and blended materials | Supported through the shared Blender material path |
+| Blender Asset Browser | Moby/Tie Collections plus standalone Material and optional Action assets |
+| Region terrain and Tie placement | Supported |
+| Primary gameplay Moby placement | Supported as linked static mesh instances |
+| Retail names | Deterministic `Moby_XXXX`, `Tie_XXXXXXXX`, and `Material_XXXX` names |
+| Collision, lightmaps, shrubs, foliage, lighting, VFX, cubemaps, and secondary gameplay groups | Not yet implemented |
+
+See [Resistance: Fall of Man formats](docs/formats/resistance_fom.md) and
+[known issues](docs/known_issues.md) for the verified layouts and remaining
+limitations.
 
 ## Ratchet & Clank Future: Tools of Destruction support
 
@@ -51,12 +76,16 @@ remaining limitations.
 
 ## Resistance 2 support
 
+Support targets the USA `BCUS98120` v01.00 disc. Selecting its ISO validates
+both fields from `PARAM.SFO`.
+
 | Feature | Status |
 |---|---|
 | PS3 zlib PSARC reading | Supported, including random entry slices |
 | Direct decrypted ISO sources | Supported through a reusable local extraction cache |
 | `assetlookup.dat` discovery | Supported |
 | Moby models | Supported |
+| Moby bangles/customizations | Each non-base segment imports into its own hidden, selectable Collection |
 | Moby damage permutations | Optional; disabled by default and kept in a separate Collection |
 | Moby primitive and triangle collision | Optional wire helpers; disabled by default |
 | Moby skeletons and skin weights | Supported |
@@ -78,12 +107,16 @@ See [Resistance 2 formats](docs/formats/resistance_2.md) and
 
 ## Resistance 3 support
 
+Support targets the USA `BCUS98176` v01.00 disc. Selecting its ISO validates
+both fields from `PARAM.SFO`.
+
 | Feature | Status |
 |---|---|
 | Hybrid ISO9660/UDF decrypted ISO sources | Supported without external extraction tools |
 | PS3 zlib PSARC reading | Supported, including random entry slices |
 | `assetlookup.dat` discovery | Supported |
 | Moby models, skeletons, skin weights, and animations | Supported, including the R3 playback profile and standalone baking for matched runtime overlays |
+| Moby bangles/customizations | Each non-base segment imports into its own hidden, selectable Collection |
 | Moby damage permutations and collision geometry | Optional; disabled by default |
 | Tie static meshes | Supported |
 | USA model/level import catalog | 5,820 named assets and 27 levels bundled as metadata |
@@ -142,7 +175,7 @@ distributed with the extension.
 
 2. In Blender, open **Edit > Preferences > Get Extensions**.
 3. Use **Install from Disk** and choose
-   `dist\insomniac_asset_io-0.6.0.zip`.
+   `dist\insomniac_asset_io-0.7.0.zip`.
 4. Open the **Insomniac** tab in the 3D View sidebar.
 
 Blender includes NumPy; no external Python package is required at runtime.
@@ -219,6 +252,11 @@ animation layers. These Actions retain
 `insomniac_additive_source = true` and identify the baked base through the
 `insomniac_overlay_baked` and `insomniac_overlay_base` custom properties.
 
+R2/R3 Moby bangles and outfitter add-ons are always preserved under
+**Customizations**. Each non-base render segment gets its own **Bangle NN**
+Collection, hidden from the viewport and renders by default but selectable
+and independently revealable in the Outliner.
+
 Damage permutations, lower LODs, and collision geometry are independently
 disabled by default. Enabling them in Add-on Preferences puts each damage
 segment in the asset's **Damage Permutations** child Collection, each authored
@@ -246,12 +284,20 @@ variants. This handles Resistance 3's hybrid image and duplicated layer files
 without mounting the disc. Configure each game's default ISO in Add-on
 Preferences or select an ISO as the optional sidebar source override, then use
 the catalog selectors. The sidebar source also accepts a directory containing
-exactly one `.iso` file. The importer extracts only the required level pair
-and global pair. Complete existing extractions are reused. **Extract Selected
-Level Now** remains available when an explicit PSARC path is useful for
-external tools. When **Inspect Source** needs ISO extraction, the sidebar and
-status bar show a busy message before processing starts; preparing the
-archives can take several minutes.
+exactly one `.iso` file. The importer extracts only the resources declared by
+the active adapter. Selecting a supported ISO detects its `TITLE_ID` and
+version, switches the active game and catalog when necessary, and rejects
+unknown or wrong-version discs before extraction. RFoM reads selected entries
+directly from the root `GAME.PSARC`; later games extract the required
+level/global archive set. Each prepared level records the source disc identity
+and declared resource set in its cache. Verified complete extractions are
+reused; legacy caches or caches produced from a different ISO are refreshed
+once before use.
+**Extract Selected Level Now**
+remains available when an explicit extracted source is useful for external
+tools. When **Inspect Source** needs ISO extraction, the sidebar and status
+bar show a busy message before processing starts; preparing the resources can
+take several minutes.
 
 The extension never modifies the ISO.
 
@@ -277,12 +323,12 @@ levels remain in tooltips and can be restored to labels in Add-on Preferences.
 The extension ships metadata-only USA catalogs containing source entity
 paths, level ownership, Moby/Tie IDs, and verified shader IDs, not models,
 textures, or other game payloads. The bundled TOD catalog includes Material
-entries; existing R2/R3 bundled catalogs remain model-only until regenerated.
-Choose **Catalog / Asset Browser game** before using **Regenerate Import
-Catalog from ISO**. It scans that game's legally obtained disc into the local
-extraction cache and replaces only that game's selector catalog. Catalog
-generation reads only IGHW headers, section tables, and bounded name sections;
-it does not decode every mesh or texture.
+entries, as does the RFoM catalog; existing R2/R3 bundled catalogs remain
+model-only until regenerated. Choose **Catalog / Asset Browser game** before
+using **Regenerate Import Catalog from ISO**. It scans that game's legally
+obtained disc into the local extraction cache and replaces only that game's
+selector catalog. Catalog generation reads only the metadata resources needed
+for asset identities and names; it does not decode every mesh or texture.
 
 ### Build the local Asset Browser cache
 
@@ -318,11 +364,12 @@ Moby import continues to include every decoded Action by default.
 The extension has a standard path plus one shared enhancement preference:
 
 - **Standard**, the default, imports diffuse color, source alpha modes, and
-  verified albedo-colored blue-channel emission masks. Both games reconstruct
-  flagged BC3/RG8 tangent normals and convert flagged packed-red gloss to
-  Principled roughness in Eevee and Cycles. R3 also preserves the base legs
-  under its opaque-BC1 Goliath wet overlay. The standard path recognizes the
-  verified R2 mode-zero `ch_hex_glass_glowy` alpha exception as well.
+  verified albedo-colored blue-channel emission masks. Supported PS3 readers
+  reconstruct flagged BC3/RG8 tangent normals and convert flagged packed-red
+  gloss to Principled roughness in Eevee and Cycles. R3 also preserves the
+  base legs under its opaque-BC1 Goliath wet overlay. The standard path
+  recognizes the verified R2 mode-zero `ch_hex_glass_glowy` alpha exception
+  as well.
 - **Enhanced source materials** additionally applies the source base-color
   multiplier while keeping the same normal, packed-map, and alpha behavior.
 
@@ -344,8 +391,11 @@ rather than speculative node connections.
 insomniac_asset_io/
   core/                   Archive, source overlay, binary, and ISO helpers
   games/
+    resistance_fom/       Resistance: Fall of Man reader and catalog
+    ratchet_tod/           Tools of Destruction reader and catalog
     resistance_2/         Resistance 2 reader and bundled catalog
     resistance_3/         Resistance 3 reader and bundled catalog
+    resistance_burning_skies/  Experimental Vita reader
   blender/                Operators, importer, and Asset Browser cache worker
 docs/                     Format, contributor, and validation documentation
 tests/                    Pure-Python unit and optional real-asset tests
@@ -363,6 +413,8 @@ This project builds on public Insomniac-engine research, especially:
 
 - [InsomniaToolset](https://github.com/PredatorCZ/InsomniaToolset)
 - [ReChimera](https://github.com/Mrroboto9819/ReChimera)
+- [Resistance: Fall of Man Recomp (PC)](https://github.com/miroslavdanutalexandru-alt/Resistance-Fall-of-Man-Recomp)
+- [resistance-recomp (macOS)](https://github.com/erikomis/resistance-recomp)
 - [Resistance3Port](https://github.com/miroslavdanutalexandru-alt/Resistance3Port)
 - [Insomniac Engine AllExtractor](https://lukascone.wordpress.com/2017/12/03/insomniac-engine-allextractor/)
 - [WebWorksTools](https://github.com/okangel12345/WebWorksTools)

@@ -14,6 +14,28 @@ from insomniac_asset_io.games.resistance_2.formats import AssetKind
 
 
 class Resistance2CatalogTests(unittest.TestCase):
+    def test_loads_bundled_resistance_fom_usa_catalog(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            catalog = load_game_catalog(
+                Path(temporary),
+                "RESISTANCE_FOM",
+            )
+
+        self.assertEqual(catalog.region, "USA BCUS98107 v1.00")
+        self.assertEqual(len(catalog.levels), 41)
+        self.assertIn("level20", catalog.levels)
+        self.assertEqual(len(catalog.assets), 36034)
+        level20 = filter_catalog_assets(
+            catalog.assets,
+            "",
+            hide_duplicates=False,
+            level="level20",
+        )
+        self.assertEqual(len(level20), 1010)
+        self.assertTrue(
+            all(asset.identifier.count(":") == 2 for asset in level20)
+        )
+
     def test_loads_bundled_usa_catalog(self):
         with tempfile.TemporaryDirectory() as temporary:
             catalog = load_catalog(Path(temporary))

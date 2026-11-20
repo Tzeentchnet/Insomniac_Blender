@@ -6,7 +6,6 @@ from enum import Enum
 import numpy as np
 from numpy.typing import NDArray
 
-
 FloatArray = NDArray[np.float32]
 IntArray = NDArray[np.int32]
 UInt16Array = NDArray[np.uint16]
@@ -130,6 +129,8 @@ class MobyAsset:
     bind_pose_inverse_offset: int
     collision_primitives: tuple[CollisionPrimitive, ...] = ()
     collision_meshes: tuple[CollisionMesh, ...] = ()
+    customization_segments: tuple[int, ...] = ()
+    default_draw_mask: int | None = None
 
 
 @dataclass(slots=True)

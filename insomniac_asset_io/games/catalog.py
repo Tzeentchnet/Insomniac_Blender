@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 import tempfile
 from dataclasses import dataclass
 from functools import lru_cache
@@ -8,14 +9,13 @@ from pathlib import Path
 from typing import Callable, Iterable
 
 from ..core.errors import InsomniacError, MissingResourceError
-from ..core.iso import extract_game_iso_member, list_game_levels
+from ..core.iso import game_level_cache_root
 from ..core.source import GameSource
 from .registry import get_game_adapter
 from .resistance_2.formats import AssetKind
 
 CATALOG_SCHEMA_VERSION = 1
 CATALOG_FILENAME = "disc_catalog.json"
-_DISC_LEVEL_ROOT = "PS3_GAME/USRDIR/packed/levels"
 
 
 def _kind_label(kind: AssetKind) -> str:
@@ -385,7 +385,7 @@ def build_catalog_from_iso(
             f"{adapter.label} ISO was not found: {iso}"
         )
     adapter.validate_iso(iso)
-    levels = list_game_levels(iso, game_label=adapter.label)
+    levels = adapter.list_levels(iso)
     work_parent = (
         Path(work_directory).expanduser().resolve()
         if work_directory is not None
@@ -400,22 +400,28 @@ def build_catalog_from_iso(
         prefix=f"{adapter.cache_key}_catalog_",
         dir=work_parent,
     ) as temporary:
-        archive_path = Path(temporary) / "level_cached.psarc"
         for index, level in enumerate(levels, start=1):
             if progress is not None:
                 progress(index, len(levels), level)
-            member = (
-                f"{_DISC_LEVEL_ROOT}/{level}/level_cached.psarc"
-            )
-            extract_game_iso_member(
+            source_path = adapter.prepare_catalog_level(
                 iso,
-                member,
-                archive_path,
+                level,
+                temporary,
+                validate_iso=False,
+            )
+            cache_root = game_level_cache_root(
+                temporary,
+                level,
+                cache_key=adapter.cache_key,
                 game_label=adapter.label,
             )
             try:
-                with GameSource.open(archive_path) as source:
-                    reader = adapter.create_reader(source)
+                with GameSource.open(source_path) as source:
+                    reader_factory = (
+                        adapter.create_catalog_reader
+                        or adapter.create_reader
+                    )
+                    reader = reader_factory(source)
                     moby_pointers = reader.asset_pointers(AssetKind.MOBY)
                     tie_pointers = reader.asset_pointers(AssetKind.TIE)
                     material_pointers = reader.asset_pointers(
@@ -453,7 +459,8 @@ def build_catalog_from_iso(
                         for pointer in material_pointers
                     ]
             finally:
-                archive_path.unlink(missing_ok=True)
+                if cache_root.is_dir():
+                    shutil.rmtree(cache_root)
             catalog_levels.append(
                 {
                     "id": level,

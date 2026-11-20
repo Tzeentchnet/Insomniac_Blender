@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import hashlib
-from pathlib import Path
 import struct
 import threading
 import zlib
+from dataclasses import dataclass
+from pathlib import Path
+from typing import BinaryIO
 
 from .errors import FormatError, MissingResourceError, UnsupportedFormatError
 
@@ -41,6 +42,24 @@ class PsarcArchive:
         except Exception:
             self._file.close()
             raise
+
+    @classmethod
+    def from_stream(
+        cls,
+        stream: BinaryIO,
+        *,
+        label: str,
+    ) -> PsarcArchive:
+        archive = cls.__new__(cls)
+        archive.path = label
+        archive._lock = threading.RLock()
+        archive._file = stream
+        try:
+            archive._read_toc()
+        except Exception:
+            stream.close()
+            raise
+        return archive
 
     def close(self) -> None:
         with self._lock:

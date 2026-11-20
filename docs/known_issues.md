@@ -1,5 +1,21 @@
 # Known issues
 
+## Resistance: Fall of Man
+
+Support is restricted to the USA `BCUS98107` v01.00 disc. Other builds fail
+disc validation instead of reusing unverified V1 offsets.
+
+Moby class IDs, Tie header offsets, Material indices, and Texture record
+offsets are level-local. Catalog identifiers and Blender material/image names
+include the level scope so equal numeric values from unrelated levels do not
+alias. The disc chain does not expose a proven retail name table; deterministic
+numeric names are used.
+
+The primary gameplay Moby group is imported. Six additional gameplay groups
+have unverified record semantics and are skipped rather than guessed.
+`ps3levelcoll.dat`, directional lightmaps, shrubs, foliage, lighting, VFX,
+cubemaps, and audio are not decoded.
+
 ## Ratchet & Clank Future: Tools of Destruction
 
 Support is intentionally restricted to the USA `BCUS98127` v02.00 disc.

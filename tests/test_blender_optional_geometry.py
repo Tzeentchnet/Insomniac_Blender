@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from pathlib import Path
 import sys
 import unittest
+from pathlib import Path
 
 import numpy as np
-
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -73,8 +72,18 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
             for obj in asset_collection.objects
             if obj.type == "MESH"
         )
+        children = {
+            child.get("insomniac_geometry_kind"): child
+            for child in asset_collection.children
+        }
+        customization_collection = children["CUSTOMIZATIONS"]
+        bangle_collections = tuple(customization_collection.children)
 
-        self.assertEqual(len(asset_collection.children), 0)
+        self.assertEqual(set(children), {"CUSTOMIZATIONS"})
+        self.assertEqual(len(bangle_collections), 1)
+        self.assertTrue(bangle_collections[0].hide_viewport)
+        self.assertTrue(bangle_collections[0].hide_render)
+        self.assertFalse(bangle_collections[0].hide_select)
         self.assertEqual(len(base_object.data.polygons), 1)
         self.assertFalse(
             any(
@@ -123,7 +132,27 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
         damage_objects = tuple(children["DAMAGE_PERMUTATIONS"].objects)
         lod_objects = tuple(children["LOWER_LODS"].objects)
         collision_objects = tuple(children["COLLISION"].objects)
+        customization_collections = tuple(
+            children["CUSTOMIZATIONS"].children
+        )
+        customization_objects = tuple(
+            obj
+            for child in customization_collections
+            for obj in child.objects
+        )
 
+        self.assertEqual(len(customization_collections), 1)
+        self.assertTrue(customization_collections[0].hide_viewport)
+        self.assertTrue(customization_collections[0].hide_render)
+        self.assertFalse(customization_collections[0].hide_select)
+        self.assertEqual(len(customization_objects), 1)
+        self.assertEqual(
+            customization_objects[0]["insomniac_segment_index"],
+            3,
+        )
+        self.assertTrue(
+            customization_objects[0]["insomniac_customization"]
+        )
         self.assertEqual(len(damage_objects), 2)
         self.assertEqual(
             {obj["insomniac_segment_index"] for obj in damage_objects},
@@ -153,7 +182,7 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
         )
         self.assertTrue(all(obj.show_in_front for obj in collision_objects))
         self.assertTrue(all(obj.hide_render for obj in collision_objects))
-        self.assertEqual(result.meshes, 9)
+        self.assertEqual(result.meshes, 10)
 
     @staticmethod
     def _asset():
@@ -198,6 +227,7 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
                 geometry(2, True),
                 geometry(0, False, 1),
                 geometry(0, False, 2),
+                geometry(3, False),
             ],
             bounding_sphere=(0.0, 0.0, 0.0, 2.0),
             shader_tuids=(1,),
@@ -219,6 +249,8 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
                     face_types=np.asarray((7,), dtype=np.uint8),
                 ),
             ),
+            customization_segments=(3,),
+            default_draw_mask=0x09,
         )
 
 
