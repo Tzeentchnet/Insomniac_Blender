@@ -66,6 +66,26 @@ class RealResistance3Tests(unittest.TestCase):
             self.assertIsNotNone(tie_name)
             self.assertTrue(tie_name.endswith(".entity.irb"))
             self.assertTrue(reader.read_tie(first_tie.tuid).meshes)
+            shrub_pointers = reader.asset_pointers(AssetKind.SHRUB)
+            shrub_tuids = {pointer.tuid for pointer in shrub_pointers}
+            for pointer in shrub_pointers:
+                shrub_name = reader.read_asset_name(
+                    AssetKind.SHRUB,
+                    pointer.tuid,
+                )
+                self.assertIsNotNone(shrub_name)
+                self.assertTrue(shrub_name.endswith(".entity.irb"))
+                shrub = reader.read_shrub(pointer.tuid)
+                self.assertEqual(len(shrub.meshes), 1)
+                self.assertTrue(
+                    np.isfinite(shrub.meshes[0].positions).all()
+                )
+                self.assertTrue(np.isfinite(shrub.meshes[0].uvs).all())
+                self.assertEqual(len(shrub.meshes[0].indices) % 3, 0)
+                self.assertEqual(
+                    reader.read_shader(shrub.shader_tuids[0]).alpha_mode,
+                    "MASK",
+                )
             foliage_pointers = reader.asset_pointers(AssetKind.FOLIAGE)
             if foliage_pointers:
                 foliage = reader.read_foliage(foliage_pointers[0].tuid)
@@ -81,6 +101,27 @@ class RealResistance3Tests(unittest.TestCase):
                 )
             zones = reader.read_zones()
             self.assertTrue(zones)
+            shrub_instances = [
+                instance
+                for zone in zones
+                for instance in zone.shrub_instances
+            ]
+            self.assertTrue(
+                {
+                    instance.asset_tuid
+                    for instance in shrub_instances
+                }.issubset(shrub_tuids)
+            )
+            self.assertTrue(
+                all(
+                    np.isfinite(instance.matrix).all()
+                    for instance in shrub_instances
+                )
+            )
+            self.assertEqual(
+                sum(zone.unsupported_shrub_instances for zone in zones),
+                0,
+            )
             self.assertEqual(
                 sum(zone.unsupported_foliage_instances for zone in zones),
                 0,
@@ -129,6 +170,41 @@ class RealResistance3FoliageTests(unittest.TestCase):
             self.assertEqual(
                 sum(zone.unsupported_foliage_instances for zone in zones),
                 0,
+            )
+
+    def test_decodes_mine_traversal_train_shrubs(self):
+        with GameSource.open(Path(FOLIAGE_SOURCE)) as source:
+            reader = Resistance3Reader(source)
+            shrub_pointers = reader.asset_pointers(AssetKind.SHRUB)
+            self.assertEqual(len(shrub_pointers), 6)
+            shrub_tuids = {pointer.tuid for pointer in shrub_pointers}
+
+            vertex_count = 0
+            triangle_count = 0
+            for pointer in shrub_pointers:
+                shrub = reader.read_shrub(pointer.tuid)
+                self.assertEqual(len(shrub.meshes), 1)
+                mesh = shrub.meshes[0]
+                self.assertTrue(np.isfinite(mesh.positions).all())
+                self.assertTrue(np.isfinite(mesh.uvs).all())
+                self.assertEqual(len(mesh.indices) % 3, 0)
+                shader = reader.read_shader(shrub.shader_tuids[0])
+                self.assertEqual(shader.alpha_mode, "MASK")
+                vertex_count += len(mesh.positions)
+                triangle_count += len(mesh.indices) // 3
+
+            zones = reader.read_zones()
+            instances = [
+                instance
+                for zone in zones
+                for instance in zone.shrub_instances
+            ]
+            self.assertEqual(vertex_count, 394)
+            self.assertEqual(triangle_count, 356)
+            self.assertEqual(len(instances), 661)
+            self.assertEqual(
+                {instance.asset_tuid for instance in instances},
+                shrub_tuids,
             )
 
     def test_decodes_mine_traversal_train_tie_material_groups(self):

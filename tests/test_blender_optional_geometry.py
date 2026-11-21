@@ -174,29 +174,37 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
             )
         )
 
-    def test_imports_foliage_as_standalone_collection(self) -> None:
-        result = import_static_asset(
-            bpy.context,
-            _LevelReader(),
-            2,
-            AssetImportOptions(materials=False, animations=False),
-            kind=AssetKind.FOLIAGE,
-            source_path="fixture",
-        )
+    def test_imports_vegetation_as_standalone_collections(self) -> None:
+        for kind, tuid, label in (
+            (AssetKind.SHRUB, 1, "Shrub"),
+            (AssetKind.FOLIAGE, 2, "Foliage"),
+        ):
+            with self.subTest(kind=kind.name):
+                result = import_static_asset(
+                    bpy.context,
+                    _LevelReader(),
+                    tuid,
+                    AssetImportOptions(materials=False, animations=False),
+                    kind=kind,
+                    source_path="fixture",
+                )
 
-        collection = result.root.users_collection[0]
-        mesh_object = next(
-            obj for obj in collection.objects if obj.type == "MESH"
-        )
-        self.assertEqual(collection.name, "RFOM_Foliage_0000000000000002")
-        self.assertEqual(
-            mesh_object["insomniac_asset_kind"],
-            "FOLIAGE",
-        )
-        self.assertEqual(
-            mesh_object["insomniac_asset_tuid"],
-            "0x0000000000000002",
-        )
+                collection = result.root.users_collection[0]
+                mesh_object = next(
+                    obj for obj in collection.objects if obj.type == "MESH"
+                )
+                self.assertEqual(
+                    collection.name,
+                    f"RFOM_{label}_{tuid:016X}",
+                )
+                self.assertEqual(
+                    mesh_object["insomniac_asset_kind"],
+                    kind.name,
+                )
+                self.assertEqual(
+                    mesh_object["insomniac_asset_tuid"],
+                    f"0x{tuid:016X}",
+                )
 
     def test_addon_preferences_default_optional_geometry_off(self) -> None:
         bpy.utils.register_class(InsomniacAddonPreferences)

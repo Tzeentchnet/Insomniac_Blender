@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 import sys
-
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -67,6 +66,13 @@ def main() -> int:
         if ties:
             tie = reader.read_tie(ties[0].tuid)
             print(f"Tie 0x{tie.tuid:016X}: meshes={len(tie.meshes)}")
+        shrub_pointers = reader.asset_pointers(AssetKind.SHRUB)
+        if shrub_pointers:
+            shrub = reader.read_shrub(shrub_pointers[0].tuid)
+            print(
+                f"Shrub 0x{shrub.tuid:016X}: "
+                f"meshes={len(shrub.meshes)}"
+            )
         foliage_pointers = reader.asset_pointers(AssetKind.FOLIAGE)
         if foliage_pointers:
             foliage = reader.read_foliage(foliage_pointers[0].tuid)
@@ -78,6 +84,8 @@ def main() -> int:
         print(
             f"Zones={len(zones)} tie_instances="
             f"{sum(len(zone.tie_instances) for zone in zones)} "
+            f"shrub_instances="
+            f"{sum(len(zone.shrub_instances) for zone in zones)} "
             f"foliage_instances="
             f"{sum(len(zone.foliage_instances) for zone in zones)} "
             f"terrain_meshes="

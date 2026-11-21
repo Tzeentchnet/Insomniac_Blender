@@ -55,6 +55,11 @@ SECT_TIE_SHADER_TABLE = 0x5600
 SECT_FOLIAGE_BUFFER = 0xA000
 SECT_FOLIAGE = 0xA200
 SECT_FOLIAGE_SHADER_TABLE = 0x5600
+SECT_SHRUB_HEADER = 0xB100
+SECT_SHRUB_VERTICES = 0xB300
+SECT_SHRUB_INDICES = 0xB400
+SECT_SHRUB_SHADER_TABLE = 0x5600
+SECT_SHRUB_NAME = 0xB700
 
 SECT_SHADER_MATERIAL = 0x5000
 SECT_SHADER_REFS = 0x5D00
@@ -75,6 +80,7 @@ SECT_TIE_INSTANCES = 0x7240
 SECT_TIE_NAME_POINTERS = 0x72C0
 SECT_FOLIAGE_TUID_TABLE = 0x7400
 SECT_FOLIAGE_INSTANCES = 0x7440
+SECT_SHRUB_TUID_TABLE = 0x7500
 SECT_SHRUB_INSTANCES = 0x7540
 
 SECT_GAMEPLAY_STRINGS = 0x25000
@@ -90,11 +96,15 @@ MAX_COLLISION_VERTICES = 512
 MAX_COLLISION_FACES = 65_535
 MAX_FOLIAGE_CORNERS = 10_000_000
 MAX_FOLIAGE_INSTANCES = 1_000_000
+MAX_SHRUB_INDICES = 10_000_000
+MAX_SHRUB_INSTANCES = 1_000_000
 
 FOLIAGE_INSTANCE_STRIDE = 0xB0
 FOLIAGE_CORNER_STRIDE = 0x08
 FOLIAGE_CENTER_STRIDE = 0x0E
 FOLIAGE_SHADER_TUID_BASE = 1 << 64
+SHRUB_VERTEX_STRIDE = 0x10
+SHRUB_INSTANCE_STRIDE = 0x40
 YARD_TO_METERS = np.float32(0.9144)
 
 
@@ -285,6 +295,7 @@ class Resistance2Reader:
         section_id = {
             AssetKind.MOBY: SECT_MOBY_NAME,
             AssetKind.TIE: SECT_TIE_NAME,
+            AssetKind.SHRUB: SECT_SHRUB_NAME,
         }.get(kind)
         if section_id is None:
             return None
@@ -989,6 +1000,94 @@ class Resistance2Reader:
             tuid=tuid,
             meshes=[mesh],
             shader_tuids=(foliage_shader_tuid,),
+        )
+
+    def read_shrub(self, tuid: int) -> TieAsset:
+        data = self._asset_bytes(AssetKind.SHRUB, tuid)
+        ighw = IghwFile(data, label=f"shrub 0x{tuid:016X}")
+        header = ighw.require_section(SECT_SHRUB_HEADER)
+        if header.count != 1 or header.length < 0x30:
+            raise FormatError(
+                f"{ighw.label}: expected one shrub header of at least "
+                "0x30 bytes"
+            )
+        base = header.offset
+        vertex_offset = ighw.u32(base)
+        index_offset = ighw.u32(base + 0x04)
+        index_count = ighw.u32(base + 0x08)
+        position_extent = ighw.f32(base + 0x18)
+        header_tuid = ighw.u64(base + 0x28)
+        actual_tuid = header_tuid or tuid
+        if index_count > MAX_SHRUB_INDICES:
+            raise FormatError(
+                f"{ighw.label}: unreasonable index count {index_count}"
+            )
+        if index_count % 3:
+            raise FormatError(
+                f"{ighw.label}: index count {index_count} is not triangular"
+            )
+        if not index_count:
+            return TieAsset(tuid=actual_tuid, meshes=[], shader_tuids=())
+        if not np.isfinite(position_extent) or position_extent <= 0.0:
+            raise FormatError(
+                f"{ighw.label}: invalid position extent {position_extent!r}"
+            )
+
+        vertex_section = ighw.require_section(SECT_SHRUB_VERTICES)
+        index_section = ighw.require_section(SECT_SHRUB_INDICES)
+        index_byte_length = index_count * 2
+        if index_offset + index_byte_length > index_section.length:
+            raise FormatError(f"{ighw.label}: shrub index buffer overrun")
+        indices = np.frombuffer(
+            ighw.data,
+            dtype=ighw.endian + "u2",
+            count=index_count,
+            offset=index_section.offset + index_offset,
+        ).astype(np.int32)
+        vertex_count = int(indices.max()) + 1
+        vertex_byte_length = vertex_count * SHRUB_VERTEX_STRIDE
+        if vertex_offset + vertex_byte_length > vertex_section.length:
+            raise FormatError(f"{ighw.label}: shrub vertex buffer overrun")
+        vertex_base = vertex_section.offset + vertex_offset
+        positions = np.ndarray(
+            shape=(vertex_count, 3),
+            dtype=ighw.endian + "i2",
+            buffer=ighw.data,
+            offset=vertex_base,
+            strides=(SHRUB_VERTEX_STRIDE, 2),
+        ).astype(np.float32)
+        positions = np.clip(
+            positions / np.float32(32767.0),
+            np.float32(-1.0),
+            np.float32(1.0),
+        )
+        positions *= np.float32(position_extent) * YARD_TO_METERS
+        uvs = np.ndarray(
+            shape=(vertex_count, 2),
+            dtype=ighw.endian + "f2",
+            buffer=ighw.data,
+            offset=vertex_base + 0x08,
+            strides=(SHRUB_VERTEX_STRIDE, 2),
+        ).astype(np.float32)
+        if not np.isfinite(positions).all() or not np.isfinite(uvs).all():
+            raise FormatError(f"{ighw.label}: shrub vertices are not finite")
+        shader_tuids = self._read_shader_table(
+            ighw,
+            SECT_SHRUB_SHADER_TABLE,
+        )
+        if not shader_tuids:
+            raise FormatError(f"{ighw.label}: shrub shader table is empty")
+        return TieAsset(
+            tuid=actual_tuid,
+            meshes=[
+                MeshGeometry(
+                    shader_index=0,
+                    positions=positions,
+                    uvs=uvs,
+                    indices=indices,
+                )
+            ],
+            shader_tuids=shader_tuids,
         )
 
     @staticmethod
@@ -1868,17 +1967,18 @@ class Resistance2Reader:
             ighw,
             zone_tuid=tuid,
         )
-        shrub_section = ighw.section(SECT_SHRUB_INSTANCES)
+        shrub_instances = self._parse_shrub_instances(
+            ighw,
+            zone_tuid=tuid,
+        )
         return Zone(
             tuid=tuid,
             tie_instances=instances,
             terrain_meshes=terrain,
             shader_tuids=shader_tuids,
             lightmaps=lightmaps,
+            shrub_instances=shrub_instances,
             foliage_instances=foliage_instances,
-            unsupported_shrub_instances=(
-                shrub_section.count if shrub_section else 0
-            ),
         )
 
     def _cache_zone_lightmap_infos(
@@ -2070,6 +2170,110 @@ class Resistance2Reader:
                     instance_tuid=instance_tuid,
                     name=f"FoliageInstance_{index:04X}",
                     matrix=self._read_single_matrix(ighw, base),
+                )
+            )
+        return instances
+
+    def _parse_shrub_instances(
+        self,
+        ighw: IghwFile,
+        *,
+        zone_tuid: int,
+    ) -> list[PlacedInstance]:
+        instance_section = ighw.section(SECT_SHRUB_INSTANCES)
+        if instance_section is None:
+            return []
+        lookup_section = ighw.section(SECT_SHRUB_TUID_TABLE)
+        if lookup_section is None:
+            raise FormatError(
+                f"{ighw.label}: shrub instances have no TUID table"
+            )
+        if instance_section.length != SHRUB_INSTANCE_STRIDE:
+            raise FormatError(
+                f"{ighw.label}: shrub instance stride is "
+                f"{instance_section.length:#x}; expected "
+                f"{SHRUB_INSTANCE_STRIDE:#x}"
+            )
+        if lookup_section.length != 8:
+            raise FormatError(
+                f"{ighw.label}: shrub lookup stride is "
+                f"{lookup_section.length:#x}; expected 0x8"
+            )
+        if instance_section.count > MAX_SHRUB_INSTANCES:
+            raise FormatError(
+                f"{ighw.label}: unreasonable shrub instance count "
+                f"{instance_section.count}"
+            )
+        ighw.require(
+            instance_section.offset,
+            instance_section.count * SHRUB_INSTANCE_STRIDE,
+            purpose="shrub instances",
+        )
+        ighw.require(
+            lookup_section.offset,
+            lookup_section.count * 8,
+            purpose="shrub TUID table",
+        )
+
+        instances: list[PlacedInstance] = []
+        for index in range(instance_section.count):
+            base = (
+                instance_section.offset
+                + index * SHRUB_INSTANCE_STRIDE
+            )
+            shrub_index = ighw.u32(base + 0x3C)
+            if shrub_index >= lookup_section.count:
+                raise FormatError(
+                    f"{ighw.label}: shrub instance {index} references "
+                    f"lookup {shrub_index}, outside "
+                    f"{lookup_section.count} entries"
+                )
+            position = np.asarray(
+                ighw.vec3(base),
+                dtype=np.float32,
+            )
+            scale = np.float32(ighw.f32(base + 0x0C))
+            row_x = np.asarray(
+                ighw.vec3(base + 0x10),
+                dtype=np.float32,
+            )
+            row_y = np.asarray(
+                ighw.vec3(base + 0x20),
+                dtype=np.float32,
+            )
+            if (
+                not np.isfinite(position).all()
+                or not np.isfinite(scale)
+                or not np.isfinite(row_x).all()
+                or not np.isfinite(row_y).all()
+            ):
+                raise FormatError(
+                    f"{ighw.label}: shrub instance {index} transform "
+                    "is not finite"
+                )
+            row_z = np.cross(row_x, row_y)
+            matrix = np.eye(4, dtype=np.float32)
+            matrix[:3, :3] = (
+                np.stack((row_x, row_y, row_z)).T * scale
+            )
+            matrix[:3, 3] = position * YARD_TO_METERS
+            asset_tuid = ighw.u64(
+                lookup_section.offset + shrub_index * 8
+            )
+            instance_tuid = (
+                (ord("S") << 56)
+                | (
+                    (zone_tuid ^ (index << 32))
+                    & 0x00FF_FFFF_FFFF_FFFF
+                )
+                | index
+            )
+            instances.append(
+                PlacedInstance(
+                    asset_tuid=asset_tuid,
+                    instance_tuid=instance_tuid,
+                    name=f"ShrubInstance_{index:04X}",
+                    matrix=matrix,
                 )
             )
         return instances

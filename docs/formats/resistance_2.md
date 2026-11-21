@@ -695,6 +695,31 @@ Blender mesh datablocks are shared by all placements of the same foliage TUID.
 Runtime wind, custom normals, and camera-facing billboard behavior are not
 reproduced.
 
+Shrub assets come from `0x1D500` pointers into `shrubs.dat`. Each standalone
+IGHW contains:
+
+- `0xB100`: one `0x80`-byte header;
+- `0xB300`: `0x10`-byte vertices;
+- `0xB400`: big-endian `u16` triangle indices;
+- `0x5600`: the source shader TUID;
+- `0xB700`: the null-terminated source entity path;
+- `0x3150`: a per-vertex runtime remap that is not needed for static geometry.
+
+The header stores vertex and index byte offsets at `+0x00`/`+0x04`, the index
+count at `+0x08`, the authored position extent at `+0x18`, and the asset TUID
+at `+0x28`. Each vertex stores signed-normalized `i16 position[4]` at `+0x00`,
+half-float UVs at `+0x08`, and one packed runtime word at `+0x0C`. Imported
+positions are `clamp(raw / 32767, -1, 1) * extent * 0.9144`; the packed word
+is preserved only as source evidence and is not interpreted as a Blender
+normal.
+
+Zones use `0x7500` as an eight-byte Shrub TUID lookup and `0x7540` as
+`0x40`-byte placement records. A placement stores position at `+0x00`, scale
+at `+0x0C`, two basis rows at `+0x10` and `+0x20`, and the lookup index at
+`+0x3C`. The third basis row is their cross product and translation is
+converted from yards to meters. All placements of one TUID share a Blender
+mesh datablock.
+
 `gameplay.dat` section `0x25000` identifies region directories. Each region
 uses:
 
@@ -706,7 +731,8 @@ Gameplay Euler values are composed in ZYX order.
 
 ## Known unknowns
 
-- Shrub geometry and exact value-14 foliage material-vector semantics.
+- Exact value-14 foliage material-vector semantics and Shrub packed vertex
+  metadata.
 - Packed normals/tangents for custom-normal import.
 - Packed green/specular behavior; the public `useSpecular` bit is absent from
   all 3,355 unique shaders in the current corpus.

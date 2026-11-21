@@ -180,10 +180,11 @@ secondary UV, and used `0x5400` baked zone lightmaps from the matching
 `lighting.dat` asset. R3 Ties likewise import packed vertex light, optional
 UV2, and per-instance `0x5400` lighting. Tie maps use a level-wide atlas
 downsampled by four in each dimension to preserve mesh sharing and avoid
-thousands of Blender images and materials. The parallel `0x5410`
-shadow/directional texture and dynamic scene lighting are not composed.
-Shrub geometry, level collision, VFX, and cubemaps are not imported.
-Terrain, Tie placement, and gameplay Moby placement are supported.
+thousands of Blender images and materials. The parallel `0x5410` shadow/directional texture and dynamic scene lighting
+are not composed. Shrub meshes and placements use the shared R2 layout and
+are imported, but their packed vertex metadata is not decoded. Level
+collision, VFX, and cubemaps are not imported. Terrain, Tie placement, and
+gameplay Moby placement are supported.
 
 ## Resistance 2
 
@@ -192,12 +193,10 @@ Terrain, Tie placement, and gameplay Moby placement are supported.
 Foliage `0xA000` sprite buffers, `0xA200` descriptors, and
 `0x7400`/`0x7440` placements are imported with shared mesh datablocks and
 masked materials. The first authored LOD is expanded into static cards.
-Runtime wind, custom normals, and camera-facing billboarding are not
-reproduced.
-
-Shrub records are still only counted. They use a separate resource kind and
-vertex/placement layouts rather than Tie or foliage geometry, and the level
-importer reports the skipped count.
+Shrub `0xB300`/`0xB400` meshes and `0x7500`/`0x7540` placements are likewise
+imported with shared mesh datablocks and their source masked materials.
+Runtime wind, packed shrub vertex metadata, custom normals, and camera-facing
+foliage billboarding are not reproduced.
 
 ### Gameplay Mobys are static in level imports
 

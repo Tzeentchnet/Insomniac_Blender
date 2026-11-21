@@ -450,9 +450,15 @@ datablocks. Two foliage-only shader identities preserve the source textures
 while forcing masked alpha; both decoded albedos contain the full `0`-`255`
 alpha range.
 
+Shrubs retain R2's `0xB100`/`0xB300`/`0xB400` standalone geometry and
+`0x7500`/`0x7540` zone placement layouts. The same signed-normalized vertex
+scaling, source `0x5600` masked shader, and two-row placement basis therefore
+apply without a V3 override. `mine_traversal_train` contains six Shrub assets
+with 394 vertices, 356 triangles, and 661 placements; every placement resolves
+to one of those six TUIDs.
+
 Runtime wind, custom normals, and camera-facing billboarding are not
 reproduced.
 
-Shrub geometry, dynamic scene lighting, the parallel zone
-shadow/directional-light texture, level collision, VFX, and cubemaps are not
-imported.
+Dynamic scene lighting, the parallel zone shadow/directional-light texture,
+level collision, VFX, and cubemaps are not imported.

@@ -24,7 +24,10 @@ The portable `test_foliage.py` fixture separately exercises the R2 and R3
 `0xA000` card buffers, their distinct `0xA200` descriptors, and their
 distinct `0x7440` placement records. A real R2 source with foliage can be
 checked by setting `R2_LEVEL_SOURCE`; Scotia Co-op contains three foliage
-assets and 200 placements.
+assets and 200 placements. The portable `test_shrubs.py` fixture exercises
+the shared R2/R3 `0xB100` geometry and `0x7540` placement records. Scotia
+Co-op contains ten Shrub assets with 2,250 vertices, 2,538 triangles, and
+8,426 placements.
 
 Run the real R3 foliage regression against `mine_traversal_train`:
 
@@ -35,14 +38,15 @@ Remove-Item Env:R3_FOLIAGE_SOURCE
 ```
 
 This decodes all 11 foliage assets, both masked leaf materials and their
-albedo textures, and all 1,050 placements. It also verifies that every
-placement resolves to one of the level's foliage assets. The same regression
-checks the exact grass, conifer, and track Tie material groups selected by
-R3 primitive byte `+0x26`, their vertex light and optional UV2, and 6,730
-placed-Tie lightmap IDs. It decodes the target grass instance's 256x256 BC3
-lightmap from zone `0x58E8829DE249D884`. For all 972 UFrag meshes in zone
-`0xEF2A7A01E249D922`, it verifies world bounds, the complete 0-to-1 UV1
-range, packed vertex-light values, lightmap index 109, and the decoded
+albedo textures, and all 1,050 placements, plus all six Shrub assets and 661
+Shrub placements. It verifies that every vegetation placement resolves to a
+level asset. The same regression checks the exact grass, conifer, and track
+Tie material groups selected by R3 primitive byte `+0x26`, their vertex light
+and optional UV2, and 6,730 placed-Tie lightmap IDs. It decodes the target
+grass instance's 256x256 BC3 lightmap from zone `0x58E8829DE249D884`. For all
+972 UFrag meshes in zone `0xEF2A7A01E249D922`, it verifies world bounds, the
+complete 0-to-1 UV1 range, packed vertex-light values, lightmap index 109, and
+the decoded
 1024x1024 BC3 lightmap read from the matching `lighting.dat` asset.
 It also verifies that `JEEP_REINFORCEMENT_6` resolves to the Warden Jeep
 Moby, whose `0x03FFFFFF` class draw mask enables all 35 source meshes and
@@ -281,9 +285,10 @@ The current implementation was validated in Blender 5.2.2 LTS with:
 - TOD `animate_spin`, reduced from 8,001 paired disk records to 4,000 Action
   frames at 15 fps;
 - bounded Asset Browser caches for all four supported PS3 games, including
-  RFoM Shrub/Foliage Collections, TOD/R2/R3 Foliage Collections, canonical
-  cross-level R3 reuse, standalone Materials, packed images, and generated
-  previews, all reopened with their catalog assignments and metadata intact;
+  RFoM/R2/R3 Shrub Collections, all four games' supported Foliage Collections,
+  canonical cross-level R3 reuse, standalone Materials, packed images, and
+  generated previews, all reopened with their catalog assignments and
+  metadata intact;
 - a selected `crumbling` import containing only its 38-bone compatible rig
   and one Action, plus a separately saved/reopened standalone TOD Material;
 - a saved TOD Metropolis level containing 6,228 objects and 313 mesh
