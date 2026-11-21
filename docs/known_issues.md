@@ -29,8 +29,9 @@ unverified offsets.
 
 The retail disc's `DEBUG.PSARC` has no usable name database. Catalog and
 Blender names therefore use stable level-local fallbacks (`Moby_XXXX` and
-`Tie_XXXXXXXX`). Numeric identities can collide between levels; catalog
-identifiers include the owner level to keep those assets distinct.
+`Tie_XXXXXXXX`, and `Shrub_XXXXXXXX`). Numeric identities can collide between
+levels; catalog identifiers include the owner level to keep those assets
+distinct.
 
 Inline animations are decoded in both observed forms. Complex clips apply
 the runtime's signed 8-bit delta scaling, while simple clips discard paired
@@ -42,9 +43,11 @@ Old Moby secondary-bangle semantics, damage permutations, authored lower
 LODs, and Moby collision are not yet independently verified. `collision.dat`
 also uses a separate non-IGHW level layout and is not imported. Foliage
 branch meshes, sprite cards, and placements are imported from the first
-authored LOD with masked, double-sided materials. Runtime wind, custom
-normals, and camera-facing billboarding are not reproduced. Shrub geometry,
-lighting, VFX, cubemaps, and audio are outside the current level importer.
+authored LOD with masked, double-sided materials. Shrub meshes and clustered
+placements are imported from the embedded old-engine layout. Runtime
+vegetation wind, packed Shrub vertex metadata, Foliage custom normals, and
+camera-facing billboarding are not reproduced. Lighting, VFX, cubemaps, and
+audio remain outside the current level importer.
 
 ## Resistance: Burning Skies (experimental)
 
@@ -171,7 +174,7 @@ bases are plausible. An unmatched additive Action therefore still represents
 only the available layer and can require a manually selected locomotion or
 idle base for an exact in-game result.
 
-### Shared unsupported level resources
+### Level rendering limitations
 
 Resistance 3's game-specific foliage sprite cards and placements are
 imported, but runtime wind, custom normals, and camera-facing billboarding
@@ -280,8 +283,9 @@ reports the reference and uses a deterministic placeholder material.
 
 ### Asset Browser cache scope
 
-Asset Browser generation caches the Mobys, Ties, supported Shrubs/Foliage,
-and verified Materials referenced by one selected level and game at a time.
+Asset Browser generation caches the Mobys, Ties, supported Shrub and Foliage
+assets, and verified Materials referenced by one selected level and game at a
+time.
 Rebuild additional levels to add their assets. R2/R3 global TUIDs resolve to
 one canonical game-wide entry even when multiple generated levels reference
 them; RFoM/TOD identities remain level-scoped because their numeric IDs
@@ -304,16 +308,18 @@ must not be redistributed.
 
 ### Import catalog labels
 
-R2 stores a source entity path in Moby section `0xD200` and Tie section
-`0x3410`. The bundled USA catalog includes paths for all 4,130 unique assets
-on the tested disc. Selector labels turn the final path component into a
-readable display name, while the full source path, kind, TUID, and owner
-levels remain in the tooltip.
+R2 stores a source entity path in Moby section `0xD200`, Tie section `0x3410`,
+and Shrub section `0xB700`. The bundled USA catalog includes 4,207 named
+Mobys, Ties, and Shrubs on the tested disc, plus 26 deterministically named
+Foliage assets and 3,355 Materials. Selector labels turn the final path
+component into a readable display name, while the full source path, kind,
+TUID, and owner levels remain in the tooltip.
 
 These are internal source names, so abbreviations, duplicate basenames, and
 development-era labels remain. Existing schema-1 local catalogs without the
-optional `names` mapping remain valid and use the deterministic TUID labels
-until regenerated from an ISO.
+optional `names`, `shrubs`, `foliage`, or `materials` fields remain valid and
+use deterministic TUID labels for unnamed assets until regenerated from an
+ISO.
 
 The sidebar asset search popup lists every asset that passes the kind, level,
 and path filters, sorted by name. Blender's search popup matches the typed

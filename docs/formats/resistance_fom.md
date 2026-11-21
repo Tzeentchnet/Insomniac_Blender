@@ -4,8 +4,8 @@ This adapter targets the USA `BCUS98107` v01.00 retail disc. It validates
 `TITLE_ID` and `VERSION` from `PARAM.SFO` before extracting data.
 
 No game payloads are distributed. The bundled metadata catalog contains
-36,034 level-scoped references across 41 levels: 5,556 Mobys, 6,714 Ties,
-and 23,764 Materials.
+36,321 level-scoped references across 41 levels: 5,556 Mobys, 6,714 Ties,
+184 Shrubs, 103 Foliage assets, and 23,764 Materials.
 
 ## Archive topology
 

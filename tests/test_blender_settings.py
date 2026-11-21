@@ -20,6 +20,8 @@ except ModuleNotFoundError:
 if bpy is not None:
     from insomniac_asset_io.blender import operators, register, unregister
     from insomniac_asset_io.blender import properties as scene_properties
+    from insomniac_asset_io.games.catalog import CatalogAsset, GameCatalog
+    from insomniac_asset_io.games.resistance_2.formats import AssetKind
 
 
 @unittest.skipUnless(bpy is not None, "Blender Python is not available")
@@ -301,6 +303,94 @@ class BlenderSettingsTests(unittest.TestCase):
                 for identifier, *_rest in state.items
             )
         )
+
+    def test_vegetation_kind_filters_list_only_selected_kind(self) -> None:
+        settings = bpy.context.scene.insomniac_asset_io
+        settings.asset_filter = ""
+        settings.asset_level_filter = "__ALL__"
+        catalog = GameCatalog(
+            game_id="RESISTANCE_2",
+            game_label="Resistance 2",
+            path=Path("test_catalog.json"),
+            region="Test",
+            levels=("test_level",),
+            assets=(
+                CatalogAsset(
+                    identifier="SHRUB:0000000000000001",
+                    kind=AssetKind.SHRUB,
+                    tuid=1,
+                    levels=("test_level",),
+                ),
+                CatalogAsset(
+                    identifier="FOLIAGE:0000000000000002",
+                    kind=AssetKind.FOLIAGE,
+                    tuid=2,
+                    levels=("test_level",),
+                ),
+            ),
+        )
+
+        with (
+            mock.patch.object(
+                scene_properties,
+                "_catalog",
+                return_value=catalog,
+            ),
+            mock.patch.object(
+                scene_properties,
+                "_selector_preferences",
+                return_value=(False, False, False),
+            ),
+        ):
+            for filter_name, identifier in (
+                ("SHRUB", "SHRUB:0000000000000001"),
+                ("FOLIAGE", "FOLIAGE:0000000000000002"),
+            ):
+                with self.subTest(filter_name=filter_name):
+                    settings.asset_kind_filter = filter_name
+                    state = scene_properties.asset_selector_state(
+                        settings,
+                        bpy.context,
+                    )
+
+                    self.assertEqual(state.match_count, 1)
+                    self.assertEqual(state.items[0][0], identifier)
+
+    def test_vegetation_catalog_dispatch_preserves_asset_kind(self) -> None:
+        reader = object()
+        options = mock.sentinel.options
+        result = mock.sentinel.result
+
+        for kind in (AssetKind.SHRUB, AssetKind.FOLIAGE):
+            with self.subTest(kind=kind.name):
+                asset = CatalogAsset(
+                    identifier=f"{kind.name}:0000000000001234",
+                    kind=kind,
+                    tuid=0x1234,
+                    levels=("test_level",),
+                )
+                with mock.patch.object(
+                    operators,
+                    "import_static_asset",
+                    return_value=result,
+                ) as import_static_asset:
+                    imported = operators._import_catalog_asset(
+                        bpy.context,
+                        reader,
+                        asset,
+                        options,
+                        source_path=r"E:\Tests\level_cached.psarc",
+                    )
+
+                self.assertIs(imported, result)
+                import_static_asset.assert_called_once_with(
+                    bpy.context,
+                    reader,
+                    0x1234,
+                    options,
+                    kind=kind,
+                    source_path=r"E:\Tests\level_cached.psarc",
+                )
 
     def test_animation_search_selects_first_matching_clip(self) -> None:
         picker = SimpleNamespace(

@@ -23,7 +23,9 @@ numeric `;1` versions, and resolves paths case-insensitively. A
 libarchive-compatible `tar` remains a fallback for other valid images.
 
 The USA disc contains 27 level archive pairs. Its bundled metadata catalog has
-5,820 unique named assets: 969 Mobys and 4,851 Ties.
+10,482 unique assets: 969 Mobys, 4,851 Ties, 70 Shrubs, 13 Foliage assets,
+and 4,579 Materials. Source names are available for the 5,890 Mobys, Ties,
+and Shrubs.
 
 ## Resistance3Port corroboration
 

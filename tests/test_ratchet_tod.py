@@ -7,6 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
+from insomniac_asset_io.core.errors import FormatError
 from insomniac_asset_io.core.source import GameSource
 from insomniac_asset_io.games.ratchet_tod.reader import RatchetTodReader
 from insomniac_asset_io.games.resistance_2.formats import AssetKind
@@ -72,8 +73,10 @@ def _write_fixture(root: Path) -> None:
         (0x9240, 0x4E0, 1, 0x80),
         (0xA200, 0xA00, 1, 0xB0),
         (0x9340, 0xB00, 1, 0xE0),
+        (0xB100, 0xC00, 1, 0x30),
+        (0x9540, 0xC40, 1, 0x160),
     )
-    main = _ighw(0xC00, sections)
+    main = _ighw(0xDA0, sections)
 
     struct.pack_into(">4f", main, 0x200, 0.0, 0.0, 0.0, 2.0)
     struct.pack_into(">H", main, 0x216, 1)
@@ -187,10 +190,61 @@ def _write_fixture(root: Path) -> None:
     )
     struct.pack_into(">16f", main, 0xB00, *foliage_matrix)
     struct.pack_into(">I", main, 0xB00 + 0xC4, 0xA00)
+
+    struct.pack_into(">3I", main, 0xC00, 0x140, 3, 3)
+    struct.pack_into(">4f", main, 0xC10, 1.0, 0.0, 0.0, 0.5)
+    struct.pack_into(">H", main, 0xC20, 1)
+
+    struct.pack_into(">4I", main, 0xC40, 2, 0xE0, 1, 0x80)
+    main[0xD00] = 2
+    struct.pack_into(">I", main, 0xD0C, 1)
+    struct.pack_into(">H", main, 0xD14, 0)
+    struct.pack_into(
+        ">16f",
+        main,
+        0xD20,
+        7.0,
+        8.0,
+        9.0,
+        1.5,
+        1.0,
+        0.0,
+        0.0,
+        2.0,
+        0.0,
+        1.0,
+        0.0,
+        0.25,
+        0.5,
+        0.5,
+        0.5,
+        1.0,
+    )
+    struct.pack_into(
+        ">16f",
+        main,
+        0xD60,
+        -1.0,
+        -2.0,
+        -3.0,
+        0.5,
+        0.0,
+        1.0,
+        0.0,
+        3.0,
+        -1.0,
+        0.0,
+        0.0,
+        0.5,
+        0.25,
+        0.25,
+        0.25,
+        1.0,
+    )
     (root / "main.dat").write_bytes(main)
 
     vertex_sections = (
-        (0x9000, 0x100, 1, 0x12C),
+        (0x9000, 0x100, 1, 0x180),
         (0x9100, 0x300, 1, 0x18),
     )
     vertices = _ighw(0x320, vertex_sections)
@@ -238,6 +292,27 @@ def _write_fixture(root: Path) -> None:
         1.0,
     )
     struct.pack_into(">3eH", vertices, 0x224, 10.0, 20.0, 30.0, 0)
+    for index, (x, y, z, u, v) in enumerate(
+        (
+            (0, 0, 0, 0.0, 0.0),
+            (256, 0, 0, 1.0, 0.0),
+            (0, 512, 0, 0.0, 1.0),
+        )
+    ):
+        struct.pack_into(
+            ">3h4B2e",
+            vertices,
+            0x240 + index * 0x0E,
+            x,
+            y,
+            z,
+            64,
+            128,
+            192,
+            255,
+            u,
+            v,
+        )
     struct.pack_into(
         ">12H",
         vertices,
@@ -313,6 +388,34 @@ class RatchetTodReaderTests(unittest.TestCase):
                 self.assertEqual(len(tie.meshes), 1)
                 self.assertEqual(tie.shader_tuids, (0,))
 
+                shrub_id = reader.asset_pointers(AssetKind.SHRUB)[0].tuid
+                shrub = reader.read_shrub(shrub_id)
+                self.assertEqual(shrub_id, 0xC00)
+                self.assertEqual(
+                    reader.read_asset_name(AssetKind.SHRUB, shrub_id),
+                    "Shrub_00000C00",
+                )
+                self.assertEqual(shrub.shader_tuids, (1,))
+                np.testing.assert_allclose(
+                    shrub.meshes[0].positions,
+                    np.asarray(
+                        (
+                            (0.0, 0.0, 0.0),
+                            (1.0, 0.0, 0.0),
+                            (0.0, 2.0, 0.0),
+                        )
+                    )
+                    * 0.9144,
+                )
+                np.testing.assert_allclose(
+                    shrub.meshes[0].uvs,
+                    ((0.0, 0.0), (1.0, 0.0), (0.0, 1.0)),
+                )
+                np.testing.assert_array_equal(
+                    shrub.meshes[0].indices,
+                    (0, 1, 2),
+                )
+
                 foliage_id = reader.asset_pointers(
                     AssetKind.FOLIAGE
                 )[0].tuid
@@ -359,7 +462,14 @@ class RatchetTodReaderTests(unittest.TestCase):
                 zone = reader.read_zones()[0]
                 self.assertEqual(len(zone.terrain_meshes), 1)
                 self.assertEqual(len(zone.tie_instances), 1)
+                self.assertEqual(len(zone.shrub_instances), 2)
                 self.assertEqual(len(zone.foliage_instances), 1)
+                self.assertTrue(
+                    all(
+                        instance.asset_tuid == shrub_id
+                        for instance in zone.shrub_instances
+                    )
+                )
                 self.assertEqual(
                     zone.foliage_instances[0].asset_tuid,
                     foliage_id,
@@ -372,10 +482,53 @@ class RatchetTodReaderTests(unittest.TestCase):
                     zone.foliage_instances[0].matrix[:3, 3],
                     np.asarray((4.0, 5.0, 6.0)) * 0.9144,
                 )
+                np.testing.assert_allclose(
+                    zone.shrub_instances[0].matrix[:3, 3],
+                    np.asarray((7.0, 8.0, 9.0)) * 0.9144,
+                )
+                np.testing.assert_allclose(
+                    zone.shrub_instances[0].matrix[:3, :3],
+                    np.eye(3) * 1.5,
+                )
+                np.testing.assert_allclose(
+                    zone.shrub_instances[1].matrix[:3, 3],
+                    np.asarray((-1.0, -2.0, -3.0)) * 0.9144,
+                )
 
                 gameplay = reader.read_gameplay_regions()[0]
                 self.assertEqual(gameplay.name, "art")
                 self.assertEqual(gameplay.moby_instances[0].asset_tuid, 0)
+
+    def test_rejects_invalid_shrub_cluster_references(self) -> None:
+        mutations = (
+            (
+                "missing shrub",
+                lambda data: struct.pack_into(">I", data, 0xD0C, 2),
+                "references missing shrub 1",
+            ),
+            (
+                "out of bounds range",
+                lambda data: data.__setitem__(0xD00, 3),
+                "instance range is out of bounds",
+            ),
+        )
+        for label, mutate, expected in mutations:
+            with (
+                self.subTest(label=label),
+                tempfile.TemporaryDirectory() as temporary,
+            ):
+                root = Path(temporary)
+                _write_fixture(root)
+                main = bytearray((root / "main.dat").read_bytes())
+                mutate(main)
+                (root / "main.dat").write_bytes(main)
+                with GameSource.open(root) as source:
+                    reader = RatchetTodReader(source)
+                    with self.assertRaisesRegex(
+                        FormatError,
+                        expected,
+                    ):
+                        reader.read_zones()
 
 
 if __name__ == "__main__":

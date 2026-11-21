@@ -16,7 +16,7 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument(
         "--kind",
-        choices=("moby", "tie", "level"),
+        choices=("moby", "tie", "shrub", "foliage", "level"),
         required=True,
     )
     parser.add_argument("--tuid", type=lambda value: int(value, 0))
@@ -46,12 +46,13 @@ def main() -> None:
         LevelImportOptions,
         import_level,
         import_moby,
-        import_tie,
+        import_static_asset,
     )
     from insomniac_asset_io.core.source import GameSource
     from insomniac_asset_io.games.ratchet_tod.reader import (
         RatchetTodReader,
     )
+    from insomniac_asset_io.games.resistance_2.formats import AssetKind
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     _clear_scene(bpy)
@@ -70,10 +71,17 @@ def main() -> None:
                 ),
                 source_path=str(args.source),
             )
-        elif args.kind == "tie":
+        elif args.kind in {"tie", "shrub", "foliage"}:
             if args.tuid is None:
-                raise RuntimeError("--tuid is required for a Tie import")
-            result = import_tie(
+                raise RuntimeError(
+                    f"--tuid is required for a {args.kind} import"
+                )
+            kind = {
+                "tie": AssetKind.TIE,
+                "shrub": AssetKind.SHRUB,
+                "foliage": AssetKind.FOLIAGE,
+            }[args.kind]
+            result = import_static_asset(
                 bpy.context,
                 reader,
                 args.tuid,
@@ -81,6 +89,7 @@ def main() -> None:
                     materials=args.materials,
                     animations=False,
                 ),
+                kind=kind,
                 source_path=str(args.source),
             )
         else:
@@ -96,9 +105,10 @@ def main() -> None:
                 ),
                 source_path=str(args.source),
             )
+            zones = reader.read_zones()
             expected_foliage = sum(
                 len(zone.foliage_instances)
-                for zone in reader.read_zones()
+                for zone in zones
             )
             imported_foliage = sum(
                 obj.get("insomniac_asset_kind") == "FOLIAGE"
@@ -108,6 +118,19 @@ def main() -> None:
                 raise RuntimeError(
                     "Foliage placement mismatch: expected "
                     f"{expected_foliage}, imported {imported_foliage}"
+                )
+            expected_shrubs = sum(
+                len(zone.shrub_instances)
+                for zone in zones
+            )
+            imported_shrubs = sum(
+                obj.get("insomniac_asset_kind") == "SHRUB"
+                for obj in bpy.data.objects
+            )
+            if imported_shrubs != expected_shrubs:
+                raise RuntimeError(
+                    "Shrub placement mismatch: expected "
+                    f"{expected_shrubs}, imported {imported_shrubs}"
                 )
 
     if result.root.get("insomniac_game") != "RATCHET_TOD":

@@ -4,6 +4,10 @@ Status: verified against the decrypted USA `BCUS98120` v01.00 Resistance 2
 PS3 disc image and the public InsomniaToolset/ReChimera research listed below.
 The add-on validates both `PARAM.SFO` identity fields before extraction.
 
+The USA disc contains 27 levels. Its bundled metadata catalog has 7,588
+unique assets: 923 Mobys, 3,207 Ties, 77 Shrubs, 26 Foliage assets, and 3,355
+Materials. Source names are available for the 4,207 Mobys, Ties, and Shrubs.
+
 ## Disc and archive layout
 
 Levels are split into:
@@ -664,7 +668,9 @@ Zones contain:
   Tie asset classes;
 - `0x7400` foliage TUID lookup records;
 - `0x7440` `0xB0`-byte foliage instances. The row-major transform begins at
-  `0x00`, and the foliage lookup index is at `0x94`.
+  `0x00`, and the foliage lookup index is at `0x94`;
+- `0x7500` Shrub TUID lookup records;
+- `0x7540` `0x40`-byte Shrub instances.
 
 UFrag world positions simplify to `(rawVertex + fragmentPosition) / 256` in
 the same game units used by placements.
@@ -705,13 +711,14 @@ IGHW contains:
 - `0xB700`: the null-terminated source entity path;
 - `0x3150`: a per-vertex runtime remap that is not needed for static geometry.
 
-The header stores vertex and index byte offsets at `+0x00`/`+0x04`, the index
-count at `+0x08`, the authored position extent at `+0x18`, and the asset TUID
-at `+0x28`. Each vertex stores signed-normalized `i16 position[4]` at `+0x00`,
-half-float UVs at `+0x08`, and one packed runtime word at `+0x0C`. Imported
-positions are `clamp(raw / 32767, -1, 1) * extent * 0.9144`; the packed word
-is preserved only as source evidence and is not interpreted as a Blender
-normal.
+The header stores vertex and index offset fields at `+0x00`/`+0x04`, the
+index count at `+0x08`, the authored position extent at `+0x18`, and the
+asset TUID at `+0x28`. Both offsets are zero in every verified R2 and R3
+asset; the bounded reader treats them as byte offsets if present. Each vertex
+stores signed-normalized `i16 position[4]` at `+0x00`, half-float UVs at
+`+0x08`, and one packed runtime word at `+0x0C`. Imported positions are
+`clamp(raw / 32767, -1, 1) * extent * 0.9144`. The packed word remains
+unidentified and is not imported as a Blender normal.
 
 Zones use `0x7500` as an eight-byte Shrub TUID lookup and `0x7540` as
 `0x40`-byte placement records. A placement stores position at `+0x00`, scale
@@ -719,6 +726,11 @@ at `+0x0C`, two basis rows at `+0x10` and `+0x20`, and the lookup index at
 `+0x3C`. The third basis row is their cross product and translation is
 converted from yards to meters. All placements of one TUID share a Blender
 mesh datablock.
+
+The real Scotia Co-op regression covers all ten Shrub assets, 2,250 vertices,
+2,538 triangles, and 8,426 placements across three of its nine zones. Every
+placement resolves to one of the ten level TUIDs, all transforms are finite,
+and every source Shrub shader resolves to a masked material.
 
 `gameplay.dat` section `0x25000` identifies region directories. Each region
 uses:

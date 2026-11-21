@@ -16,12 +16,21 @@ from .resistance_2.formats import AssetKind
 
 CATALOG_SCHEMA_VERSION = 1
 CATALOG_FILENAME = "disc_catalog.json"
+_CATALOG_ASSET_FIELDS = (
+    ("mobys", AssetKind.MOBY, True),
+    ("ties", AssetKind.TIE, True),
+    ("shrubs", AssetKind.SHRUB, False),
+    ("foliage", AssetKind.FOLIAGE, False),
+    ("materials", AssetKind.SHADER, False),
+)
 
 
 def _kind_label(kind: AssetKind) -> str:
     return {
         AssetKind.MOBY: "Moby",
         AssetKind.TIE: "Tie",
+        AssetKind.SHRUB: "Shrub",
+        AssetKind.FOLIAGE: "Foliage",
         AssetKind.SHADER: "Material",
     }.get(kind, kind.name.title())
 
@@ -297,11 +306,7 @@ def _load_catalog_cached(
         if level_id in level_ids:
             raise InsomniacError(f"{path}: duplicate level {level_id!r}")
         level_ids.append(level_id)
-        for field, kind, required in (
-            ("mobys", AssetKind.MOBY, True),
-            ("ties", AssetKind.TIE, True),
-            ("materials", AssetKind.SHADER, False),
-        ):
+        for field, kind, required in _CATALOG_ASSET_FIELDS:
             values = raw_level.get(field, [] if not required else None)
             if not isinstance(values, list):
                 raise InsomniacError(
@@ -422,16 +427,12 @@ def build_catalog_from_iso(
                         or adapter.create_reader
                     )
                     reader = reader_factory(source)
-                    moby_pointers = reader.asset_pointers(AssetKind.MOBY)
-                    tie_pointers = reader.asset_pointers(AssetKind.TIE)
-                    material_pointers = reader.asset_pointers(
-                        AssetKind.SHADER
-                    )
-                    for kind, pointers in (
-                        (AssetKind.MOBY, moby_pointers),
-                        (AssetKind.TIE, tie_pointers),
-                        (AssetKind.SHADER, material_pointers),
-                    ):
+                    pointers_by_field = {
+                        field: reader.asset_pointers(kind)
+                        for field, kind, _required in _CATALOG_ASSET_FIELDS
+                    }
+                    for field, kind, _required in _CATALOG_ASSET_FIELDS:
+                        pointers = pointers_by_field[field]
                         for pointer in pointers:
                             identifier = adapter.catalog_identifier(
                                 kind,
@@ -446,27 +447,20 @@ def build_catalog_from_iso(
                             )
                             if source_name:
                                 asset_names[identifier] = source_name
-                    mobys = [
-                        f"0x{pointer.tuid:016X}"
-                        for pointer in moby_pointers
-                    ]
-                    ties = [
-                        f"0x{pointer.tuid:016X}"
-                        for pointer in tie_pointers
-                    ]
-                    materials = [
-                        f"0x{pointer.tuid:016X}"
-                        for pointer in material_pointers
-                    ]
+                    level_assets = {
+                        field: [
+                            f"0x{pointer.tuid:016X}"
+                            for pointer in pointers_by_field[field]
+                        ]
+                        for field, _kind, _required in _CATALOG_ASSET_FIELDS
+                    }
             finally:
                 if cache_root.is_dir():
                     shutil.rmtree(cache_root)
             catalog_levels.append(
                 {
                     "id": level,
-                    "mobys": mobys,
-                    "ties": ties,
-                    "materials": materials,
+                    **level_assets,
                 }
             )
 
@@ -492,49 +486,33 @@ def build_catalog_from_iso(
 
     unique_assets = {
         adapter.catalog_identifier(
-            AssetKind[kind],
+            kind,
             int(value, 16),
             str(level["id"]),
         )
         for level in catalog_levels
-        for kind, field in (
-            ("MOBY", "mobys"),
-            ("TIE", "ties"),
-            ("SHADER", "materials"),
-        )
+        for field, kind, _required in _CATALOG_ASSET_FIELDS
         for value in level[field]
     }
-    return {
+    report = {
         "catalog": str(output),
         "levels": len(catalog_levels),
         "asset_references": sum(
-            len(level["mobys"])
-            + len(level["ties"])
-            + len(level["materials"])
+            sum(
+                len(level[field])
+                for field, _kind, _required in _CATALOG_ASSET_FIELDS
+            )
             for level in catalog_levels
         ),
         "unique_assets": len(unique_assets),
-        "mobys": sum(
-            identifier.startswith("MOBY:")
-            for identifier in unique_assets
-        ),
-        "ties": sum(
-            identifier.startswith("TIE:")
-            for identifier in unique_assets
-        ),
-        "materials": sum(
-            identifier.startswith("SHADER:")
-            for identifier in unique_assets
-        ),
         "named_assets": len(asset_names),
-        "named_mobys": sum(
-            identifier.startswith("MOBY:") for identifier in asset_names
-        ),
-        "named_ties": sum(
-            identifier.startswith("TIE:") for identifier in asset_names
-        ),
-        "named_materials": sum(
-            identifier.startswith("SHADER:")
-            for identifier in asset_names
-        ),
     }
+    for field, kind, _required in _CATALOG_ASSET_FIELDS:
+        prefix = f"{kind.name}:"
+        report[field] = sum(
+            identifier.startswith(prefix) for identifier in unique_assets
+        )
+        report[f"named_{field}"] = sum(
+            identifier.startswith(prefix) for identifier in asset_names
+        )
+    return report

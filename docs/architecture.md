@@ -44,18 +44,18 @@ decompress only selected level entries. Catalog preparation can declare a
 smaller metadata-only resource set than interactive imports.
 
 The sidebar selectors are backed by per-game metadata-only disc catalogs. The
-bundled USA catalogs record level IDs, source names, Moby/Tie identities, and
-verified shader identities, but no geometry, textures, or archive payloads.
-A selected asset first resolves against its manual source override, then
-extracted owner levels, then the active game's configured ISO. Level selection
-follows the same cache-first resolution. A background catalog worker can
-replace a bundled catalog with a locally generated catalog for a different
-disc.
+bundled USA catalogs record level IDs, source names, supported
+Moby/Tie/Shrub/Foliage identities, and verified shader identities, but no
+geometry, textures, or archive payloads. A selected asset first resolves
+against its manual source override, then extracted owner levels, then the
+active game's configured ISO. Level selection follows the same cache-first
+resolution. A background catalog worker can replace a bundled catalog with a
+locally generated catalog for a different disc.
 
 Catalog identity is adapter-driven. R2 and R3 retain globally meaningful
 TUIDs, while RFoM and Tools of Destruction include the owner level in each
-catalog identifier because their Moby IDs/indices, Tie offsets, shader
-indices, and texture record offsets are level-local.
+catalog identifier because their Moby IDs/indices, Tie and vegetation
+offsets, shader indices, and texture record offsets are level-local.
 
 If a shader texture is absent from both domains, the R2 adapter lazily indexes
 already-extracted sibling `level_cached.psarc` files under the same
@@ -90,6 +90,7 @@ NumPy is used for:
 the selected level's `main.dat` metadata and uses bounded slices from
 `vertices.dat`, `textures.dat`, and `texstream.dat`. Mobys are addressed by
 their local table index; Ties use the byte offset of their `main.dat` header.
+Embedded Shrubs likewise use the byte offset of their `0xB100` descriptor.
 Mesh shader indices are localized before entering the shared Blender bridge,
 so an import only builds materials it actually uses.
 
@@ -100,9 +101,10 @@ are shifted left by two before adding their 16-bit bases, frame strides are
 records and play at half the disk rate. No bind-pose fallback is used for
 compressed clips.
 
-The old level layout has one zone. Its UFrag terrain and Tie placements are
-decoded from `main.dat` plus the level vertex/index sections; `gameplay.dat`
-provides one `art` region of placed Mobys.
+The old level layout has one zone. Its UFrag terrain, Tie placements, and
+clustered Shrub placements are decoded from `main.dat` plus the level
+vertex/index sections; `gameplay.dat` provides one `art` region of placed
+Mobys.
 
 ## Resistance: Fall of Man adapter
 
@@ -194,8 +196,8 @@ separate per game.
 ## Asset Browser cache
 
 The Asset Browser cache is generated locally from a user-provided ISO. A
-factory-startup Blender subprocess imports each selected-level Moby, Tie, and
-supported Shrub or Foliage model independently, marks its containing
+factory-startup Blender subprocess imports each supported selected-level
+Moby, Tie, Shrub, or Foliage model independently, marks its containing
 Collection as an asset, generates an optional preview, and writes that
 Collection plus dependencies to a compressed `.blend`. The UI operator polls
 JSON progress from a modal timer, leaving Blender responsive; cancellation

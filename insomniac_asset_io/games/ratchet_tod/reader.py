@@ -50,7 +50,8 @@ SECT_LEVEL_INDICES = 0x9100
 SECT_UFRAGS = 0x6200
 SECT_TIE_INSTANCES = 0x9240
 SECT_FOLIAGE = 0xA200
-SECT_SHRUB_INSTANCES = 0x7540
+SECT_SHRUB = 0xB100
+SECT_SHRUB_INSTANCES = 0x9540
 SECT_FOLIAGE_INSTANCES = 0x9340
 SECT_GAMEPLAY_MOBYS = 0x7340
 
@@ -60,6 +61,7 @@ MOBY_MESH_STRIDE = 0x40
 TIE_STRIDE = 0x80
 TIE_MESH_STRIDE = 0x40
 FOLIAGE_STRIDE = 0xB0
+SHRUB_STRIDE = 0x30
 SHADER_STRIDE = 0x80
 TEXTURE_STRIDE = 0x20
 TEXSTREAM_STRIDE = 0x10
@@ -68,12 +70,18 @@ UFRAG_VERTEX_STRIDE = 0x18
 TIE_INSTANCE_STRIDE = 0x80
 FOLIAGE_INSTANCE_STRIDE = 0xE0
 FOLIAGE_CENTER_STRIDE = 0x08
+SHRUB_CLUSTER_STRIDE = 0x60
+SHRUB_INSTANCE_STRIDE = 0x40
+SHRUB_VERTEX_STRIDE = 0x0E
 GAMEPLAY_MOBY_STRIDE = 0x48
 
 USE_VERTICES_DAT = 0x8000_0000
 YARD_TO_METERS = np.float32(0.9144)
 UFRAG_SCALE = np.float32(YARD_TO_METERS / 256.0)
 FOLIAGE_SHADER_TUID_BASE = 1 << 32
+MAX_VEGETATION_INSTANCES = 1_000_000
+MAX_VEGETATION_INDICES = 10_000_000
+MAX_TOD_SHRUB_CLASSES = 32
 
 
 @dataclass(frozen=True, slots=True)
@@ -177,6 +185,7 @@ class RatchetTodReader(Resistance2Reader):
         return (
             f"{len(self.asset_pointers(AssetKind.MOBY))} mobys, "
             f"{len(self.asset_pointers(AssetKind.TIE))} ties, "
+            f"{len(self.asset_pointers(AssetKind.SHRUB))} shrubs, "
             f"{len(self.asset_pointers(AssetKind.FOLIAGE))} foliage assets, "
             f"{len(self.asset_pointers(AssetKind.SHADER))} shaders, "
             f"{len(self.asset_pointers(AssetKind.TEXTURE))} textures, "
@@ -245,6 +254,13 @@ class RatchetTodReader(Resistance2Reader):
                 FOLIAGE_STRIDE,
                 identity="offset",
             )
+        elif kind is AssetKind.SHRUB:
+            pointers = self._record_pointers(
+                kind,
+                SECT_SHRUB,
+                SHRUB_STRIDE,
+                identity="offset",
+            )
         elif kind is AssetKind.SHADER:
             pointers = self._record_pointers(
                 kind,
@@ -263,6 +279,7 @@ class RatchetTodReader(Resistance2Reader):
             self.main.section(SECT_UFRAGS) is not None
             or self.main.section(SECT_TIE_INSTANCES) is not None
             or self.main.section(SECT_FOLIAGE_INSTANCES) is not None
+            or self.main.section(SECT_SHRUB_INSTANCES) is not None
         ):
             pointers = (AssetPointer(tuid=0, offset=0, length=0),)
         else:
@@ -295,6 +312,8 @@ class RatchetTodReader(Resistance2Reader):
             return f"Tie_{tuid:08X}"
         if kind is AssetKind.FOLIAGE:
             return f"Foliage_{tuid:08X}"
+        if kind is AssetKind.SHRUB:
+            return f"Shrub_{tuid:08X}"
         return None
 
     @property
@@ -634,6 +653,89 @@ class RatchetTodReader(Resistance2Reader):
             tuid=tuid,
             meshes=meshes,
             shader_tuids=tuple(shader_tuids),
+        )
+
+    def read_shrub(self, tuid: int) -> TieAsset:
+        base = self._pointer(AssetKind.SHRUB, tuid).offset
+        vertex_offset = self.main.u32(base)
+        index_offset = self.main.u32(base + 0x04)
+        index_count = self.main.u32(base + 0x08)
+        shader_index = self.main.u16(base + 0x20)
+        if index_count > MAX_VEGETATION_INDICES:
+            raise FormatError(
+                f"Shrub_{tuid:08X}: unreasonable index count {index_count}"
+            )
+        if index_count % 3:
+            raise FormatError(
+                f"Shrub_{tuid:08X}: index count {index_count} is not "
+                "a triangle list"
+            )
+        if not index_count:
+            return TieAsset(tuid=tuid, meshes=[], shader_tuids=())
+
+        index_section = self.vertices.require_section(SECT_LEVEL_INDICES)
+        index_byte_offset = index_offset * 2
+        index_length = index_count * 2
+        if (
+            index_byte_offset > index_section.length
+            or index_length > index_section.length - index_byte_offset
+        ):
+            raise FormatError(f"Shrub_{tuid:08X}: index buffer overrun")
+        indices = np.frombuffer(
+            self.source.read_slice(
+                self.vertices_path,
+                index_section.offset + index_byte_offset,
+                index_length,
+            ),
+            dtype=self.vertices.endian + "u2",
+            count=index_count,
+        ).astype(np.int32)
+
+        vertex_count = int(indices.max()) + 1
+        vertex_length = vertex_count * SHRUB_VERTEX_STRIDE
+        vertex_section = self.vertices.require_section(SECT_LEVEL_VERTICES)
+        if (
+            vertex_offset > vertex_section.length
+            or vertex_length > vertex_section.length - vertex_offset
+        ):
+            raise FormatError(f"Shrub_{tuid:08X}: vertex buffer overrun")
+        vertices = memoryview(
+            self.source.read_slice(
+                self.vertices_path,
+                vertex_section.offset + vertex_offset,
+                vertex_length,
+            )
+        )
+        positions = np.ndarray(
+            shape=(vertex_count, 3),
+            dtype=self.vertices.endian + "i2",
+            buffer=vertices,
+            strides=(SHRUB_VERTEX_STRIDE, 2),
+        ).astype(np.float32)
+        positions *= UFRAG_SCALE
+        uvs = np.ndarray(
+            shape=(vertex_count, 2),
+            dtype=self.vertices.endian + "f2",
+            buffer=vertices,
+            offset=0x0A,
+            strides=(SHRUB_VERTEX_STRIDE, 2),
+        ).astype(np.float32)
+        if not np.isfinite(uvs).all():
+            raise FormatError(
+                f"Shrub_{tuid:08X}: texture coordinates are not finite"
+            )
+        meshes = [
+            MeshGeometry(
+                shader_index=shader_index,
+                positions=positions,
+                uvs=uvs,
+                indices=indices,
+            )
+        ]
+        return TieAsset(
+            tuid=tuid,
+            meshes=meshes,
+            shader_tuids=self._localized_shaders(meshes),
         )
 
     def read_foliage(self, tuid: int) -> TieAsset:
@@ -1043,10 +1145,15 @@ class RatchetTodReader(Resistance2Reader):
                     )
                 )
 
+        shrub_instances = self._read_shrub_instances()
         terrain = self._read_terrain()
         shader_tuids = self._localized_shaders(terrain)
-        shrub_section = self.main.section(SECT_SHRUB_INSTANCES)
-        if not tie_instances and not foliage_instances and not terrain:
+        if (
+            not tie_instances
+            and not foliage_instances
+            and not shrub_instances
+            and not terrain
+        ):
             return []
         return [
             Zone(
@@ -1054,12 +1161,175 @@ class RatchetTodReader(Resistance2Reader):
                 tie_instances=tie_instances,
                 terrain_meshes=terrain,
                 shader_tuids=shader_tuids,
+                shrub_instances=shrub_instances,
                 foliage_instances=foliage_instances,
-                unsupported_shrub_instances=(
-                    shrub_section.count if shrub_section else 0
-                ),
             )
         ]
+
+    def _read_shrub_instances(self) -> list[PlacedInstance]:
+        section = self.main.section(SECT_SHRUB_INSTANCES)
+        if section is None:
+            return []
+        if section.count != 1:
+            raise FormatError(
+                f"{self.main_path}: expected one shrub container, found "
+                f"{section.count}"
+            )
+        if section.length < 0x60:
+            raise FormatError(
+                f"{self.main_path}: shrub container is too short"
+            )
+        base = section.offset
+        self.main.require(
+            base,
+            section.length,
+            purpose="shrub instance container",
+        )
+        instance_count = self.main.u32(base)
+        instance_offset = self.main.u32(base + 0x04)
+        cluster_count = self.main.u32(base + 0x08)
+        cluster_offset = self.main.u32(base + 0x0C)
+        if (
+            instance_count > MAX_VEGETATION_INSTANCES
+            or cluster_count > MAX_VEGETATION_INSTANCES
+        ):
+            raise FormatError(
+                f"{self.main_path}: unreasonable shrub placement counts"
+            )
+        if (
+            instance_offset > section.length
+            or instance_count * SHRUB_INSTANCE_STRIDE
+            > section.length - instance_offset
+        ):
+            raise FormatError(
+                f"{self.main_path}: shrub instance table overruns its "
+                "container"
+            )
+        if (
+            cluster_offset > section.length
+            or cluster_count * SHRUB_CLUSTER_STRIDE
+            > section.length - cluster_offset
+        ):
+            raise FormatError(
+                f"{self.main_path}: shrub cluster table overruns its "
+                "container"
+            )
+
+        shrub_pointers = self.asset_pointers(AssetKind.SHRUB)
+        if len(shrub_pointers) > MAX_TOD_SHRUB_CLASSES:
+            raise FormatError(
+                f"{self.main_path}: shrub clusters can address at most "
+                f"{MAX_TOD_SHRUB_CLASSES} assets, found "
+                f"{len(shrub_pointers)}"
+            )
+        referenced = np.zeros(instance_count, dtype=np.bool_)
+        instances: list[PlacedInstance] = []
+        for cluster_index in range(cluster_count):
+            cluster = (
+                base + cluster_offset + cluster_index * SHRUB_CLUSTER_STRIDE
+            )
+            local_ranges = tuple(
+                (
+                    self.main.u8(cluster + 0x40 + range_index * 2),
+                    self.main.u8(cluster + 0x41 + range_index * 2),
+                )
+                for range_index in range(4)
+            )
+            active_ranges = tuple(
+                item for item in local_ranges if item[0]
+            )
+            shrub_mask = self.main.u32(cluster + 0x4C)
+            shrub_indices = tuple(
+                index
+                for index in range(MAX_TOD_SHRUB_CLASSES - 1, -1, -1)
+                if shrub_mask & (1 << index)
+            )
+            if len(active_ranges) != len(shrub_indices):
+                raise FormatError(
+                    f"{self.main_path}: shrub cluster {cluster_index} has "
+                    f"{len(active_ranges)} populated ranges for "
+                    f"{len(shrub_indices)} assets"
+                )
+            first_instance = self.main.u16(cluster + 0x54)
+            for shrub_index, (count, offset) in zip(
+                shrub_indices,
+                active_ranges,
+                strict=True,
+            ):
+                if shrub_index >= len(shrub_pointers):
+                    raise FormatError(
+                        f"{self.main_path}: shrub cluster {cluster_index} "
+                        f"references missing shrub {shrub_index}"
+                    )
+                if first_instance + offset + count > instance_count:
+                    raise FormatError(
+                        f"{self.main_path}: shrub cluster {cluster_index} "
+                        "instance range is out of bounds"
+                    )
+                for local_instance in range(count):
+                    instance_index = (
+                        first_instance + offset + local_instance
+                    )
+                    if referenced[instance_index]:
+                        raise FormatError(
+                            f"{self.main_path}: shrub instance "
+                            f"{instance_index} is referenced more than once"
+                        )
+                    referenced[instance_index] = True
+                    item = (
+                        base
+                        + instance_offset
+                        + instance_index * SHRUB_INSTANCE_STRIDE
+                    )
+                    position = np.asarray(
+                        self.main.vec3(item),
+                        dtype=np.float32,
+                    )
+                    position *= YARD_TO_METERS
+                    scale = self.main.f32(item + 0x0C)
+                    row_x = np.asarray(
+                        self.main.vec3(item + 0x10),
+                        dtype=np.float32,
+                    )
+                    row_y = np.asarray(
+                        self.main.vec3(item + 0x20),
+                        dtype=np.float32,
+                    )
+                    if (
+                        not np.isfinite(position).all()
+                        or not np.isfinite(scale)
+                        or not np.isfinite(row_x).all()
+                        or not np.isfinite(row_y).all()
+                    ):
+                        raise FormatError(
+                            f"{self.main_path}: shrub instance "
+                            f"{instance_index} transform is not finite"
+                        )
+                    row_z = np.cross(row_x, row_y)
+                    matrix = np.eye(4, dtype=np.float32)
+                    matrix[:3, :3] = (
+                        np.stack((row_x, row_y, row_z)).T * scale
+                    )
+                    matrix[:3, 3] = position
+                    instances.append(
+                        PlacedInstance(
+                            asset_tuid=shrub_pointers[shrub_index].tuid,
+                            instance_tuid=item,
+                            name=(
+                                f"Shrub_{shrub_index:02X}_"
+                                f"{cluster_index:04X}_"
+                                f"{local_instance:02X}"
+                            ),
+                            matrix=matrix,
+                        )
+                    )
+        if instance_count and not referenced.all():
+            missing = int(np.flatnonzero(~referenced)[0])
+            raise FormatError(
+                f"{self.main_path}: shrub instance {missing} is not "
+                "referenced by a cluster"
+            )
+        return instances
 
     @staticmethod
     def _validate_stride(

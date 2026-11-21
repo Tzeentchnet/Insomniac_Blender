@@ -5,8 +5,9 @@ This adapter targets the USA `BCUS98127` v02.00 retail disc. It validates
 any level.
 
 No game payloads are distributed. The bundled catalog contains only numeric
-asset metadata and deterministic fallback names: 3,012 Mobys, 2,048 Ties,
-and 10,521 level-scoped Materials across 20 levels.
+asset metadata and deterministic fallback names: 15,629 level-scoped
+references across 20 levels, comprising 3,012 Mobys, 2,048 Ties, 34 Shrubs,
+14 Foliage assets, and 10,521 Materials.
 
 ## Archive topology
 
@@ -29,6 +30,7 @@ Most metadata is stored directly in a big-endian IGHW 1.1 `main.dat`.
 |---|---|
 | Moby | index in `main.dat:0xD100` |
 | Tie | byte offset of its `0x3400` header |
+| Shrub | byte offset of its `0xB100` descriptor |
 | Foliage | byte offset of its `0xA200` descriptor |
 | Shader | index in `main.dat:0x5000` |
 | Texture | byte offset of its `0x5200` record |
@@ -37,7 +39,8 @@ These values repeat in different levels. Catalog identifiers therefore use
 `KIND:level:VALUE`; existing R2/R3 catalog identifiers remain unchanged.
 
 The retail debug archive exposes no usable Moby, Tie, or Material names. The
-reader uses `Moby_XXXX`, `Tie_XXXXXXXX`, and level-scoped shader identities.
+reader uses `Moby_XXXX`, `Tie_XXXXXXXX`, `Shrub_XXXXXXXX`, and level-scoped
+shader identities.
 
 ## Mobys
 
@@ -187,6 +190,52 @@ indexes the texture table. The reader gives it a separate foliage shader
 identity with masked alpha and no unrelated normal, packed, or detail slots.
 Blender's material remains double-sided.
 
+## Shrubs
+
+Section `0xB100` contains `0x30`-byte embedded Shrub descriptors. A Shrub's
+level-local identity is the descriptor byte offset.
+
+| Offset | Type | Meaning |
+|---:|---|---|
+| `0x00` | `u32` | vertex byte offset in `vertices.dat:0x9000` |
+| `0x04` | `u32` | index offset in `u16` units in `vertices.dat:0x9100` |
+| `0x08` | `u32` | triangle-list index count |
+| `0x20` | `u16` | level-global shader index |
+
+TOD Shrub vertices have stride `0x0E`, unlike RFoM's `0x10`-byte format:
+
+| Offset | Type | Meaning |
+|---:|---|---|
+| `0x00` | `i16[3]` | local position |
+| `0x06` | `u8[4]` | packed vertex metadata, retained as unverified |
+| `0x0A` | `f16[2]` | UV |
+
+Positions use the same fixed-point yard scale as TOD UFrags:
+`raw * 0.9144 / 256`. The USA v02.00 disc contains 34 descriptors across
+11 levels, totaling 12,466 vertices and 15,085 triangles.
+
+Section `0x9540` contains one open-ended clustered placement container:
+
+| Header offset | Type | Meaning |
+|---:|---|---|
+| `0x00` | `u32` | raw instance count |
+| `0x04` | `u32` | instance-table byte offset |
+| `0x08` | `u32` | cluster count |
+| `0x0C` | `u32` | cluster-table byte offset |
+
+Clusters have stride `0x60`. Four `(u8 count, u8 offset)` ranges begin at
+`0x40`, a 32-bit Shrub-class mask is at `0x4C`, and a 16-bit first-instance
+index is at `0x54`. Set class bits are consumed from high to low and paired
+with the populated local ranges. Instances have stride `0x40`: position and
+uniform scale are at `0x00`/`0x0C`, two basis rows are at `0x10`/`0x20`, and
+the third row is their cross product. Placement positions are converted from
+yards with `0.9144`.
+
+Across the 11 Shrub-bearing levels, 10,997 clusters resolve all 103,300 raw
+instances exactly once, without missing or duplicate ranges. The reader
+rejects out-of-bounds ranges, class-mask references without a matching
+descriptor, non-finite transforms, and unreferenced raw instances.
+
 ## Level geometry and placements
 
 TOD has one logical zone per level.
@@ -196,6 +245,8 @@ TOD has one logical zone per level.
 - `main.dat:0x9340` contains `0xE0`-byte foliage placements. The row-major
   matrix begins at `0x00`, and the matching `0xA200` descriptor pointer is at
   `0xC4`.
+- `main.dat:0x9540` contains the clustered Shrub placement container
+  documented above.
 - `main.dat:0x6200` contains `0x80`-byte UFrags. Index and vertex offsets are
   at `0x40`/`0x44`, counts at `0x48`/`0x4A`, shader index at `0x50`, and
   position at `0x60`.
@@ -207,4 +258,5 @@ TOD has one logical zone per level.
 
 The current adapter does not decode the separate non-IGHW `collision.dat`
 layout or unverified secondary-bangle/LOD semantics. Runtime foliage wind,
-custom normals, and camera-facing billboard behavior are not reproduced.
+Shrub wind and packed vertex metadata, Foliage custom normals, and
+camera-facing billboard behavior are not reproduced.

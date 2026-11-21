@@ -270,14 +270,13 @@ def _catalog(
 
 
 def _kind_filter(settings: bpy.types.PropertyGroup) -> AssetKind | None:
-    value = settings.asset_kind_filter
-    if value == "MOBY":
-        return AssetKind.MOBY
-    if value == "TIE":
-        return AssetKind.TIE
-    if value == "SHADER":
-        return AssetKind.SHADER
-    return None
+    return {
+        "MOBY": AssetKind.MOBY,
+        "TIE": AssetKind.TIE,
+        "SHRUB": AssetKind.SHRUB,
+        "FOLIAGE": AssetKind.FOLIAGE,
+        "SHADER": AssetKind.SHADER,
+    }.get(settings.asset_kind_filter)
 
 
 def _level_filter(
@@ -597,9 +596,15 @@ class InsomniacSceneSettings(bpy.types.PropertyGroup):
         name="Asset Kind",
         description="Only list assets of one kind",
         items=[
-            (ALL_KINDS, "All", "List Mobys, Ties, and materials"),
+            (
+                ALL_KINDS,
+                "All",
+                "List Mobys, Ties, Shrubs, Foliage, and materials",
+            ),
             ("MOBY", "Mobys", "Animated or dynamic models"),
             ("TIE", "Ties", "Static level meshes"),
+            ("SHRUB", "Shrubs", "Static vegetation meshes"),
+            ("FOLIAGE", "Foliage", "Branch and sprite-card vegetation"),
             ("SHADER", "Materials", "Standalone shader materials"),
         ],
         default=ALL_KINDS,

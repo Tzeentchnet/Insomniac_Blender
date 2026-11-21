@@ -24,14 +24,24 @@ class Resistance2CatalogTests(unittest.TestCase):
         self.assertEqual(catalog.region, "USA BCUS98107 v1.00")
         self.assertEqual(len(catalog.levels), 41)
         self.assertIn("level20", catalog.levels)
-        self.assertEqual(len(catalog.assets), 36034)
+        self.assertEqual(len(catalog.assets), 36321)
+        self.assertEqual(
+            (
+                sum(asset.kind is AssetKind.SHRUB for asset in catalog.assets),
+                sum(
+                    asset.kind is AssetKind.FOLIAGE
+                    for asset in catalog.assets
+                ),
+            ),
+            (184, 103),
+        )
         level20 = filter_catalog_assets(
             catalog.assets,
             "",
             hide_duplicates=False,
             level="level20",
         )
-        self.assertEqual(len(level20), 1010)
+        self.assertEqual(len(level20), 1032)
         self.assertTrue(
             all(asset.identifier.count(":") == 2 for asset in level20)
         )
@@ -43,7 +53,7 @@ class Resistance2CatalogTests(unittest.TestCase):
         self.assertEqual(catalog.region, "USA")
         self.assertEqual(len(catalog.levels), 27)
         self.assertEqual(catalog.levels[0], "lobby")
-        self.assertEqual(len(catalog.assets), 4130)
+        self.assertEqual(len(catalog.assets), 7588)
         self.assertEqual(catalog.assets[0].identifier, "MOBY:00897CA26A876DEF")
         self.assertEqual(
             catalog.asset("MOBY:00897CA26A876DEF").levels[0],
@@ -102,7 +112,7 @@ class Resistance2CatalogTests(unittest.TestCase):
                     hide_duplicates=True,
                 )
             ),
-            4127,
+            7585,
         )
 
         test_tentacle = filter_catalog_assets(
@@ -131,8 +141,41 @@ class Resistance2CatalogTests(unittest.TestCase):
             hide_duplicates=False,
             kind=AssetKind.TIE,
         )
-        self.assertEqual((len(mobys), len(ties)), (923, 3207))
+        shrubs = filter_catalog_assets(
+            catalog.assets,
+            "",
+            hide_duplicates=False,
+            kind=AssetKind.SHRUB,
+        )
+        foliage = filter_catalog_assets(
+            catalog.assets,
+            "",
+            hide_duplicates=False,
+            kind=AssetKind.FOLIAGE,
+        )
+        materials = filter_catalog_assets(
+            catalog.assets,
+            "",
+            hide_duplicates=False,
+            kind=AssetKind.SHADER,
+        )
+        self.assertEqual(
+            (
+                len(mobys),
+                len(ties),
+                len(shrubs),
+                len(foliage),
+                len(materials),
+            ),
+            (923, 3207, 77, 26, 3355),
+        )
         self.assertTrue(all(asset.kind is AssetKind.MOBY for asset in mobys))
+        self.assertTrue(
+            all(asset.kind is AssetKind.SHRUB for asset in shrubs)
+        )
+        self.assertTrue(
+            all(asset.kind is AssetKind.FOLIAGE for asset in foliage)
+        )
 
         lobby = filter_catalog_assets(
             catalog.assets,
@@ -140,10 +183,10 @@ class Resistance2CatalogTests(unittest.TestCase):
             hide_duplicates=False,
             level="lobby",
         )
-        self.assertEqual(len(lobby), 56)
+        self.assertEqual(len(lobby), 264)
         self.assertTrue(all("lobby" in asset.levels for asset in lobby))
 
-        # Filters combine, and most of the catalog lives outside the lobby.
+        # Filters combine, and most model geometry lives outside the lobby.
         chicago_ties = filter_catalog_assets(
             catalog.assets,
             "",
@@ -184,6 +227,9 @@ class Resistance2CatalogTests(unittest.TestCase):
                                 "entities/example/test_asset/"
                                 "test_asset.entity.irb"
                             ),
+                            "SHRUB:0000000000002468": (
+                                "props/vegetation/test_shrub.entity.irb"
+                            ),
                             "SHADER:0000000000009ABC": "example_material",
                         },
                         "levels": [
@@ -191,6 +237,8 @@ class Resistance2CatalogTests(unittest.TestCase):
                                 "id": "test_level",
                                 "mobys": ["0x0000000000001234"],
                                 "ties": ["0x0000000000005678"],
+                                "shrubs": ["0x0000000000002468"],
+                                "foliage": ["0x0000000000001357"],
                                 "materials": ["0x0000000000009ABC"],
                             }
                         ],
@@ -207,6 +255,8 @@ class Resistance2CatalogTests(unittest.TestCase):
             {
                 "MOBY:0000000000001234",
                 "TIE:0000000000005678",
+                "SHRUB:0000000000002468",
+                "FOLIAGE:0000000000001357",
                 "SHADER:0000000000009ABC",
             },
         )
@@ -222,6 +272,15 @@ class Resistance2CatalogTests(unittest.TestCase):
         self.assertEqual(
             tie.label,
             "Tie 0x0000000000005678 - test_level",
+        )
+        shrub = catalog.asset("SHRUB:0000000000002468")
+        self.assertEqual(shrub.kind, AssetKind.SHRUB)
+        self.assertEqual(shrub.display_name, "Test Shrub")
+        foliage = catalog.asset("FOLIAGE:0000000000001357")
+        self.assertEqual(foliage.kind, AssetKind.FOLIAGE)
+        self.assertEqual(
+            foliage.label,
+            "Foliage 0x0000000000001357 - test_level",
         )
         material = catalog.asset("SHADER:0000000000009ABC")
         self.assertEqual(material.kind, AssetKind.SHADER)
@@ -278,12 +337,16 @@ class Resistance2CatalogTests(unittest.TestCase):
                                 "id": "level_a",
                                 "mobys": ["0x0000000000000001"],
                                 "ties": [],
+                                "shrubs": ["0x0000000000000002"],
+                                "foliage": ["0x0000000000000003"],
                                 "materials": ["0x0000000000000001"],
                             },
                             {
                                 "id": "level_b",
                                 "mobys": ["0x0000000000000001"],
                                 "ties": [],
+                                "shrubs": ["0x0000000000000002"],
+                                "foliage": ["0x0000000000000003"],
                                 "materials": ["0x0000000000000001"],
                             },
                         ],
@@ -296,12 +359,16 @@ class Resistance2CatalogTests(unittest.TestCase):
                 "RATCHET_TOD",
             )
 
-        self.assertEqual(len(catalog.assets), 4)
+        self.assertEqual(len(catalog.assets), 8)
         self.assertEqual(
             {asset.identifier for asset in catalog.assets},
             {
                 "MOBY:level_a:0000000000000001",
                 "MOBY:level_b:0000000000000001",
+                "SHRUB:level_a:0000000000000002",
+                "SHRUB:level_b:0000000000000002",
+                "FOLIAGE:level_a:0000000000000003",
+                "FOLIAGE:level_b:0000000000000003",
                 "SHADER:level_a:0000000000000001",
                 "SHADER:level_b:0000000000000001",
             },
@@ -319,7 +386,7 @@ class Resistance2CatalogTests(unittest.TestCase):
 
         self.assertEqual(catalog.region, "USA v02.00")
         self.assertEqual(len(catalog.levels), 20)
-        self.assertEqual(len(catalog.assets), 15581)
+        self.assertEqual(len(catalog.assets), 15629)
         self.assertEqual(
             sum(asset.kind is AssetKind.MOBY for asset in catalog.assets),
             3012,
@@ -327,6 +394,17 @@ class Resistance2CatalogTests(unittest.TestCase):
         self.assertEqual(
             sum(asset.kind is AssetKind.TIE for asset in catalog.assets),
             2048,
+        )
+        self.assertEqual(
+            sum(
+                asset.kind is AssetKind.FOLIAGE
+                for asset in catalog.assets
+            ),
+            14,
+        )
+        self.assertEqual(
+            sum(asset.kind is AssetKind.SHRUB for asset in catalog.assets),
+            34,
         )
         self.assertEqual(
             sum(asset.kind is AssetKind.SHADER for asset in catalog.assets),
@@ -348,7 +426,7 @@ class Resistance2CatalogTests(unittest.TestCase):
         self.assertEqual(catalog.region, "USA")
         self.assertEqual(len(catalog.levels), 27)
         self.assertEqual(catalog.levels[0], "lobby")
-        self.assertEqual(len(catalog.assets), 5820)
+        self.assertEqual(len(catalog.assets), 10482)
         self.assertEqual(
             sum(asset.kind is AssetKind.MOBY for asset in catalog.assets),
             969,
@@ -356,6 +434,21 @@ class Resistance2CatalogTests(unittest.TestCase):
         self.assertEqual(
             sum(asset.kind is AssetKind.TIE for asset in catalog.assets),
             4851,
+        )
+        self.assertEqual(
+            sum(asset.kind is AssetKind.SHRUB for asset in catalog.assets),
+            70,
+        )
+        self.assertEqual(
+            sum(
+                asset.kind is AssetKind.FOLIAGE
+                for asset in catalog.assets
+            ),
+            13,
+        )
+        self.assertEqual(
+            sum(asset.kind is AssetKind.SHADER for asset in catalog.assets),
+            4579,
         )
         self.assertIn("Resistance 3", catalog.assets[0].description)
 

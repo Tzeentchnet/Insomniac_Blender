@@ -6,6 +6,7 @@
   "game": "RATCHET_TOD",
   "levels": [
     {
+      "foliage": [],
       "id": "apogee_space_station",
       "materials": [
         "0x0000000000000000",
@@ -790,6 +791,11 @@
         "0x00000000000000A2",
         "0x00000000000000A3"
       ],
+      "shrubs": [
+        "0x0000000000D66D00",
+        "0x0000000000D66D30",
+        "0x0000000000D66D60"
+      ],
       "ties": [
         "0x0000000000CB4200",
         "0x0000000000CB4280",
@@ -914,6 +920,9 @@
       ]
     },
     {
+      "foliage": [
+        "0x0000000000D4D080"
+      ],
       "id": "cobalia",
       "materials": [
         "0x0000000000000000",
@@ -1749,6 +1758,9 @@
         "0x0000000000000096",
         "0x0000000000000097"
       ],
+      "shrubs": [
+        "0x0000000000D75A80"
+      ],
       "ties": [
         "0x0000000000CCF680",
         "0x0000000000CCF700",
@@ -1863,6 +1875,7 @@
       ]
     },
     {
+      "foliage": [],
       "id": "cragmite_ruins",
       "materials": [
         "0x0000000000000000",
@@ -2582,6 +2595,10 @@
         "0x00000000000000B3",
         "0x00000000000000B4"
       ],
+      "shrubs": [
+        "0x0000000000114B00",
+        "0x0000000000114B30"
+      ],
       "ties": [
         "0x0000000000037D00",
         "0x0000000000037D80",
@@ -2672,6 +2689,7 @@
       ]
     },
     {
+      "foliage": [],
       "id": "fastoon",
       "materials": [
         "0x0000000000000000",
@@ -3298,6 +3316,9 @@
         "0x0000000000000096",
         "0x0000000000000097"
       ],
+      "shrubs": [
+        "0x0000000000AB6180"
+      ],
       "ties": [
         "0x000000000095B980",
         "0x000000000095BA00",
@@ -3407,6 +3428,7 @@
       ]
     },
     {
+      "foliage": [],
       "id": "fastoon_return",
       "materials": [
         "0x0000000000000000",
@@ -4156,6 +4178,9 @@
         "0x00000000000000B4",
         "0x00000000000000B5"
       ],
+      "shrubs": [
+        "0x000000000127DE00"
+      ],
       "ties": [
         "0x0000000001247900",
         "0x0000000001247980",
@@ -4246,6 +4271,11 @@
       ]
     },
     {
+      "foliage": [
+        "0x0000000001F43000",
+        "0x0000000001F430B0",
+        "0x0000000001F43160"
+      ],
       "id": "imperial_fight_fest",
       "materials": [
         "0x0000000000000000",
@@ -5036,6 +5066,9 @@
         "0x00000000000000D1",
         "0x00000000000000D2"
       ],
+      "shrubs": [
+        "0x0000000001F76B80"
+      ],
       "ties": [
         "0x0000000001DD5500",
         "0x0000000001DD5580",
@@ -5144,6 +5177,7 @@
       ]
     },
     {
+      "foliage": [],
       "id": "iris",
       "materials": [
         "0x0000000000000000",
@@ -5867,6 +5901,7 @@
         "0x00000000000000A9",
         "0x00000000000000AA"
       ],
+      "shrubs": [],
       "ties": [
         "0x0000000000EB9280",
         "0x0000000000EB9300",
@@ -6010,6 +6045,12 @@
       ]
     },
     {
+      "foliage": [
+        "0x00000000016A8E80",
+        "0x00000000016A8F30",
+        "0x00000000016A8FE0",
+        "0x00000000016A9090"
+      ],
       "id": "kerchu_city",
       "materials": [
         "0x0000000000000000",
@@ -6973,6 +7014,23 @@
         "0x00000000000000AA",
         "0x00000000000000AB"
       ],
+      "shrubs": [
+        "0x00000000017EAF80",
+        "0x00000000017EAFB0",
+        "0x00000000017EAFE0",
+        "0x00000000017EB010",
+        "0x00000000017EB040",
+        "0x00000000017EB070",
+        "0x00000000017EB0A0",
+        "0x00000000017EB0D0",
+        "0x00000000017EB100",
+        "0x00000000017EB130",
+        "0x00000000017EB160",
+        "0x00000000017EB190",
+        "0x00000000017EB1C0",
+        "0x00000000017EB1F0",
+        "0x00000000017EB220"
+      ],
       "ties": [
         "0x0000000001558C80",
         "0x0000000001558D00",
@@ -7225,6 +7283,7 @@
       ]
     },
     {
+      "foliage": [],
       "id": "level_transitions",
       "materials": [
         "0x0000000000000000",
@@ -7347,6 +7406,7 @@
         "0x0000000000000024",
         "0x0000000000000025"
       ],
+      "shrubs": [],
       "ties": [
         "0x0000000000012E00",
         "0x0000000000012E80",
@@ -7354,6 +7414,7 @@
       ]
     },
     {
+      "foliage": [],
       "id": "meridian_city",
       "materials": [
         "0x0000000000000000",
@@ -8188,6 +8249,12 @@
         "0x00000000000000C6",
         "0x00000000000000C7"
       ],
+      "shrubs": [
+        "0x000000000111E800",
+        "0x000000000111E830",
+        "0x000000000111E860",
+        "0x000000000111E890"
+      ],
       "ties": [
         "0x0000000001053380",
         "0x0000000001053400",
@@ -8330,6 +8397,10 @@
       ]
     },
     {
+      "foliage": [
+        "0x0000000001074C80",
+        "0x0000000001074D30"
+      ],
       "id": "metropolis",
       "materials": [
         "0x0000000000000000",
@@ -9167,6 +9238,7 @@
         "0x00000000000000C7",
         "0x00000000000000C8"
       ],
+      "shrubs": [],
       "ties": [
         "0x0000000000FC7A00",
         "0x0000000000FC7A80",
@@ -9364,6 +9436,9 @@
       ]
     },
     {
+      "foliage": [
+        "0x0000000001268F00"
+      ],
       "id": "pirate_base",
       "materials": [
         "0x0000000000000000",
@@ -10185,6 +10260,10 @@
         "0x00000000000000AC",
         "0x00000000000000AD"
       ],
+      "shrubs": [
+        "0x00000000011E7C80",
+        "0x00000000011E7CB0"
+      ],
       "ties": [
         "0x00000000010A0A00",
         "0x00000000010A0A80",
@@ -10341,6 +10420,7 @@
       ]
     },
     {
+      "foliage": [],
       "id": "rykan_v",
       "materials": [
         "0x0000000000000000",
@@ -11226,6 +11306,10 @@
         "0x00000000000000A6",
         "0x00000000000000A7"
       ],
+      "shrubs": [
+        "0x00000000017B4980",
+        "0x00000000017B49B0"
+      ],
       "ties": [
         "0x00000000016ECD80",
         "0x00000000016ECE00",
@@ -11309,6 +11393,9 @@
       ]
     },
     {
+      "foliage": [
+        "0x000000000109CC00"
+      ],
       "id": "sargasso",
       "materials": [
         "0x0000000000000000",
@@ -12160,6 +12247,10 @@
         "0x00000000000000A8",
         "0x00000000000000A9"
       ],
+      "shrubs": [
+        "0x000000000101DA80",
+        "0x000000000101DAB0"
+      ],
       "ties": [
         "0x0000000000F12800",
         "0x0000000000F12880",
@@ -12293,6 +12384,7 @@
       ]
     },
     {
+      "foliage": [],
       "id": "slags_fleet",
       "materials": [
         "0x0000000000000000",
@@ -13030,6 +13122,7 @@
         "0x00000000000000A2",
         "0x00000000000000A3"
       ],
+      "shrubs": [],
       "ties": [
         "0x0000000000ED5280",
         "0x0000000000ED5300",
@@ -13092,6 +13185,7 @@
       ]
     },
     {
+      "foliage": [],
       "id": "space_combat_i",
       "materials": [
         "0x0000000000000000",
@@ -13381,6 +13475,7 @@
         "0x0000000000000031",
         "0x0000000000000032"
       ],
+      "shrubs": [],
       "ties": [
         "0x0000000000722E00",
         "0x0000000000722E80",
@@ -13392,6 +13487,7 @@
       ]
     },
     {
+      "foliage": [],
       "id": "space_combat_ii",
       "materials": [
         "0x0000000000000000",
@@ -13563,6 +13659,7 @@
         "0x000000000000002E",
         "0x000000000000002F"
       ],
+      "shrubs": [],
       "ties": [
         "0x00000000001E0980",
         "0x00000000001E0A00",
@@ -13589,6 +13686,7 @@
       ]
     },
     {
+      "foliage": [],
       "id": "space_combat_iii",
       "materials": [
         "0x0000000000000000",
@@ -13793,6 +13891,7 @@
         "0x0000000000000034",
         "0x0000000000000035"
       ],
+      "shrubs": [],
       "ties": [
         "0x0000000000201680",
         "0x0000000000201700",
@@ -13823,6 +13922,10 @@
       ]
     },
     {
+      "foliage": [
+        "0x0000000001252E80",
+        "0x0000000001252F30"
+      ],
       "id": "stratus_city",
       "materials": [
         "0x0000000000000000",
@@ -14694,6 +14797,7 @@
         "0x00000000000000AB",
         "0x00000000000000AC"
       ],
+      "shrubs": [],
       "ties": [
         "0x00000000011D5A00",
         "0x00000000011D5A80",
@@ -14840,6 +14944,7 @@
       ]
     },
     {
+      "foliage": [],
       "id": "zordoom_prison",
       "materials": [
         "0x0000000000000000",
@@ -15662,6 +15767,7 @@
         "0x00000000000000B8",
         "0x00000000000000B9"
       ],
+      "shrubs": [],
       "ties": [
         "0x0000000001096780",
         "0x0000000001096800",
@@ -15768,6 +15874,20 @@
     }
   ],
   "names": {
+    "FOLIAGE:cobalia:0000000000D4D080": "Foliage_00D4D080",
+    "FOLIAGE:imperial_fight_fest:0000000001F43000": "Foliage_01F43000",
+    "FOLIAGE:imperial_fight_fest:0000000001F430B0": "Foliage_01F430B0",
+    "FOLIAGE:imperial_fight_fest:0000000001F43160": "Foliage_01F43160",
+    "FOLIAGE:kerchu_city:00000000016A8E80": "Foliage_016A8E80",
+    "FOLIAGE:kerchu_city:00000000016A8F30": "Foliage_016A8F30",
+    "FOLIAGE:kerchu_city:00000000016A8FE0": "Foliage_016A8FE0",
+    "FOLIAGE:kerchu_city:00000000016A9090": "Foliage_016A9090",
+    "FOLIAGE:metropolis:0000000001074C80": "Foliage_01074C80",
+    "FOLIAGE:metropolis:0000000001074D30": "Foliage_01074D30",
+    "FOLIAGE:pirate_base:0000000001268F00": "Foliage_01268F00",
+    "FOLIAGE:sargasso:000000000109CC00": "Foliage_0109CC00",
+    "FOLIAGE:stratus_city:0000000001252E80": "Foliage_01252E80",
+    "FOLIAGE:stratus_city:0000000001252F30": "Foliage_01252F30",
     "MOBY:apogee_space_station:0000000000000000": "Moby_0000",
     "MOBY:apogee_space_station:0000000000000001": "Moby_0001",
     "MOBY:apogee_space_station:0000000000000002": "Moby_0002",
@@ -18780,6 +18900,40 @@
     "MOBY:zordoom_prison:00000000000000B7": "Moby_00B7",
     "MOBY:zordoom_prison:00000000000000B8": "Moby_00B8",
     "MOBY:zordoom_prison:00000000000000B9": "Moby_00B9",
+    "SHRUB:apogee_space_station:0000000000D66D00": "Shrub_00D66D00",
+    "SHRUB:apogee_space_station:0000000000D66D30": "Shrub_00D66D30",
+    "SHRUB:apogee_space_station:0000000000D66D60": "Shrub_00D66D60",
+    "SHRUB:cobalia:0000000000D75A80": "Shrub_00D75A80",
+    "SHRUB:cragmite_ruins:0000000000114B00": "Shrub_00114B00",
+    "SHRUB:cragmite_ruins:0000000000114B30": "Shrub_00114B30",
+    "SHRUB:fastoon:0000000000AB6180": "Shrub_00AB6180",
+    "SHRUB:fastoon_return:000000000127DE00": "Shrub_0127DE00",
+    "SHRUB:imperial_fight_fest:0000000001F76B80": "Shrub_01F76B80",
+    "SHRUB:kerchu_city:00000000017EAF80": "Shrub_017EAF80",
+    "SHRUB:kerchu_city:00000000017EAFB0": "Shrub_017EAFB0",
+    "SHRUB:kerchu_city:00000000017EAFE0": "Shrub_017EAFE0",
+    "SHRUB:kerchu_city:00000000017EB010": "Shrub_017EB010",
+    "SHRUB:kerchu_city:00000000017EB040": "Shrub_017EB040",
+    "SHRUB:kerchu_city:00000000017EB070": "Shrub_017EB070",
+    "SHRUB:kerchu_city:00000000017EB0A0": "Shrub_017EB0A0",
+    "SHRUB:kerchu_city:00000000017EB0D0": "Shrub_017EB0D0",
+    "SHRUB:kerchu_city:00000000017EB100": "Shrub_017EB100",
+    "SHRUB:kerchu_city:00000000017EB130": "Shrub_017EB130",
+    "SHRUB:kerchu_city:00000000017EB160": "Shrub_017EB160",
+    "SHRUB:kerchu_city:00000000017EB190": "Shrub_017EB190",
+    "SHRUB:kerchu_city:00000000017EB1C0": "Shrub_017EB1C0",
+    "SHRUB:kerchu_city:00000000017EB1F0": "Shrub_017EB1F0",
+    "SHRUB:kerchu_city:00000000017EB220": "Shrub_017EB220",
+    "SHRUB:meridian_city:000000000111E800": "Shrub_0111E800",
+    "SHRUB:meridian_city:000000000111E830": "Shrub_0111E830",
+    "SHRUB:meridian_city:000000000111E860": "Shrub_0111E860",
+    "SHRUB:meridian_city:000000000111E890": "Shrub_0111E890",
+    "SHRUB:pirate_base:00000000011E7C80": "Shrub_011E7C80",
+    "SHRUB:pirate_base:00000000011E7CB0": "Shrub_011E7CB0",
+    "SHRUB:rykan_v:00000000017B4980": "Shrub_017B4980",
+    "SHRUB:rykan_v:00000000017B49B0": "Shrub_017B49B0",
+    "SHRUB:sargasso:000000000101DA80": "Shrub_0101DA80",
+    "SHRUB:sargasso:000000000101DAB0": "Shrub_0101DAB0",
     "TIE:apogee_space_station:0000000000CB4200": "Tie_00CB4200",
     "TIE:apogee_space_station:0000000000CB4280": "Tie_00CB4280",
     "TIE:apogee_space_station:0000000000CB4300": "Tie_00CB4300",

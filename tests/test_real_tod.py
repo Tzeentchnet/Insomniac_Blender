@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import os
+import tempfile
 import unittest
+from collections import Counter
 from pathlib import Path
 
 import numpy as np
@@ -27,6 +29,78 @@ class RealRatchetTodIsoTests(unittest.TestCase):
         levels = list_game_levels(Path(REAL_ISO), game_label=adapter.label)
         self.assertEqual(len(levels), 20)
         self.assertIn("metropolis", levels)
+
+    def test_decodes_kerchu_city_shrubs(self) -> None:
+        adapter = get_game_adapter("RATCHET_TOD")
+        with tempfile.TemporaryDirectory() as temporary:
+            prepared = adapter.prepare_catalog_level(
+                Path(REAL_ISO),
+                "kerchu_city",
+                temporary,
+                validate_iso=False,
+            )
+            with GameSource.open(prepared) as source:
+                reader = RatchetTodReader(source)
+                pointers = reader.asset_pointers(AssetKind.SHRUB)
+                self.assertEqual(len(pointers), 15)
+
+                vertex_count = 0
+                triangle_count = 0
+                alpha_modes: Counter[str] = Counter()
+                for pointer in pointers:
+                    shrub = reader.read_shrub(pointer.tuid)
+                    self.assertEqual(len(shrub.meshes), 1)
+                    mesh = shrub.meshes[0]
+                    self.assertTrue(np.isfinite(mesh.positions).all())
+                    self.assertTrue(np.isfinite(mesh.uvs).all())
+                    self.assertLess(int(mesh.indices.max()), len(mesh.positions))
+                    vertex_count += len(mesh.positions)
+                    triangle_count += len(mesh.indices) // 3
+
+                    shader = reader.read_shader(shrub.shader_tuids[0])
+                    alpha_modes[shader.alpha_mode] += 1
+                    self.assertIsNotNone(shader.albedo_texture_id)
+
+                self.assertEqual(vertex_count, 4387)
+                self.assertEqual(triangle_count, 5998)
+                self.assertEqual(
+                    alpha_modes,
+                    {"MASK": 10, "OPAQUE": 4, "BLEND": 1},
+                )
+
+                zone = reader.read_zones()[0]
+                self.assertEqual(len(zone.shrub_instances), 11857)
+                self.assertEqual(zone.unsupported_shrub_instances, 0)
+                self.assertTrue(
+                    all(
+                        np.isfinite(instance.matrix).all()
+                        for instance in zone.shrub_instances
+                    )
+                )
+                counts = Counter(
+                    instance.asset_tuid
+                    for instance in zone.shrub_instances
+                )
+                self.assertEqual(
+                    [counts[pointer.tuid] for pointer in pointers],
+                    [
+                        559,
+                        108,
+                        187,
+                        318,
+                        37,
+                        9329,
+                        69,
+                        312,
+                        83,
+                        6,
+                        4,
+                        133,
+                        8,
+                        696,
+                        8,
+                    ],
+                )
 
 
 @unittest.skipUnless(REAL_SOURCE, "TOD_LEVEL_SOURCE is not set")

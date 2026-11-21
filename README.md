@@ -37,7 +37,7 @@ both fields from `PARAM.SFO`.
 | Root `GAME.PSARC` topology | Read in place across ISO multi-extents; only the selected level resources are decompressed |
 | Moby models, skeletons, skin weights, and inline animations | Supported with an RFoM-specific playback profile |
 | Tie static meshes | Supported |
-| USA v01.00 import catalog | 36,034 level-scoped assets across 41 levels: 5,556 Mobys, 6,714 Ties, and 23,764 Materials |
+| USA v01.00 import catalog | 36,321 level-scoped assets across 41 levels: 5,556 Mobys, 6,714 Ties, 184 Shrubs, 103 Foliage assets, and 23,764 Materials |
 | DXT1/3/5 and common uncompressed textures | Supported from raw `ps3leveltexs.dat` payloads |
 | Diffuse, reconstructed normal, packed, detail, masked, and blended materials | Supported through the shared Blender material path |
 | Blender Asset Browser | Moby, Tie, Shrub, and Foliage Collections plus standalone Material and optional Action assets |
@@ -64,15 +64,15 @@ fields from `PARAM.SFO` before extraction.
 | Moby models, skeletons, and skin weights | Supported |
 | Inline Moby animations | Supported, including compressed 8-bit tracks, TOD pair-frame clips, and selected-clip rig imports |
 | Tie static meshes | Supported |
-| USA v02.00 import catalog | 15,581 level-scoped assets across 20 levels: 3,012 Mobys, 2,048 Ties, and 10,521 Materials |
+| USA v02.00 import catalog | 15,629 level-scoped assets across 20 levels: 3,012 Mobys, 2,048 Ties, 34 Shrubs, 14 Foliage assets, and 10,521 Materials |
 | DXT1/3/5 and common uncompressed textures | Supported, including streamed high-resolution mips |
 | Diffuse, reconstructed normal, packed, masked, and blended materials | Supported |
-| Blender Asset Browser | Moby, Tie, and Foliage Collections plus standalone Material and optional Action assets |
+| Blender Asset Browser | Moby, Tie, Shrub, and Foliage Collections plus standalone Material and optional Action assets |
 | Level terrain (`UFrag`) and Tie placement | Supported |
-| Foliage level geometry | Supported as linked first-LOD branch and sprite-card meshes with masked materials |
+| Shrub and foliage level geometry | Supported as linked static meshes and placements; foliage includes first-LOD branch and sprite-card geometry |
 | Gameplay Moby placement | Supported as linked static mesh instances |
-| Retail names | Deterministic `Moby_XXXX` and `Tie_XXXXXXXX` names; retail debug names are absent |
-| Moby/level collision, shrubs, lighting, VFX, and cubemaps | Not yet implemented |
+| Retail names | Deterministic `Moby_XXXX`, `Tie_XXXXXXXX`, and `Shrub_XXXXXXXX` names; retail debug names are absent |
+| Moby/level collision, lighting, VFX, and cubemaps | Not yet implemented |
 
 See [Tools of Destruction formats](docs/formats/ratchet_tod.md) and
 [known issues](docs/known_issues.md) for the verified old-engine layouts and
@@ -95,7 +95,7 @@ both fields from `PARAM.SFO`.
 | Moby skeletons and skin weights | Supported |
 | Moby animsets | Supported, including additive subset and blend masks; clips become Blender Actions |
 | Tie static meshes | Supported |
-| USA model/level import catalog | 4,130 named assets and 27 levels bundled as metadata |
+| USA model/level import catalog | 7,588 unique assets across 27 levels: 923 Mobys, 3,207 Ties, 77 Shrubs, 26 Foliage assets, and 3,355 Materials |
 | Blender Asset Browser library | Locally generated Moby, Tie, Shrub, and Foliage Collections, standalone Materials, and optional Actions |
 | Diffuse textures and albedo-colored packed-blue emission | Supported |
 | Reconstructed normals and packed red-channel gloss | Supported in the default material mode |
@@ -123,7 +123,7 @@ both fields from `PARAM.SFO`.
 | Moby bangles/customizations | Each non-base segment imports into its own selectable Collection; authored source-default parts can optionally be shown |
 | Moby damage permutations and collision geometry | Optional; disabled by default |
 | Tie static meshes | Supported |
-| USA model/level import catalog | 5,820 named assets and 27 levels bundled as metadata |
+| USA model/level import catalog | 10,482 unique assets across 27 levels: 969 Mobys, 4,851 Ties, 70 Shrubs, 13 Foliage assets, and 4,579 Materials |
 | Blender Asset Browser library | Locally generated Moby, Tie, Shrub, and Foliage Collections, standalone Materials, and optional Actions |
 | Diffuse, reconstructed normal, packed red-gloss response, albedo-colored packed-blue emission, and the Goliath wet-leg overlay | Supported in the default material mode |
 | Detail and additional shader references | Bound detail images are preserved as unconnected Non-Color nodes; R3 effect slots remain metadata-only because runtime composition is not yet proven |
@@ -190,16 +190,17 @@ Blender includes NumPy; no external Python package is required at runtime.
 
 ### Import an asset
 
-1. Select **Ratchet & Clank Future: Tools of Destruction**,
-   **Resistance 2**, or **Resistance 3** in the sidebar. In Add-on
-   Preferences, select the corresponding decrypted ISO and a local
-   extraction-cache directory.
+1. Select **Resistance: Fall of Man**,
+   **Ratchet & Clank Future: Tools of Destruction**, **Resistance 2**, or
+   **Resistance 3** in the sidebar. In Add-on Preferences, select the
+   corresponding decrypted ISO and a local extraction-cache directory.
 2. In the **Insomniac** sidebar, click the asset button to open a scrollable
    chooser listing every asset alphabetically. Use its search field to find
    an asset by name, path, kind, TUID, or owner level.
 3. Optionally narrow what the popup lists first. All three filters are
    optional and combine:
-   - **All / Mobys / Ties / Materials** restricts the asset kind;
+   - **All / Mobys / Ties / Shrubs / Foliage / Materials** restricts the
+     asset kind;
    - the level list restricts to assets used by one level;
    - the text field searches the complete source self-path, readable name,
      kind, TUID, and owning levels. Space-separated fragments are all
@@ -235,12 +236,13 @@ for the Blender session when creating or opening another file, including with
 **File > New** (`Ctrl+N`). Transient progress and result messages reset with
 the file.
 
-The bundled USA catalogs contain 4,130 Resistance 2 assets and 5,820
-Resistance 3 assets, each across 27 disc levels. The importer reuses an
-extracted owner level when available and otherwise extracts that level's
-cached/uncached and global archive pairs from the selected game's configured
-ISO on demand. A manually selected PSARC or ISO remains an optional source
-override.
+The bundled USA catalogs contain 7,588 unique Resistance 2 assets and 10,482
+unique Resistance 3 assets, each across 27 disc levels. They include
+standalone Materials and supported Shrub and Foliage geometry as well as
+Mobys and Ties. The importer reuses an extracted owner level when available
+and otherwise extracts that level's cached/uncached and global archive pairs
+from the selected game's configured ISO on demand. A manually selected PSARC
+or ISO remains an optional source override.
 
 Moby imports create the intact/base mesh, armature, weights, materials, and
 every decoded animset clip as a persistent Blender Action by default. The rig
@@ -342,14 +344,14 @@ matching display basenames after the path filter is applied. TUIDs and owner
 levels remain in tooltips and can be restored to labels in Add-on Preferences.
 
 The extension ships metadata-only USA catalogs containing source entity
-paths, level ownership, Moby/Tie IDs, and verified shader IDs, not models,
-textures, or other game payloads. The bundled TOD catalog includes Material
-entries, as does the RFoM catalog; existing R2/R3 bundled catalogs remain
-model-only until regenerated. Choose **Catalog / Asset Browser game** before
-using **Regenerate Import Catalog from ISO**. It scans that game's legally
-obtained disc into the local extraction cache and replaces only that game's
-selector catalog. Catalog generation reads only the metadata resources needed
-for asset identities and names; it does not decode every mesh or texture.
+paths, level ownership, supported Moby/Tie/Shrub/Foliage IDs, and verified
+shader IDs, not models, textures, or other game payloads. All four PS3
+catalogs include their supported vegetation and Material entries. Choose
+**Catalog / Asset Browser game** before using **Regenerate Import Catalog
+from ISO**. It scans that game's legally obtained disc into the local
+extraction cache and replaces only that game's selector catalog. Catalog
+generation reads only the metadata resources needed for asset identities and
+names; it does not decode every mesh or texture.
 
 ### Build the local Asset Browser cache
 

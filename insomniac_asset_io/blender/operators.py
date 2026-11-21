@@ -23,7 +23,7 @@ from .importer import (
     import_materials,
     import_moby,
     import_moby_animation,
-    import_tie,
+    import_static_asset,
 )
 from .preferences import addon_preferences, cycles_materials_enabled
 from .properties import (
@@ -312,6 +312,8 @@ def _summary(reader) -> str:
     counts = summary.counts
     return (
         f"{counts[AssetKind.MOBY]} mobys, {counts[AssetKind.TIE]} ties, "
+        f"{counts[AssetKind.SHRUB]} shrubs, "
+        f"{counts[AssetKind.FOLIAGE]} foliage assets, "
         f"{counts[AssetKind.SHADER]} materials, "
         f"{counts[AssetKind.ANIMSET]} animsets, "
         f"{counts[AssetKind.HIGH_MIP]} textures, "
@@ -511,6 +513,8 @@ def _asset_kind_icon(kind: str) -> str:
     return {
         "MOBY": "ARMATURE_DATA",
         "TIE": "MESH_CUBE",
+        "SHRUB": "OUTLINER_OB_MESH",
+        "FOLIAGE": "MESH_PLANE",
         "SHADER": "MATERIAL",
         "ANIMATION": "ACTION",
     }.get(kind, "OBJECT_DATA")
@@ -695,10 +699,52 @@ class INSOMNIAC_OT_clear_asset_filters(bpy.types.Operator):
         return {"FINISHED"}
 
 
+def _import_catalog_asset(
+    context: bpy.types.Context,
+    reader,
+    asset: CatalogAsset,
+    options: AssetImportOptions,
+    *,
+    source_path: str,
+):
+    if asset.kind is AssetKind.MOBY:
+        return import_moby(
+            context,
+            reader,
+            asset.tuid,
+            options,
+            source_path=source_path,
+        )
+    if asset.kind is AssetKind.SHADER:
+        return import_materials(
+            reader,
+            (asset.tuid,),
+            cycles_materials=cycles_materials_enabled(context),
+        )
+    if asset.kind in {
+        AssetKind.TIE,
+        AssetKind.SHRUB,
+        AssetKind.FOLIAGE,
+    }:
+        return import_static_asset(
+            context,
+            reader,
+            asset.tuid,
+            options,
+            kind=asset.kind,
+            source_path=source_path,
+        )
+    raise InsomniacError(
+        f"Direct {asset.kind.name.title()} import is not supported"
+    )
+
+
 class INSOMNIAC_OT_import_asset(bpy.types.Operator):
     bl_idname = "insomniac.import_asset"
     bl_label = "Import Asset"
-    bl_description = "Import the selected model, static mesh, or Material"
+    bl_description = (
+        "Import the selected model, static mesh, vegetation, or Material"
+    )
     bl_options = {"REGISTER", "UNDO"}
 
     def execute(self, context):
@@ -741,28 +787,13 @@ class INSOMNIAC_OT_import_asset(bpy.types.Operator):
                         preferences.asset_import_source_default_parts
                     ),
                 )
-                if asset.kind is AssetKind.MOBY:
-                    result = import_moby(
-                        context,
-                        reader,
-                        asset.tuid,
-                        options,
-                        source_path=original_path,
-                    )
-                elif asset.kind is AssetKind.SHADER:
-                    result = import_materials(
-                        reader,
-                        (asset.tuid,),
-                        cycles_materials=cycles_materials_enabled(context),
-                    )
-                else:
-                    result = import_tie(
-                        context,
-                        reader,
-                        asset.tuid,
-                        options,
-                        source_path=original_path,
-                    )
+                result = _import_catalog_asset(
+                    context,
+                    reader,
+                    asset,
+                    options,
+                    source_path=original_path,
+                )
             if asset.kind is not AssetKind.SHADER:
                 _focus_imported_asset(context, result.root)
             _report_warnings(self, result.warnings)
@@ -1049,8 +1080,8 @@ class INSOMNIAC_OT_rebuild_import_catalog(bpy.types.Operator):
     bl_idname = "insomniac.rebuild_import_catalog"
     bl_label = "Regenerate Import Catalog"
     bl_description = (
-        "Scan the configured ISO for importable Moby, Tie, Material, and "
-        "level IDs and write a local metadata catalog"
+        "Scan the configured ISO for importable Moby, Tie, Shrub, Foliage, "
+        "Material, and level IDs and write a local metadata catalog"
     )
     bl_options = {"REGISTER"}
 

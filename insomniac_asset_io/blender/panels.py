@@ -11,6 +11,8 @@ def _asset_icon(kind: AssetKind) -> str:
     return {
         AssetKind.MOBY: "ARMATURE_DATA",
         AssetKind.TIE: "MESH_CUBE",
+        AssetKind.SHRUB: "OUTLINER_OB_MESH",
+        AssetKind.FOLIAGE: "MESH_PLANE",
         AssetKind.SHADER: "MATERIAL",
     }.get(kind, "OBJECT_DATA")
 
@@ -58,11 +60,7 @@ class INSOMNIAC_PT_asset_io(bpy.types.Panel):
         # or hide the current selection.
         filters = asset.column(align=True)
         if adapter.supports_levels:
-            filters.row(align=True).prop(
-                settings,
-                "asset_kind_filter",
-                expand=True,
-            )
+            filters.prop(settings, "asset_kind_filter", text="Kind")
             filters.prop(settings, "asset_level_filter", text="")
         filters.prop(settings, "asset_filter", text="", icon="VIEWZOOM")
         status = asset.row(align=True)

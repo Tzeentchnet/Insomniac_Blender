@@ -29,7 +29,7 @@ the shared R2/R3 `0xB100` geometry and `0x7540` placement records. Scotia
 Co-op contains ten Shrub assets with 2,250 vertices, 2,538 triangles, and
 8,426 placements.
 
-Run the real R3 foliage regression against `mine_traversal_train`:
+Run the real R3 vegetation regression against `mine_traversal_train`:
 
 ```powershell
 $env:R3_FOLIAGE_SOURCE = "C:\path\to\mine_traversal_train\level_cached.psarc"
@@ -121,8 +121,8 @@ Validate RFoM imports with Blender 5.2:
 For level imports, the Blender smoke test compares every decoded shrub and
 foliage placement with the corresponding imported Blender object count.
 
-Run the environment-gated Tools of Destruction Metropolis regression against
-an extracted archive trio:
+Run the environment-gated Tools of Destruction regressions against an
+extracted Metropolis archive trio and the decrypted ISO:
 
 ```powershell
 $env:TOD_LEVEL_SOURCE = "E:\tests\InsomniacAssetIO\ratchet_tod\cache\ratchet_tod\metropolis\PS3_GAME\USRDIR\packed\levels\metropolis"
@@ -135,7 +135,10 @@ Remove-Item Env:TOD_ISO_PATH
 This checks the representative compressed and pair-frame animations, a shader
 texture, a Tie, UFrag terrain, Tie placements, both Metropolis foliage assets,
 all 757 foliage placements, gameplay Moby placements, the exact
-`BCUS98127`/`02.00` disc identity, and the 20-level disc inventory. Each
+`BCUS98127`/`02.00` disc identity, and the 20-level disc inventory. The
+ISO-gated Kerchu City regression additionally checks all 15 Shrub meshes,
+4,387 vertices, 5,998 triangles, masked/opaque/blended material routing, and
+all 11,857 finite clustered placements with exact per-class counts. Each
 source-specific test is skipped when its corresponding environment variable
 is not set.
 
@@ -155,12 +158,22 @@ for example `E:\tests\InsomniacAssetIO\ratchet_tod`:
   --factory-startup --python-exit-code 1 `
   --python tools\blender_smoke_tod.py -- `
   --source "E:\tests\InsomniacAssetIO\ratchet_tod\cache\...\level_cached.psarc" `
+  --output "E:\tests\InsomniacAssetIO\ratchet_tod\imports\shrub.blend" `
+  --kind shrub --tuid 0x017EB070 --materials
+
+& "D:\Blender Foundation\Blender 5.2\blender.exe" --background `
+  --factory-startup --python-exit-code 1 `
+  --python tools\blender_smoke_tod.py -- `
+  --source "E:\tests\InsomniacAssetIO\ratchet_tod\cache\...\level_cached.psarc" `
   --output "E:\tests\InsomniacAssetIO\ratchet_tod\imports\level.blend" `
-  --kind level
+  --kind level --materials
 ```
 
-The TOD smoke tool also accepts `--kind tie --tuid <header-offset>`. It fails
-if a requested import produces no mesh, no material, or no Action.
+The TOD smoke tool also accepts `--kind tie`, `--kind shrub`, and
+`--kind foliage` with the corresponding level-local `--tuid`. Level imports
+compare both Shrub and Foliage placement totals with the imported Blender
+objects. The tool fails if a requested import produces no mesh, no requested
+material, or no requested Action.
 
 Diffuse lookup first uses the level texture tables, then the global archive's
 per-TUID texture bundles, then already-extracted sibling level pairs under the
@@ -271,7 +284,8 @@ The current implementation was validated in Blender 5.2.2 LTS with:
 - representative RFoM texture decoding for every observed format
   (`0x81`, `0x85`, `0x86`, `0x87`, `0x88`, and `0x8B`);
 - selective RFoM level extraction directly from the ISO-backed 6.5 GB
-  `GAME.PSARC`, plus a 41-level, 36,034-reference metadata catalog;
+  `GAME.PSARC`, plus a 41-level, 36,321-reference metadata catalog including
+  Shrubs and Foliage;
 - a saved and reopened animated RFoM Moby with three Materials, ten decoded
   game images, a 76-bone rig, and one Action;
 - a saved and reopened RFoM level with 4,782 objects, 303 mesh datablocks,
@@ -280,19 +294,34 @@ The current implementation was validated in Blender 5.2.2 LTS with:
 - Tools of Destruction USA v02.00 Metropolis: 201 Mobys, 193 Ties,
   631 shaders, 1,297 textures, 1,987 UFrags, 4,848 Tie placements, and
   1,378 gameplay Moby placements;
+- a regenerated 20-level TOD catalog with 15,629 references, including all
+  34 Shrub descriptors from the 11 levels that contain them;
+- all 34 TOD Shrub meshes with 12,466 vertices and 15,085 triangles, plus
+  10,997 clusters that resolve all 103,300 placements exactly once;
 - a compressed TOD Moby Action using 8-bit tracks, with 151 finite decoded
   frames across a 38-bone skeleton;
 - TOD `animate_spin`, reduced from 8,001 paired disk records to 4,000 Action
   frames at 15 fps;
 - bounded Asset Browser caches for all four supported PS3 games, including
-  RFoM/R2/R3 Shrub Collections, all four games' supported Foliage Collections,
+  all four games' Shrub Collections and supported Foliage Collections,
   canonical cross-level R3 reuse, standalone Materials, packed images, and
   generated previews, all reopened with their catalog assignments and
   metadata intact;
+- a capped real Kerchu City Asset Browser cache containing one TOD Moby, Tie,
+  Shrub, Foliage, and Material, reopened with five catalog assignments, nine
+  object dependencies, and 20 packed image dependencies;
+- direct catalog dispatch of isolated Shrub and Foliage assets for all four
+  games, preserving the selected vegetation kind through Blender mesh
+  creation;
 - a selected `crumbling` import containing only its 38-bone compatible rig
   and one Action, plus a separately saved/reopened standalone TOD Material;
 - a saved TOD Metropolis level containing 6,228 objects and 313 mesh
   datablocks, plus separate saved Moby and Tie material imports;
+- a saved/reopened isolated Kerchu City Shrub with two objects, one shared
+  mesh, one game Material, and one packed game image;
+- a saved/reopened Kerchu City level with 23,683 objects, 349 mesh
+  datablocks, 620 game Materials, and 1,321 game images, including exactly
+  11,857 finite Shrub placements sharing 15 mesh datablocks;
 - a 16,150-vertex Moby containing 44 bones and 21 Actions;
 - a 4,129-vertex Moby containing 62 bones, 2 Actions, and an RG8 tangent
   normal, including Cycles render compilation before and after reopening;
