@@ -12,6 +12,7 @@ from insomniac_asset_io.games.resistance_2.formats import AssetKind
 from insomniac_asset_io.games.resistance_3.reader import Resistance3Reader
 
 REAL_SOURCE = os.environ.get("R3_LEVEL_SOURCE")
+FOLIAGE_SOURCE = os.environ.get("R3_FOLIAGE_SOURCE")
 RAVAGER_SOURCE = os.environ.get("R3_RAVAGER_SOURCE")
 STALKER_SOURCE = os.environ.get("R3_STALKER_SOURCE")
 CAPELLI_SOURCE = os.environ.get("R3_CAPELLI_SOURCE")
@@ -65,8 +66,218 @@ class RealResistance3Tests(unittest.TestCase):
             self.assertIsNotNone(tie_name)
             self.assertTrue(tie_name.endswith(".entity.irb"))
             self.assertTrue(reader.read_tie(first_tie.tuid).meshes)
-            self.assertTrue(reader.read_zones())
+            foliage_pointers = reader.asset_pointers(AssetKind.FOLIAGE)
+            if foliage_pointers:
+                foliage = reader.read_foliage(foliage_pointers[0].tuid)
+                self.assertTrue(foliage.meshes)
+                self.assertTrue(
+                    np.isfinite(foliage.meshes[0].positions).all()
+                )
+                self.assertEqual(
+                    reader.read_shader(
+                        foliage.shader_tuids[0]
+                    ).alpha_mode,
+                    "MASK",
+                )
+            zones = reader.read_zones()
+            self.assertTrue(zones)
+            self.assertEqual(
+                sum(zone.unsupported_foliage_instances for zone in zones),
+                0,
+            )
             self.assertTrue(reader.read_gameplay_regions())
+
+
+@unittest.skipUnless(FOLIAGE_SOURCE, "R3_FOLIAGE_SOURCE is not set")
+class RealResistance3FoliageTests(unittest.TestCase):
+    def test_decodes_mine_traversal_train_foliage(self):
+        with GameSource.open(Path(FOLIAGE_SOURCE)) as source:
+            reader = Resistance3Reader(source)
+            foliage_pointers = reader.asset_pointers(AssetKind.FOLIAGE)
+            self.assertEqual(len(foliage_pointers), 11)
+            foliage_tuids = {pointer.tuid for pointer in foliage_pointers}
+
+            for pointer in foliage_pointers:
+                foliage = reader.read_foliage(pointer.tuid)
+                self.assertEqual(len(foliage.meshes), 1)
+                mesh = foliage.meshes[0]
+                self.assertGreater(len(mesh.positions), 0)
+                self.assertTrue(np.isfinite(mesh.positions).all())
+                self.assertTrue(np.isfinite(mesh.uvs).all())
+                self.assertEqual(len(mesh.positions) % 4, 0)
+                self.assertEqual(len(mesh.indices) % 6, 0)
+                shader = reader.read_shader(foliage.shader_tuids[0])
+                self.assertEqual(shader.alpha_mode, "MASK")
+                self.assertIsNotNone(shader.albedo_texture_id)
+                texture = reader.read_texture(
+                    shader.albedo_texture_id,
+                    lookup_path=shader.texture_lookup_paths[0],
+                )
+                self.assertEqual(texture.rgba.shape[-1], 4)
+
+            zones = reader.read_zones()
+            instances = [
+                instance
+                for zone in zones
+                for instance in zone.foliage_instances
+            ]
+            self.assertEqual(len(instances), 1_050)
+            self.assertEqual(
+                {instance.asset_tuid for instance in instances},
+                foliage_tuids,
+            )
+            self.assertEqual(
+                sum(zone.unsupported_foliage_instances for zone in zones),
+                0,
+            )
+
+    def test_decodes_mine_traversal_train_tie_material_groups(self):
+        with GameSource.open(Path(FOLIAGE_SOURCE)) as source:
+            reader = Resistance3Reader(source)
+            grass = reader.read_tie(0x398B_4420_E2AC_F15B)
+            tree = reader.read_tie(0xE18B_F091_E270_42FC)
+            track = reader.read_tie(0xA62D_61B7_D19B_863D)
+            zones = reader.read_zones()
+            target_grass = next(
+                instance
+                for zone in zones
+                for instance in zone.tie_instances
+                if instance.name == "ceg_lowpoly_grass_field_2_85"
+            )
+            target_lightmap = reader.read_zone_lightmap(
+                target_grass.lightmap_zone_tuid,
+                target_grass.lightmap_index,
+            )
+
+        self.assertEqual(
+            [mesh.shader_index for mesh in grass.meshes],
+            [0] * 5 + [1] * 18 + [2] * 2 + [3] * 2,
+        )
+        self.assertEqual(
+            [mesh.shader_index for mesh in tree.meshes],
+            [0] * 5 + [1] * 6 + [2] * 4 + [3] * 5 + [4] * 9,
+        )
+        self.assertEqual(
+            [mesh.shader_index for mesh in track.meshes],
+            [0, 0, 1, 1, 1],
+        )
+        self.assertTrue(all(mesh.colors is not None for mesh in grass.meshes))
+        self.assertTrue(
+            all(mesh.secondary_uvs is not None for mesh in grass.meshes)
+        )
+        self.assertTrue(
+            all(mesh.secondary_uvs is None for mesh in tree.meshes)
+        )
+        self.assertEqual(
+            sum(mesh.secondary_uvs is not None for mesh in track.meshes),
+            3,
+        )
+        self.assertEqual(target_grass.lightmap_index, 173)
+        self.assertEqual(
+            target_grass.lightmap_zone_tuid,
+            0x58E8_829D_E249_D884,
+        )
+        self.assertEqual(target_lightmap.rgba.shape, (256, 256, 4))
+        self.assertLess(int(target_lightmap.rgba[..., :3].min()), 70)
+        self.assertEqual(
+            sum(
+                instance.lightmap_index is not None
+                for zone in zones
+                for instance in zone.tie_instances
+            ),
+            6_730,
+        )
+        for asset in (grass, tree, track):
+            self.assertTrue(
+                all(
+                    mesh.shader_index < len(asset.shader_tuids)
+                    for mesh in asset.meshes
+                )
+            )
+
+    def test_decodes_warden_jeep_default_parts(self):
+        jeep_tuid = 0x4B9D_A07C_D744_C4B0
+        with GameSource.open(Path(FOLIAGE_SOURCE)) as source:
+            reader = Resistance3Reader(source)
+            jeep = reader.read_moby(jeep_tuid)
+            placements = [
+                instance
+                for region in reader.read_gameplay_regions()
+                for instance in region.moby_instances
+                if instance.name == "JEEP_REINFORCEMENT_6"
+            ]
+
+        default_meshes = [
+            mesh
+            for mesh in jeep.meshes
+            if (
+                not mesh.is_damage_permutation
+                and mesh.lod_level == 0
+                and mesh.segment_index < 64
+                and jeep.default_draw_mask & (1 << mesh.segment_index)
+            )
+        ]
+        self.assertEqual(jeep.default_draw_mask, 0x03FF_FFFF)
+        self.assertEqual(jeep.customization_segments, tuple(range(1, 26)))
+        self.assertEqual(len(default_meshes), 35)
+        self.assertEqual(
+            sum(len(mesh.indices) // 3 for mesh in default_meshes),
+            16_978,
+        )
+        self.assertTrue(placements)
+        self.assertEqual(
+            {instance.asset_tuid for instance in placements},
+            {jeep_tuid},
+        )
+
+    def test_decodes_mine_traversal_train_terrain_positions(self):
+        with GameSource.open(Path(FOLIAGE_SOURCE)) as source:
+            zones = Resistance3Reader(source).read_zones()
+
+        terrain_zone = next(
+            zone
+            for zone in zones
+            if zone.tuid == 0xEF2A_7A01_E249_D922
+        )
+        terrain_positions = np.concatenate(
+            [mesh.positions for mesh in terrain_zone.terrain_meshes]
+        )
+        terrain_secondary_uvs = np.concatenate(
+            [mesh.secondary_uvs for mesh in terrain_zone.terrain_meshes]
+        )
+        terrain_colors = np.concatenate(
+            [mesh.colors for mesh in terrain_zone.terrain_meshes]
+        )
+        self.assertEqual(len(terrain_zone.terrain_meshes), 972)
+        self.assertLess(float(terrain_positions[:, 0].min()), 2_500.0)
+        self.assertGreater(float(terrain_positions[:, 0].max()), 3_200.0)
+        self.assertLess(float(terrain_positions[:, 2].min()), -600.0)
+        self.assertGreater(float(terrain_positions[:, 2].max()), 1_200.0)
+        self.assertEqual(
+            {mesh.lightmap_index for mesh in terrain_zone.terrain_meshes},
+            {109},
+        )
+        self.assertEqual(set(terrain_zone.lightmaps), {109})
+        self.assertEqual(
+            terrain_zone.lightmaps[109].rgba.shape,
+            (1_024, 1_024, 4),
+        )
+        np.testing.assert_allclose(
+            terrain_secondary_uvs.min(axis=0),
+            (0.0, 0.0),
+        )
+        np.testing.assert_allclose(
+            terrain_secondary_uvs.max(axis=0),
+            (1.0, 1.0),
+        )
+        self.assertLess(float(terrain_colors[:, 0].min()), 0.24)
+        self.assertEqual(float(terrain_colors[:, 0].max()), 1.0)
+        self.assertGreater(float(terrain_colors[:, 0].mean()), 0.88)
+        self.assertLess(float(terrain_colors[:, 0].mean()), 0.90)
+        lightmap_mean = terrain_zone.lightmaps[109].rgba.mean(axis=(0, 1))
+        self.assertGreater(float(lightmap_mean[0]), 252.0)
+        self.assertLess(float(lightmap_mean[1]), 240.0)
+        self.assertLess(float(lightmap_mean[2]), 213.0)
 
 
 @unittest.skipUnless(CAPELLI_SOURCE, "R3_CAPELLI_SOURCE is not set")

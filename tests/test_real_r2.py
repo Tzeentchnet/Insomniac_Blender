@@ -4,6 +4,8 @@ import os
 from pathlib import Path
 import unittest
 
+import numpy as np
+
 from insomniac_asset_io.core.source import GameSource
 from insomniac_asset_io.games.resistance_2.formats import AssetKind
 from insomniac_asset_io.games.resistance_2.reader import Resistance2Reader
@@ -25,7 +27,8 @@ class RealResistance2Tests(unittest.TestCase):
             self.assertTrue(moby.meshes)
             self.assertIsNotNone(moby.skeleton)
             clips = reader.read_animations(moby)
-            self.assertTrue(clips)
+            if moby.animset_hash is not None:
+                self.assertTrue(clips)
 
             shader = reader.read_shader(moby.shader_tuids[0])
             if shader.albedo_texture_id is not None:
@@ -46,7 +49,25 @@ class RealResistance2Tests(unittest.TestCase):
                 self.assertIsNotNone(tie_name)
                 self.assertTrue(tie_name.endswith(".entity.irb"))
                 self.assertTrue(reader.read_tie(tie_pointers[0].tuid).meshes)
-            self.assertTrue(reader.read_zones())
+            foliage_pointers = reader.asset_pointers(AssetKind.FOLIAGE)
+            if foliage_pointers:
+                foliage = reader.read_foliage(foliage_pointers[0].tuid)
+                self.assertTrue(foliage.meshes)
+                self.assertTrue(
+                    np.isfinite(foliage.meshes[0].positions).all()
+                )
+                self.assertEqual(
+                    reader.read_shader(
+                        foliage.shader_tuids[0]
+                    ).alpha_mode,
+                    "MASK",
+                )
+            zones = reader.read_zones()
+            self.assertTrue(zones)
+            self.assertEqual(
+                sum(zone.unsupported_foliage_instances for zone in zones),
+                0,
+            )
             self.assertTrue(reader.read_gameplay_regions())
 
 

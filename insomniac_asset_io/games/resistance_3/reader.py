@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from ...core.binary import IghwFile
+from ...core.errors import FormatError
 from ..resistance_2.animations import AnimationProfile
 from ..resistance_2.reader import Resistance2Reader
 
@@ -26,3 +28,38 @@ class Resistance3Reader(Resistance2Reader):
     )
     collision_quantization_markers = (256, 257)
     animation_profile = AnimationProfile.RESISTANCE_3
+    foliage_descriptor_min_length = 0x68
+    foliage_corner_y_sign = -1.0
+    foliage_instance_stride = 0x80
+    foliage_instance_lookup_offset = 0x70
+    terrain_position_offset = 0x70
+    terrain_vertex_lighting = True
+    terrain_lightmaps = True
+    tie_vertex_lighting = True
+    tie_secondary_uvs = True
+    tie_instance_lightmaps = True
+
+    @staticmethod
+    def _tie_shader_index(
+        ighw: IghwFile,
+        mesh: int,
+        shader_count: int,
+    ) -> int:
+        shader_index = ighw.u8(mesh + 0x26)
+        if shader_count and shader_index >= shader_count:
+            raise FormatError(
+                f"{ighw.label}: Tie shader index {shader_index} exceeds "
+                f"the {shader_count}-entry shader table"
+            )
+        return shader_index
+
+    @staticmethod
+    def _foliage_sprite_layout(
+        ighw: IghwFile,
+        base: int,
+    ) -> tuple[int, int, int]:
+        return (
+            ighw.u8(base + 0x37),
+            ighw.u32(base + 0x50),
+            base + 0x58,
+        )

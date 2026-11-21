@@ -21,12 +21,17 @@ except ModuleNotFoundError:
 if bpy is not None:
     from insomniac_asset_io.blender.importer import (
         _MaterialFactory,
+        _static_asset_geometry_and_materials,
         import_materials,
     )
     from insomniac_asset_io.games.resistance_2.formats import (
         DecodedTexture,
+        MeshGeometry,
+        PlacedInstance,
         ShaderInfo,
+        TieAsset,
         TextureInfo,
+        Zone,
     )
 
 
@@ -198,6 +203,236 @@ class BlenderMaterialTests(unittest.TestCase):
         _MaterialFactory._apply_colorspace(image, "color")
 
         self.assertEqual(image.alpha_mode, "CHANNEL_PACKED")
+
+    def test_r3_terrain_material_multiplies_vertex_and_zone_lighting(
+        self,
+    ) -> None:
+        shader_tuid = 0x1234
+        albedo_id = 0x200
+        zone_tuid = 0x1020_3040_5060_7080
+        shader = ShaderInfo(
+            shader_tuid,
+            albedo_id,
+            None,
+            None,
+            None,
+            material_word=0,
+        )
+        albedo = self._decoded_texture(albedo_id)
+        lightmap = self._decoded_texture(
+            5,
+            tuid=zone_tuid,
+            format_code=0x88,
+            value=192,
+        )
+        reader = _MaterialReader(
+            "RESISTANCE_3",
+            shader,
+            {albedo_id: albedo},
+        )
+        factory = _MaterialFactory(reader, True, [])
+
+        material = factory.terrain_material(
+            shader_tuid,
+            zone_tuid,
+            5,
+            lightmap,
+            vertex_colors=True,
+        )
+        cached = factory.terrain_material(
+            shader_tuid,
+            zone_tuid,
+            5,
+            lightmap,
+            vertex_colors=True,
+        )
+
+        self.assertIs(material, cached)
+        self.assertTrue(material["insomniac_terrain_material"])
+        self.assertTrue(material["insomniac_vertex_lighting"])
+        self.assertEqual(material["insomniac_lightmap_index"], 5)
+        nodes = material.node_tree.nodes
+        principled = nodes["Principled BSDF"]
+        vertex = nodes["R3_Terrain_Vertex_Color"]
+        vertex_multiply = nodes["R3_Terrain_Vertex_Color_Multiply"]
+        lightmap_texture = nodes["R3_Terrain_Lightmap_0005"]
+        lightmap_multiply = nodes["R3_Terrain_Lightmap_Multiply"]
+        self.assertEqual(vertex.layer_name, "InsomniacVertexColor")
+        self.assertEqual(
+            nodes["R3_Terrain_Lightmap_UV"].uv_map,
+            "LightmapUV",
+        )
+        self.assertEqual(
+            lightmap_texture.image.colorspace_settings.name,
+            "sRGB",
+        )
+        self.assertEqual(
+            principled.inputs["Base Color"].links[0].from_node,
+            lightmap_multiply,
+        )
+        self.assertEqual(
+            lightmap_multiply.inputs[1].links[0].from_node,
+            vertex_multiply,
+        )
+        self.assertEqual(
+            lightmap_multiply.inputs[2].links[0].from_node,
+            lightmap_texture,
+        )
+        self.assertEqual(
+            vertex_multiply.inputs[2].links[0].from_node,
+            vertex,
+        )
+        self.assertEqual(
+            lightmap_texture.image["insomniac_zone_tuid"],
+            f"0x{zone_tuid:016X}",
+        )
+
+    def test_r3_tie_material_multiplies_vertex_lighting(self) -> None:
+        shader_tuid = 0x1234
+        albedo_id = 0x200
+        shader = ShaderInfo(
+            shader_tuid,
+            albedo_id,
+            None,
+            None,
+            None,
+            material_word=0,
+        )
+        reader = _MaterialReader(
+            "RESISTANCE_3",
+            shader,
+            {albedo_id: self._decoded_texture(albedo_id)},
+        )
+        zone_tuid = 0x1020_3040_5060_7080
+        lightmap_index = 7
+        lightmap = self._decoded_texture(
+            lightmap_index,
+            tuid=zone_tuid,
+            format_code=0x88,
+            value=192,
+        )
+        reader.tie_instance_lightmaps = True
+        reader.zone_lightmap_infos = lambda _zone_tuid: {
+            lightmap_index: lightmap.info
+        }
+        reader.read_zone_lightmap = (
+            lambda _zone_tuid, _lightmap_index: lightmap
+        )
+        factory = _MaterialFactory(reader, True, [])
+        factory.prepare_tie_lightmap_atlas(
+            (
+                Zone(
+                    tuid=zone_tuid,
+                    tie_instances=[
+                        PlacedInstance(
+                            asset_tuid=1,
+                            instance_tuid=2,
+                            name="Tie",
+                            matrix=np.eye(4, dtype=np.float32),
+                            lightmap_index=lightmap_index,
+                            lightmap_zone_tuid=zone_tuid,
+                        )
+                    ],
+                    terrain_meshes=[],
+                    shader_tuids=(),
+                ),
+            )
+        )
+
+        material = factory.vertex_lit_material(
+            shader_tuid,
+            variant_kind="TIE",
+            lightmapped=True,
+        )
+        cached = factory.vertex_lit_material(
+            shader_tuid,
+            variant_kind="TIE",
+            lightmapped=True,
+        )
+
+        self.assertIs(material, cached)
+        self.assertTrue(material["insomniac_vertex_lit_material"])
+        self.assertEqual(material["insomniac_vertex_lit_kind"], "TIE")
+        self.assertEqual(
+            factory.tie_lightmap_atlas["insomniac_lightmap_count"],
+            1,
+        )
+        nodes = material.node_tree.nodes
+        vertex = nodes["R3_TIE_Vertex_Color"]
+        multiply = nodes["R3_TIE_Vertex_Color_Multiply"]
+        principled = nodes["Principled BSDF"]
+        self.assertEqual(vertex.layer_name, "InsomniacVertexColor")
+        lightmap_multiply = nodes["R3_TIE_Lightmap_Multiply"]
+        self.assertEqual(
+            principled.inputs["Base Color"].links[0].from_node,
+            lightmap_multiply,
+        )
+        self.assertEqual(
+            lightmap_multiply.inputs[1].links[0].from_node,
+            multiply,
+        )
+        self.assertEqual(
+            multiply.inputs[2].links[0].from_node,
+            vertex,
+        )
+        atlas = nodes["R3_TIE_Lightmap_Atlas"]
+        self.assertIs(atlas.image, factory.tie_lightmap_atlas)
+        self.assertEqual(
+            nodes["R3_TIE_Lightmap_Scale"].attribute_name,
+            "insomniac_lightmap_uv_scale",
+        )
+        self.assertEqual(
+            nodes["R3_TIE_Lightmap_Offset"].attribute_name,
+            "insomniac_lightmap_uv_offset",
+        )
+
+        positions = np.asarray(
+            ((0, 0, 0), (1, 0, 0), (0, 1, 0)),
+            dtype=np.float32,
+        )
+        uvs = np.zeros((3, 2), dtype=np.float32)
+        indices = np.asarray((0, 1, 2), dtype=np.int32)
+        colors = np.ones((3, 4), dtype=np.float32)
+        geometries, routed_materials = (
+            _static_asset_geometry_and_materials(
+                factory,
+                TieAsset(
+                    tuid=1,
+                    meshes=[
+                        MeshGeometry(
+                            shader_index=0,
+                            positions=positions,
+                            uvs=uvs,
+                            indices=indices,
+                            colors=colors,
+                        ),
+                        MeshGeometry(
+                            shader_index=0,
+                            positions=positions,
+                            uvs=uvs,
+                            indices=indices,
+                            secondary_uvs=uvs,
+                            colors=colors,
+                        ),
+                    ],
+                    shader_tuids=(shader_tuid,),
+                ),
+                variant_kind="TIE",
+            )
+        )
+        self.assertNotEqual(
+            geometries[0].shader_index,
+            geometries[1].shader_index,
+        )
+        self.assertEqual(len(routed_materials), 2)
+        self.assertIsNone(
+            routed_materials[geometries[0].shader_index]
+            .node_tree.nodes.get("R3_TIE_Lightmap_Atlas")
+        )
+        self.assertIsNotNone(
+            routed_materials[geometries[1].shader_index]
+            .node_tree.nodes.get("R3_TIE_Lightmap_Atlas")
+        )
 
     def test_all_supported_games_import_verified_data_maps(self) -> None:
         texture_ids = {

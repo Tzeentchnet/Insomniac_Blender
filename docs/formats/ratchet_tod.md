@@ -29,6 +29,7 @@ Most metadata is stored directly in a big-endian IGHW 1.1 `main.dat`.
 |---|---|
 | Moby | index in `main.dat:0xD100` |
 | Tie | byte offset of its `0x3400` header |
+| Foliage | byte offset of its `0xA200` descriptor |
 | Shader | index in `main.dat:0x5000` |
 | Texture | byte offset of its `0x5200` record |
 
@@ -153,12 +154,48 @@ texture index is at `0x06` and its `texstream.dat` pixel offset is at `0x00`.
 Matching references double both dimensions and provide the high-resolution
 base mip; otherwise the reader uses `textures.dat`.
 
+## Foliage
+
+Section `0xA200` contains `0xB0`-byte embedded foliage descriptors. The
+verified sprite-card fields are:
+
+| Offset | Type | Meaning |
+|---:|---|---|
+| `0x08` | `u32` | direct ordinal in the `0x5200` texture table |
+| `0x18` | `u32` | branch-vertex offset in `vertices.dat:0x9000` |
+| `0x20` | `4 * 0x08` | `(u32 indexIndex, u16 count, u16 runtime)` branch LODs |
+| `0x40` | `u32` | sprite-corner offset in `vertices.dat:0x9000` |
+| `0x44` | `u32` | sprite-center offset in `vertices.dat:0x9000` |
+| `0x48` | `u32` | used sprite LOD count |
+| `0x50` | `5 * 0x08` | `(u16 begin, u16 end, f32 threshold)` LOD ranges |
+
+Branch vertices occupy the range from the branch offset to the sprite-corner
+offset and use stride `0x14`: half-float `position[4]`, half-float `uv[2]`,
+and packed tangent/normal bytes. Branch LOD indices address
+`vertices.dat:0x9100` in `u16` units. The first non-empty authored branch LOD
+is imported.
+
+Corner records have stride `0x08` and store half-float `size[2]` and `uv[2]`.
+Center records also have stride `0x08`: half-float position followed by one
+runtime `u16`. Four corners share one center. The first authored LOD is
+expanded into ordinary triangles. Branch and sprite positions are converted
+with `0.9144`; sprite corners use
+`(center + (size.x, size.y, 0)) * 0.9144`.
+
+Unlike ordinary TOD shaders, the descriptor's material selector directly
+indexes the texture table. The reader gives it a separate foliage shader
+identity with masked alpha and no unrelated normal, packed, or detail slots.
+Blender's material remains double-sided.
+
 ## Level geometry and placements
 
 TOD has one logical zone per level.
 
 - `main.dat:0x9240` contains `0x80`-byte Tie placements. The row-major matrix
   begins at `0x00`; the Tie header offset is at `0x50`.
+- `main.dat:0x9340` contains `0xE0`-byte foliage placements. The row-major
+  matrix begins at `0x00`, and the matching `0xA200` descriptor pointer is at
+  `0xC4`.
 - `main.dat:0x6200` contains `0x80`-byte UFrags. Index and vertex offsets are
   at `0x40`/`0x44`, counts at `0x48`/`0x4A`, shader index at `0x50`, and
   position at `0x60`.
@@ -169,4 +206,5 @@ TOD has one logical zone per level.
   `0x18`, `0x24`, `0x30`, and `0x3C`.
 
 The current adapter does not decode the separate non-IGHW `collision.dat`
-layout or unverified secondary-bangle/LOD semantics.
+layout or unverified secondary-bangle/LOD semantics. Runtime foliage wind,
+custom normals, and camera-facing billboard behavior are not reproduced.

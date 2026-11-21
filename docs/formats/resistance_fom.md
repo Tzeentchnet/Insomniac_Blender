@@ -151,6 +151,43 @@ Section `0x9300` contains `0xC0`-byte Tie placements. A row-major 4x4 matrix
 begins at `0x00`; the Tie header pointer is at `0x8C`. Translation is
 converted from yards to meters.
 
+## Shrubs and foliage
+
+Section `0xC700` contains `0x30`-byte shrub mesh records. Vertex-buffer byte
+offset, index-buffer `u16` offset, index count, and material index are at
+`0x00`, `0x04`, `0x08`, and `0x20`. Shrub vertices have stride `0x10`:
+four half-float position components, four color bytes, and two half-float UV
+components. Position XYZ is converted from yards to meters.
+
+Section `0xC650` contains one open-ended shrub placement container. Its
+instance count/offset and cluster count/offset are at `0x00`/`0x04` and
+`0x08`/`0x0C`. Each `0x50`-byte cluster contains four local ranges at
+`0x40`, an instance base at `0x48`, and a 16-bit shrub mask at `0x4C`.
+Set mask bit `i` selects shrub record `15 - i`. The referenced `0x40`-byte
+instance records contain world-space position, uniform scale, and two basis
+rows; the third row is reconstructed with a cross product.
+
+Section `0xC200` contains `0x120`-byte foliage descriptors. Direct
+`0x5300` texture-table ordinal, shared index-buffer offset, branch vertex
+offset, and sprite vertex offset are at `0x08`, `0x10`, `0x18`, and `0x40`.
+Foliage does not route this value through the ordinary `0x5001` material
+table. The importer builds a dedicated double-sided, alpha-masked material
+from the selected texture. Four branch LOD ranges begin at `0x20`; the
+importer uses the first non-empty range. Branch vertices have stride `0x14`
+with half-float position and UV fields.
+
+Foliage sprite LOD metadata begins at `0x44`, the absolute sprite-center
+pointer is at `0xB8`, and up to eight sprite ranges begin at `0xC0`.
+`0x0C`-byte sprite vertices store half-float corner sizes and UVs. The first
+sprite LOD is expanded into ordinary triangle vertices around each authored
+center. These are static XY-plane cards: runtime wind and camera-facing
+billboard rotation are not reproduced.
+
+Section `0x9700` contains `0xE0`-byte foliage placements. Its matrix starts at
+`0x00`, and the pointer to the matching `0xC200` descriptor is at `0xC4`.
+Translations and all shrub/foliage vertex positions use the same
+`0.9144` yard-to-meter conversion as the other RFoM level geometry.
+
 The `0x25000` gameplay structure points to `GameplayInstances` at `0x20`.
 The primary Moby group starts at `GameplayInstances + 0x40`; its records have
 stride `0x40`. Position, ZYX Euler rotation, and Moby class ID are at `0x10`,
@@ -163,8 +200,10 @@ semantics are not yet corroborated.
 
 - `ps3levelcoll.dat` collision is not decoded.
 - Directional lightmap textures in section `0x5500` are not imported.
-- Shrubs, foliage, lighting, VFX, cubemaps, and the non-primary gameplay
-  groups are not decoded.
+- Lighting, VFX, cubemaps, and the non-primary gameplay groups are not
+  decoded.
+- Shrub vertex colors, vegetation wind, foliage custom normals, and
+  camera-facing billboard behavior are not reproduced.
 - Deterministic numeric names are used until retail names can be recovered
   from a proven source.
 

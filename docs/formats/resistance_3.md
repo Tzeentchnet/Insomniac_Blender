@@ -56,10 +56,121 @@ reader layouts documented in [Resistance 2 format notes](resistance_2.md):
 - skeletons, skin palettes, and bind matrices;
 - the V2 animset container, control arrays, track masks, and quantization;
 - texture metadata, high mips, local textures, and global texture bundles;
-- zone terrain, Tie instances, and gameplay Moby placement.
+- zone terrain vertex/index records, Tie instances, and gameplay Moby
+  placement.
 
 Resistance 3 has game-specific reader constants for the layouts below rather
 than weakening Resistance 2 validation.
+
+## Tie material groups
+
+R3 Tie primitives retain the shared `0x40`-byte record stride, but select
+their local shader group with the byte at primitive `+0x26`. R2's `u16`
+selector at `+0x28` and legacy fallback at `+0x0C` are not shader indices in
+R3. Treating them as such routed grass cards, conifer branches, bark, track
+geometry, and helper faces through unrelated materials.
+
+The exact `mine_traversal_train` regression covers:
+
+- `ceg_lowpoly_grass_field_2_85` (`0x398B4420E2ACF15B`);
+- `ceg_treeclump_conifer_alive49` (`0xE18BF091E27042FC`);
+- the representative track Tie (`0xA62D61B7D19B863D`).
+
+All 4,767 tested R3 Tie primitives have an in-range `+0x26` selector. The
+reader rejects an out-of-range value rather than silently assigning material
+zero.
+
+## Tie vertex and baked-light data
+
+R3 Tie primary vertices use a `0x14`-byte layout:
+
+| Offset | Type | Meaning |
+|---:|---|---|
+| `+0x00` | `i16[3]` | Quantized local position |
+| `+0x06` | `i16` | Packed per-vertex light value |
+| `+0x08` | `f16[2]` | Base-material UV |
+
+Tie header `u32 +0x18` gives the primary-buffer byte length. Any secondary
+UV buffer begins after that range within section `0x3000` and stores packed
+`f16[2]` values at a `0x04`-byte stride. Primitive `u16 +0x06` selects its
+secondary-vertex start and byte `+0x0E` indicates that UV2 is present. The
+grass and representative track assets use this buffer; the tested conifer
+does not.
+
+The primary vertex light uses the same `abs(purpose)` decode documented for
+UFrags below. Blender preserves it in the point-domain
+`InsomniacVertexColor` attribute and preserves UV2 as `LightmapUV`.
+
+Each `TieInstanceV2` stores a signed zone-lightmap ID at `i16 +0x5A`;
+negative values mean no lightmap. Non-negative IDs address the zone's
+`0x5400` descriptor table and the matching same-TUID `lighting.dat` asset,
+just like UFrag lightmaps. Blender retains shared Tie meshes while applying
+the per-instance maps through one level-wide atlas and object-specific UV
+scale/offset properties. The atlas downsamples each baked-light texture by
+four in each dimension using linear-light averaging; this keeps the full
+level practical without creating thousands of images, materials, or mesh
+copies.
+
+In `mine_traversal_train`, 6,730 Tie instances reference distinct baked
+lightmaps. They pack into one 4096x2116 atlas. The named
+`ceg_lowpoly_grass_field_2_85` instance uses zone
+`0x58E8829DE249D884` lightmap 173, a 256x256 BC3 image whose RGB range
+includes approximately 26% through 100% intensity.
+
+## UFrag terrain position
+
+R3 retains the `0x6000` vertex buffer, `0x6100` index buffer, and `0x6200`
+`0x80`-byte UFrag descriptors, but moves the descriptor's 256-scaled world
+position from R2's `+0x60` to `+0x70`. The signed 16-bit local vertex
+positions remain divided by 256 before adding that world position.
+
+Reading the R3 vector at `+0x60` produces denormalized values near zero and
+collapses each zone's terrain around the origin. In `mine_traversal_train`,
+the corrected `0xEF2A7A01E249D922` zone spans roughly `x=2493..3244` and
+`z=-610..1234`, matching its modular terrain Ties and train-track placements.
+
+## UFrag vertex and baked-light data
+
+R3 UFrags use the `0x18`-byte `RegionVertexV2` layout:
+
+| Offset | Type | Meaning |
+|---:|---|---|
+| `+0x00` | `i16[3]` | Local position, divided by 256 |
+| `+0x06` | `i16` | Packed per-vertex light value |
+| `+0x08` | `f16[2]` | Base-material UV |
+| `+0x0C` | `f16[2]` | Zone-lightmap UV |
+| `+0x10` | `u32` | Packed normal |
+| `+0x14` | `u32` | Packed tangent |
+
+The signed light value is decoded using the independently documented engine
+rule:
+
+```text
+value = abs(purpose)
+rgb = min(value / 0x4000, 1)
+alpha = fract(value / 0x80)
+```
+
+Blender stores the result as the point-domain
+`InsomniacVertexColor` attribute and multiplies its RGB into the terrain
+albedo. `LightmapUV` preserves UV1.
+
+The UFrag descriptor's `u16 +0x4E` selects a zone-local lightmap; `0xFFFF`
+means no texture. Section `0x5400` contains parallel `0x20`-byte NV4097
+texture descriptors. Their texel offsets are **not** relative to the zone
+asset and do not address `textures.dat`. They are relative to the
+same-TUID `0x1DB00` lighting asset in `lighting.dat`. Only lightmaps used by
+terrain or placed Ties are decoded.
+
+The imported terrain material multiplies base albedo, per-vertex light, and
+the sRGB zone lightmap. The parallel `0x5410` texture remains an uncomposed
+shadow/directional-light resource until its shader equation is independently
+verified.
+
+In `mine_traversal_train`, zone `0xEF2A7A01E249D922` has 972 UFrags. Every
+one references lightmap 109, a 1024x1024 BC3 image at relative lighting
+offset `0x9BE380`. Its UV1 range is exactly 0 through 1. Across the level,
+terrain uses 34 zone-scoped lightmaps and 51 shader/lightmap material pairs.
 
 ## Animation profile
 
@@ -312,5 +423,36 @@ The real-data regression and Blender 5.2 smoke tests cover:
 - a complete level import producing 6,500+ Blender objects with shared mesh
   datablocks.
 
-Shrub and foliage geometry, lighting, level collision, VFX, and cubemaps are
-not imported.
+Resistance 3 retains the R2 foliage card and center records, but changes both
+the descriptor and placement layouts. Each standalone foliage IGHW contains:
+
+- `0xA000`: a combined card-corner and sprite-center buffer;
+- `0xA200`: one `0x80`-byte V3 descriptor;
+- `0x5600`: the foliage shader TUID lookup.
+
+The descriptor stores the used LOD count as a byte at `+0x37`, the
+sprite-center byte offset at `+0x50`, and LOD ranges beginning at `+0x58`.
+Each range remains `(u16 cornerBegin, u16 cornerEnd, f32 threshold)`.
+The `0x08`-byte half-float corner and `0x0E`-byte center records match R2:
+four consecutive corners share one center, and imported positions are
+`(center + (size.x, -size.y, 0)) * 0.9144`. V3's vertical corner sign is the
+opposite of R2; using the R2 sign places the card tops on the terrain and
+extends the foliage downward. Only the first authored LOD is expanded.
+
+Zones retain the `0x7400` array of foliage TUIDs, but `0x7440` uses
+`0x80`-byte V3 instance records. The row-major transform starts at `+0x00`
+and the `0x7400` lookup index is at `+0x70`.
+
+The real `mine_traversal_train` regression covers all 11 foliage assets and
+1,050 placements across eight zones. Its first LODs contain 5,232 unique
+vertices and 2,616 triangles. All placements reuse those 11 Blender mesh
+datablocks. Two foliage-only shader identities preserve the source textures
+while forcing masked alpha; both decoded albedos contain the full `0`-`255`
+alpha range.
+
+Runtime wind, custom normals, and camera-facing billboarding are not
+reproduced.
+
+Shrub geometry, dynamic scene lighting, the parallel zone
+shadow/directional-light texture, level collision, VFX, and cubemaps are not
+imported.

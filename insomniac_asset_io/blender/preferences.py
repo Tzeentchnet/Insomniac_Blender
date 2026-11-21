@@ -225,6 +225,11 @@ class InsomniacAddonPreferences(bpy.types.AddonPreferences):
         name="Static props",
         default=True,
     )
+    level_import_vegetation: bpy.props.BoolProperty(
+        name="Shrubs and foliage",
+        description="Import supported vegetation meshes and placements",
+        default=True,
+    )
     level_import_gameplay: bpy.props.BoolProperty(
         name="Gameplay instances",
         description="Place Moby meshes from gameplay region tables",
@@ -278,6 +283,7 @@ class InsomniacAddonPreferences(bpy.types.AddonPreferences):
         level.prop(self, "level_import_materials")
         level.prop(self, "level_import_terrain")
         level.prop(self, "level_import_ties")
+        level.prop(self, "level_import_vegetation")
         level.prop(self, "level_import_gameplay")
         level.prop(self, "level_convert_axes")
 

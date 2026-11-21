@@ -49,8 +49,9 @@ SECT_LEVEL_VERTICES = 0x9000
 SECT_LEVEL_INDICES = 0x9100
 SECT_UFRAGS = 0x6200
 SECT_TIE_INSTANCES = 0x9240
+SECT_FOLIAGE = 0xA200
 SECT_SHRUB_INSTANCES = 0x7540
-SECT_FOLIAGE_INSTANCES = 0x7440
+SECT_FOLIAGE_INSTANCES = 0x9340
 SECT_GAMEPLAY_MOBYS = 0x7340
 
 MOBY_STRIDE = 0xC0
@@ -58,17 +59,21 @@ MOBY_BANGLE_STRIDE = 0x08
 MOBY_MESH_STRIDE = 0x40
 TIE_STRIDE = 0x80
 TIE_MESH_STRIDE = 0x40
+FOLIAGE_STRIDE = 0xB0
 SHADER_STRIDE = 0x80
 TEXTURE_STRIDE = 0x20
 TEXSTREAM_STRIDE = 0x10
 UFRAG_STRIDE = 0x80
 UFRAG_VERTEX_STRIDE = 0x18
 TIE_INSTANCE_STRIDE = 0x80
+FOLIAGE_INSTANCE_STRIDE = 0xE0
+FOLIAGE_CENTER_STRIDE = 0x08
 GAMEPLAY_MOBY_STRIDE = 0x48
 
 USE_VERTICES_DAT = 0x8000_0000
 YARD_TO_METERS = np.float32(0.9144)
 UFRAG_SCALE = np.float32(YARD_TO_METERS / 256.0)
+FOLIAGE_SHADER_TUID_BASE = 1 << 32
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,6 +177,7 @@ class RatchetTodReader(Resistance2Reader):
         return (
             f"{len(self.asset_pointers(AssetKind.MOBY))} mobys, "
             f"{len(self.asset_pointers(AssetKind.TIE))} ties, "
+            f"{len(self.asset_pointers(AssetKind.FOLIAGE))} foliage assets, "
             f"{len(self.asset_pointers(AssetKind.SHADER))} shaders, "
             f"{len(self.asset_pointers(AssetKind.TEXTURE))} textures, "
             f"{len(self.asset_pointers(AssetKind.ZONE))} zone"
@@ -232,6 +238,13 @@ class RatchetTodReader(Resistance2Reader):
                 TIE_STRIDE,
                 identity="offset",
             )
+        elif kind is AssetKind.FOLIAGE:
+            pointers = self._record_pointers(
+                kind,
+                SECT_FOLIAGE,
+                FOLIAGE_STRIDE,
+                identity="offset",
+            )
         elif kind is AssetKind.SHADER:
             pointers = self._record_pointers(
                 kind,
@@ -249,6 +262,7 @@ class RatchetTodReader(Resistance2Reader):
         elif kind is AssetKind.ZONE and (
             self.main.section(SECT_UFRAGS) is not None
             or self.main.section(SECT_TIE_INSTANCES) is not None
+            or self.main.section(SECT_FOLIAGE_INSTANCES) is not None
         ):
             pointers = (AssetPointer(tuid=0, offset=0, length=0),)
         else:
@@ -279,6 +293,8 @@ class RatchetTodReader(Resistance2Reader):
             return f"Moby_{tuid:04X}"
         if kind is AssetKind.TIE:
             return f"Tie_{tuid:08X}"
+        if kind is AssetKind.FOLIAGE:
+            return f"Foliage_{tuid:08X}"
         return None
 
     @property
@@ -620,10 +636,193 @@ class RatchetTodReader(Resistance2Reader):
             shader_tuids=tuple(shader_tuids),
         )
 
+    def read_foliage(self, tuid: int) -> TieAsset:
+        pointer = self._pointer(AssetKind.FOLIAGE, tuid)
+        base = pointer.offset
+        vertex_section = self.vertices.require_section(SECT_LEVEL_VERTICES)
+        index_section = self.vertices.require_section(SECT_LEVEL_INDICES)
+        branch_offset = self.main.u32(base + 0x18)
+        sprite_offset = self.main.u32(base + 0x40)
+        meshes: list[MeshGeometry] = []
+
+        if branch_offset and sprite_offset < branch_offset:
+            raise FormatError(
+                f"Foliage_{tuid:08X}: sprite offset precedes branch data"
+            )
+        if branch_offset and sprite_offset > branch_offset:
+            branch_length = sprite_offset - branch_offset
+            if branch_length % 0x14:
+                raise FormatError(
+                    f"Foliage_{tuid:08X}: branch vertex range is not "
+                    "0x14-byte aligned"
+                )
+            if branch_offset + branch_length > vertex_section.length:
+                raise FormatError(
+                    f"Foliage_{tuid:08X}: branch vertex buffer overrun"
+                )
+            branch_lod: tuple[int, int] | None = None
+            for lod_index in range(4):
+                lod = base + 0x20 + lod_index * 8
+                index_count = self.main.u16(lod + 4)
+                if index_count:
+                    branch_lod = (
+                        self.main.u32(lod),
+                        index_count,
+                    )
+                    break
+            if branch_lod is not None:
+                index_index, index_count = branch_lod
+                index_offset = index_index * 2
+                index_length = index_count * 2
+                if index_offset + index_length > index_section.length:
+                    raise FormatError(
+                        f"Foliage_{tuid:08X}: branch index buffer overrun"
+                    )
+                vertex_count = branch_length // 0x14
+                if vertex_count > MAX_MESHES:
+                    raise FormatError(
+                        f"Foliage_{tuid:08X}: unreasonable branch vertex "
+                        f"count {vertex_count}"
+                    )
+                vertex_buffer = memoryview(
+                    self.source.read_slice(
+                        self.vertices_path,
+                        vertex_section.offset + branch_offset,
+                        branch_length,
+                    )
+                )
+                positions = np.ndarray(
+                    shape=(vertex_count, 3),
+                    dtype=self.main.endian + "f2",
+                    buffer=vertex_buffer,
+                    strides=(0x14, 2),
+                ).astype(np.float32)
+                positions *= YARD_TO_METERS
+                uvs = np.ndarray(
+                    shape=(vertex_count, 2),
+                    dtype=self.main.endian + "f2",
+                    buffer=vertex_buffer,
+                    offset=8,
+                    strides=(0x14, 2),
+                ).astype(np.float32)
+                indices = np.frombuffer(
+                    self.source.read_slice(
+                        self.vertices_path,
+                        index_section.offset + index_offset,
+                        index_length,
+                    ),
+                    dtype=self.main.endian + "u2",
+                    count=index_count,
+                ).astype(np.int32)
+                if (
+                    not np.isfinite(positions).all()
+                    or not np.isfinite(uvs).all()
+                ):
+                    raise FormatError(
+                        f"Foliage_{tuid:08X}: branch vertices are not finite"
+                    )
+                if indices.size and int(indices.max()) >= vertex_count:
+                    raise FormatError(
+                        f"Foliage_{tuid:08X}: branch index exceeds "
+                        f"{vertex_count} vertices"
+                    )
+                meshes.append(
+                    MeshGeometry(
+                        shader_index=0,
+                        positions=positions,
+                        uvs=uvs,
+                        indices=indices,
+                    )
+                )
+
+        used_lods = self.main.u32(base + 0x48)
+        if used_lods:
+            corner_begin = self.main.u16(base + 0x50)
+            corner_end = self.main.u16(base + 0x52)
+            if corner_begin != corner_end:
+                center_offset = self.main.u32(base + 0x44)
+                corner_length = corner_end * 0x08
+                center_length = (
+                    (corner_end // 4) * FOLIAGE_CENTER_STRIDE
+                )
+                if sprite_offset + corner_length > vertex_section.length:
+                    raise FormatError(
+                        f"Foliage_{tuid:08X}: corner buffer overrun"
+                    )
+                if center_offset + center_length > vertex_section.length:
+                    raise FormatError(
+                        f"Foliage_{tuid:08X}: center buffer overrun"
+                    )
+                corner_buffer = memoryview(
+                    self.source.read_slice(
+                        self.vertices_path,
+                        vertex_section.offset + sprite_offset,
+                        corner_length,
+                    )
+                )
+                center_buffer = memoryview(
+                    self.source.read_slice(
+                        self.vertices_path,
+                        vertex_section.offset + center_offset,
+                        center_length,
+                    )
+                )
+                meshes.append(
+                    self._decode_foliage_sprite_mesh(
+                        corner_buffer=corner_buffer,
+                        center_buffer=center_buffer,
+                        corner_begin=corner_begin,
+                        corner_end=corner_end,
+                        center_stride=FOLIAGE_CENTER_STRIDE,
+                        endian=self.main.endian,
+                        label=f"Foliage_{tuid:08X}",
+                        position_scale=YARD_TO_METERS,
+                    )
+                )
+
+        if not meshes:
+            return TieAsset(tuid=tuid, meshes=[], shader_tuids=())
+        texture_index = self.main.u32(base + 0x08)
+        texture_section = self.main.require_section(SECT_TEXTURE)
+        if texture_index >= texture_section.count:
+            raise FormatError(
+                f"Foliage_{tuid:08X}: texture index {texture_index} is "
+                f"outside the {texture_section.count}-record table"
+            )
+        return TieAsset(
+            tuid=tuid,
+            meshes=meshes,
+            shader_tuids=(
+                FOLIAGE_SHADER_TUID_BASE + texture_index,
+            ),
+        )
+
     def read_shader(self, tuid: int) -> ShaderInfo:
         cached = self._shader_cache.get(tuid)
         if cached is not None:
             return cached
+        if tuid >= FOLIAGE_SHADER_TUID_BASE:
+            texture_index = tuid - FOLIAGE_SHADER_TUID_BASE
+            texture_section = self.main.require_section(SECT_TEXTURE)
+            if texture_index >= texture_section.count:
+                raise MissingResourceError(
+                    f"Foliage shader 0x{tuid:016X} references texture "
+                    f"index {texture_index}, outside the "
+                    f"{texture_section.count}-record texture table"
+                )
+            shader = ShaderInfo(
+                tuid=tuid,
+                albedo_texture_id=(
+                    texture_section.offset + texture_index * TEXTURE_STRIDE
+                ),
+                normal_texture_id=None,
+                specular_texture_id=None,
+                detail_texture_id=None,
+                lookup_path=f"foliage/texture_{texture_index:04X}",
+                alpha_mode_override="MASK",
+            )
+            self._shader_cache[tuid] = shader
+            return shader
         base = self._pointer(AssetKind.SHADER, tuid).offset
         texture_ids = tuple(
             self.main.u32(base + offset) or None
@@ -805,11 +1004,49 @@ class RatchetTodReader(Resistance2Reader):
                     )
                 )
 
+        foliage_instances: list[PlacedInstance] = []
+        foliage_section = self.main.section(SECT_FOLIAGE_INSTANCES)
+        if foliage_section is not None:
+            self._validate_stride(
+                foliage_section,
+                FOLIAGE_INSTANCE_STRIDE,
+                "foliage instance",
+            )
+            if foliage_section.count > MAX_MESHES:
+                raise FormatError(
+                    f"{self.main_path}: unreasonable foliage instance count "
+                    f"{foliage_section.count}"
+                )
+            foliage_tuids = {
+                pointer.tuid
+                for pointer in self.asset_pointers(AssetKind.FOLIAGE)
+            }
+            for index in range(foliage_section.count):
+                base = (
+                    foliage_section.offset
+                    + index * FOLIAGE_INSTANCE_STRIDE
+                )
+                foliage_tuid = self.main.u32(base + 0xC4)
+                if foliage_tuid not in foliage_tuids:
+                    raise FormatError(
+                        f"Foliage instance {index} references unknown "
+                        f"descriptor 0x{foliage_tuid:08X}"
+                    )
+                matrix = self._read_single_matrix(self.main, base)
+                matrix[:3, 3] *= YARD_TO_METERS
+                foliage_instances.append(
+                    PlacedInstance(
+                        asset_tuid=foliage_tuid,
+                        instance_tuid=index,
+                        name=f"FoliageInstance_{index:04X}",
+                        matrix=matrix,
+                    )
+                )
+
         terrain = self._read_terrain()
         shader_tuids = self._localized_shaders(terrain)
         shrub_section = self.main.section(SECT_SHRUB_INSTANCES)
-        foliage_section = self.main.section(SECT_FOLIAGE_INSTANCES)
-        if not tie_instances and not terrain:
+        if not tie_instances and not foliage_instances and not terrain:
             return []
         return [
             Zone(
@@ -817,11 +1054,9 @@ class RatchetTodReader(Resistance2Reader):
                 tie_instances=tie_instances,
                 terrain_meshes=terrain,
                 shader_tuids=shader_tuids,
+                foliage_instances=foliage_instances,
                 unsupported_shrub_instances=(
                     shrub_section.count if shrub_section else 0
-                ),
-                unsupported_foliage_instances=(
-                    foliage_section.count if foliage_section else 0
                 ),
             )
         ]

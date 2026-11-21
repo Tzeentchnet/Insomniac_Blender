@@ -140,6 +140,14 @@ the undocumented logical grouping used by complex outfitter Mobys. For Mobys
 without bangle metadata, clear default-draw bits continue to identify optional
 damage alternatives; a zero mask remains unspecified.
 
+Standalone Moby imports keep those Collections independently selectable and
+show mask-enabled parts only when **Show source-default character parts** is
+enabled. Level gameplay placements instead combine mask-enabled segments into
+the class's shared placed mesh automatically. This restores authored intact
+defaults for vehicles, enemies, and destructible props while excluding
+disabled alternatives and known damage permutations. Runtime script or
+outfitter changes to the class mask are not decoded.
+
 ### Collision
 
 Moby collision prototypes are independent from render segments.
@@ -653,10 +661,39 @@ Zones contain:
 - `0x7200` Tie TUID table;
 - `0x7240` Tie instance transforms;
 - `0x72C0` instance TUID/name metadata, which names placements rather than
-  Tie asset classes.
+  Tie asset classes;
+- `0x7400` foliage TUID lookup records;
+- `0x7440` `0xB0`-byte foliage instances. The row-major transform begins at
+  `0x00`, and the foliage lookup index is at `0x94`.
 
 UFrag world positions simplify to `(rawVertex + fragmentPosition) / 256` in
 the same game units used by placements.
+
+Foliage assets come from the `0x1D400` pointers into `foliages.dat`. Each
+standalone IGHW contains:
+
+- `0xA000`: one combined sprite buffer;
+- `0xA200`: one `0xC0`-byte descriptor;
+- `0x5600`: the foliage shader TUID lookup.
+
+The descriptor stores the used LOD count at `0x50`, the sprite-center byte
+offset at `0x58`, and five `0x08`-byte LOD ranges beginning at `0x60`. Each
+range is `(u16 cornerBegin, u16 cornerEnd, f32 threshold)`. The importer uses
+the first authored LOD.
+
+The start of `0xA000` contains `0x08`-byte corner records with half-float
+`size[2]` and `uv[2]`. The center stream begins at the descriptor's
+sprite-center offset and uses `0x0E`-byte records: half-float position plus
+four signed 16-bit runtime fields. Four consecutive corners share one center.
+Imported card positions are
+`(center + (size.x, size.y, 0)) * 0.9144`.
+
+Foliage uses its asset's first `0x5600` shader. A foliage-only shader identity
+preserves those source textures and parameters while forcing masked alpha, so
+the same source shader can remain opaque when used by a non-foliage asset.
+Blender mesh datablocks are shared by all placements of the same foliage TUID.
+Runtime wind, custom normals, and camera-facing billboard behavior are not
+reproduced.
 
 `gameplay.dat` section `0x25000` identifies region directories. Each region
 uses:
@@ -669,7 +706,7 @@ Gameplay Euler values are composed in ZYX order.
 
 ## Known unknowns
 
-- Shrub and foliage geometry and exact value-14 material-vector semantics.
+- Shrub geometry and exact value-14 foliage material-vector semantics.
 - Packed normals/tangents for custom-normal import.
 - Packed green/specular behavior; the public `useSpecular` bit is absent from
   all 3,355 unique shaders in the current corpus.

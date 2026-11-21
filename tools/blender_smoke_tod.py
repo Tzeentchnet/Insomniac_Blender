@@ -91,10 +91,24 @@ def main() -> None:
                     materials=args.materials,
                     terrain=True,
                     ties=True,
+                    vegetation=True,
                     gameplay=True,
                 ),
                 source_path=str(args.source),
             )
+            expected_foliage = sum(
+                len(zone.foliage_instances)
+                for zone in reader.read_zones()
+            )
+            imported_foliage = sum(
+                obj.get("insomniac_asset_kind") == "FOLIAGE"
+                for obj in bpy.data.objects
+            )
+            if imported_foliage != expected_foliage:
+                raise RuntimeError(
+                    "Foliage placement mismatch: expected "
+                    f"{expected_foliage}, imported {imported_foliage}"
+                )
 
     if result.root.get("insomniac_game") != "RATCHET_TOD":
         raise RuntimeError("Imported root does not identify the TOD adapter")

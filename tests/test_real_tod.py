@@ -70,9 +70,28 @@ class RealRatchetTodTests(unittest.TestCase):
             self.assertTrue(tie.meshes)
             self.assertTrue(tie.shader_tuids)
 
+            foliage_pointers = reader.asset_pointers(AssetKind.FOLIAGE)
+            self.assertEqual(len(foliage_pointers), 2)
+            for pointer in foliage_pointers:
+                foliage = reader.read_foliage(pointer.tuid)
+                self.assertEqual(len(foliage.meshes), 2)
+                self.assertTrue(
+                    all(
+                        np.isfinite(mesh.positions).all()
+                        for mesh in foliage.meshes
+                    )
+                )
+                foliage_shader = reader.read_shader(
+                    foliage.shader_tuids[0]
+                )
+                self.assertEqual(foliage_shader.alpha_mode, "MASK")
+                self.assertIsNotNone(foliage_shader.albedo_texture_id)
+
             zone = reader.read_zones()[0]
             self.assertTrue(zone.terrain_meshes)
             self.assertTrue(zone.tie_instances)
+            self.assertEqual(len(zone.foliage_instances), 757)
+            self.assertEqual(zone.unsupported_foliage_instances, 0)
 
             gameplay = reader.read_gameplay_regions()[0]
             self.assertEqual(gameplay.name, "art")

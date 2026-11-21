@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import cached_property
 from pathlib import Path, PurePosixPath
 
@@ -52,6 +52,9 @@ SECT_TIE_INDICES = 0x3200
 SECT_TIE_HEADER = 0x3400
 SECT_TIE_NAME = 0x3410
 SECT_TIE_SHADER_TABLE = 0x5600
+SECT_FOLIAGE_BUFFER = 0xA000
+SECT_FOLIAGE = 0xA200
+SECT_FOLIAGE_SHADER_TABLE = 0x5600
 
 SECT_SHADER_MATERIAL = 0x5000
 SECT_SHADER_REFS = 0x5D00
@@ -65,10 +68,12 @@ SECT_GLOBAL_TEXTURE_RESOURCE = 0x5A00
 SECT_UFRAG_VERTICES = 0x6000
 SECT_UFRAG_INDICES = 0x6100
 SECT_UFRAGS = 0x6200
+SECT_ZONE_LIGHTMAPS = 0x5400
 SECT_UFRAG_SHADER_TABLE = 0x71A0
 SECT_TIE_TUID_TABLE = 0x7200
 SECT_TIE_INSTANCES = 0x7240
 SECT_TIE_NAME_POINTERS = 0x72C0
+SECT_FOLIAGE_TUID_TABLE = 0x7400
 SECT_FOLIAGE_INSTANCES = 0x7440
 SECT_SHRUB_INSTANCES = 0x7540
 
@@ -83,6 +88,27 @@ MAX_BONES = 4096
 MAX_COLLISION_PRIMITIVES = 65_535
 MAX_COLLISION_VERTICES = 512
 MAX_COLLISION_FACES = 65_535
+MAX_FOLIAGE_CORNERS = 10_000_000
+MAX_FOLIAGE_INSTANCES = 1_000_000
+
+FOLIAGE_INSTANCE_STRIDE = 0xB0
+FOLIAGE_CORNER_STRIDE = 0x08
+FOLIAGE_CENTER_STRIDE = 0x0E
+FOLIAGE_SHADER_TUID_BASE = 1 << 64
+YARD_TO_METERS = np.float32(0.9144)
+
+
+def _decode_vertex_colors(purposes: np.ndarray) -> np.ndarray:
+    values = np.abs(purposes.astype(np.int32, copy=False)).astype(np.float32)
+    rgb = np.minimum(
+        values * np.float32(1.0 / 0x4000),
+        np.float32(1.0),
+    )
+    alpha = np.mod(
+        values * np.float32(1.0 / 0x80),
+        np.float32(1.0),
+    )
+    return np.column_stack((rgb, rgb, rgb, alpha))
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,6 +137,16 @@ class Resistance2Reader:
     material_luminance_alpha_shader_tuids: frozenset[int] = frozenset()
     collision_quantization_markers = (256, 257)
     animation_profile = AnimationProfile.RESISTANCE_2
+    foliage_descriptor_min_length = 0x6C
+    foliage_corner_y_sign = 1.0
+    foliage_instance_stride = FOLIAGE_INSTANCE_STRIDE
+    foliage_instance_lookup_offset = 0x94
+    terrain_position_offset = 0x60
+    terrain_vertex_lighting = False
+    terrain_lightmaps = False
+    tie_vertex_lighting = False
+    tie_secondary_uvs = False
+    tie_instance_lightmaps = False
 
     def __init__(self, source: GameSource) -> None:
         self.source = source
@@ -131,6 +167,10 @@ class Resistance2Reader:
         ] = {}
         self._texture_path_index: dict[str, tuple[int, ...]] | None = None
         self._sibling_texture_index: dict[int, tuple[Path, ...]] | None = None
+        self._zone_lightmap_info_cache: dict[
+            int,
+            dict[int, TextureInfo],
+        ] = {}
         self.warnings: list[str] = []
 
     def _find_level_resource(self, filename: str) -> str:
@@ -821,8 +861,19 @@ class Resistance2Reader:
 
         vertex_section = ighw.require_section(SECT_TIE_VERTICES)
         index_section = ighw.require_section(SECT_TIE_INDICES)
+        vertex_end = vertex_start + vertex_size
+        if vertex_end > vertex_section.length:
+            raise FormatError(
+                f"{ighw.label}: Tie primary vertex-buffer range ends at "
+                f"{vertex_end:#x}, beyond section length "
+                f"{vertex_section.length:#x}"
+            )
         vertex_buffer = ighw.view(
             vertex_section.offset + vertex_start, vertex_size
+        )
+        secondary_vertex_buffer = ighw.view(
+            vertex_section.offset + vertex_end,
+            vertex_section.length - vertex_end,
         )
         index_buffer = ighw.view(index_section.offset, index_section.length)
         shader_tuids = self._read_shader_table(ighw, SECT_TIE_SHADER_TABLE)
@@ -831,16 +882,14 @@ class Resistance2Reader:
             mesh = mesh_table + mesh_index * 0x40
             index_index = ighw.u32(mesh)
             vertex_index = ighw.u16(mesh + 4)
+            secondary_vertex_index = ighw.u16(mesh + 6)
             vertex_count = ighw.u16(mesh + 8)
             index_count = ighw.u16(mesh + 0x12)
-            candidate = ighw.u16(mesh + 0x28)
-            if candidate >= len(shader_tuids):
-                fallback = ighw.u16(mesh + 0x0C)
-                shader_index = (
-                    fallback if fallback < len(shader_tuids) else candidate
-                )
-            else:
-                shader_index = candidate
+            shader_index = self._tie_shader_index(
+                ighw,
+                mesh,
+                len(shader_tuids),
+            )
             meshes.append(
                 self._decode_tie_mesh(
                     vertex_buffer,
@@ -853,12 +902,179 @@ class Resistance2Reader:
                     shader_index,
                     ighw.endian,
                     ighw.label,
+                    secondary_vertex_buffer=secondary_vertex_buffer,
+                    secondary_vertex_index=secondary_vertex_index,
+                    use_secondary_uvs=(
+                        self.tie_secondary_uvs
+                        and bool(ighw.u8(mesh + 0x0E))
+                    ),
+                    decode_vertex_lighting=self.tie_vertex_lighting,
                 )
             )
         return TieAsset(
             tuid=actual_tuid,
             meshes=meshes,
             shader_tuids=shader_tuids,
+        )
+
+    @staticmethod
+    def _tie_shader_index(
+        ighw: IghwFile,
+        mesh: int,
+        shader_count: int,
+    ) -> int:
+        candidate = ighw.u16(mesh + 0x28)
+        if candidate < shader_count:
+            return candidate
+        fallback = ighw.u16(mesh + 0x0C)
+        return fallback if fallback < shader_count else candidate
+
+    def read_foliage(self, tuid: int) -> TieAsset:
+        data = self._asset_bytes(AssetKind.FOLIAGE, tuid)
+        ighw = IghwFile(data, label=f"foliage 0x{tuid:016X}")
+        descriptor = ighw.require_section(SECT_FOLIAGE)
+        if (
+            descriptor.count != 1
+            or descriptor.length < self.foliage_descriptor_min_length
+        ):
+            raise FormatError(
+                f"{ighw.label}: expected one foliage descriptor of at least "
+                f"{self.foliage_descriptor_min_length:#x} bytes"
+            )
+        ighw.require(
+            descriptor.offset,
+            descriptor.length,
+            purpose="foliage descriptor",
+        )
+        base = descriptor.offset
+        used_lods, sprite_vertex_offset, lod_ranges = (
+            self._foliage_sprite_layout(ighw, base)
+        )
+        if not used_lods:
+            return TieAsset(tuid=tuid, meshes=[], shader_tuids=())
+
+        corner_begin = ighw.u16(lod_ranges)
+        corner_end = ighw.u16(lod_ranges + 2)
+        if corner_begin == corner_end:
+            return TieAsset(tuid=tuid, meshes=[], shader_tuids=())
+
+        buffer_section = ighw.require_section(SECT_FOLIAGE_BUFFER)
+        if sprite_vertex_offset > buffer_section.length:
+            raise FormatError(
+                f"{ighw.label}: sprite center offset "
+                f"{sprite_vertex_offset:#x} exceeds the foliage buffer"
+            )
+        buffer = ighw.view(buffer_section.offset, buffer_section.length)
+        shader_tuids = self._read_shader_table(
+            ighw,
+            SECT_FOLIAGE_SHADER_TABLE,
+        )
+        if not shader_tuids:
+            raise FormatError(f"{ighw.label}: foliage shader table is empty")
+        mesh = self._decode_foliage_sprite_mesh(
+            corner_buffer=buffer[:sprite_vertex_offset],
+            center_buffer=buffer[sprite_vertex_offset:],
+            corner_begin=corner_begin,
+            corner_end=corner_end,
+            center_stride=FOLIAGE_CENTER_STRIDE,
+            endian=ighw.endian,
+            label=ighw.label,
+            position_scale=YARD_TO_METERS,
+            corner_y_sign=self.foliage_corner_y_sign,
+        )
+        foliage_shader_tuid = (
+            FOLIAGE_SHADER_TUID_BASE + shader_tuids[0]
+        )
+        return TieAsset(
+            tuid=tuid,
+            meshes=[mesh],
+            shader_tuids=(foliage_shader_tuid,),
+        )
+
+    @staticmethod
+    def _foliage_sprite_layout(
+        ighw: IghwFile,
+        base: int,
+    ) -> tuple[int, int, int]:
+        return (
+            ighw.u32(base + 0x50),
+            ighw.u32(base + 0x58),
+            base + 0x60,
+        )
+
+    @staticmethod
+    def _decode_foliage_sprite_mesh(
+        *,
+        corner_buffer: memoryview,
+        center_buffer: memoryview,
+        corner_begin: int,
+        corner_end: int,
+        center_stride: int,
+        endian: str,
+        label: str,
+        position_scale: np.float32,
+        corner_y_sign: float = 1.0,
+    ) -> MeshGeometry:
+        if (
+            corner_begin > corner_end
+            or corner_begin % 4
+            or corner_end % 4
+        ):
+            raise FormatError(
+                f"{label}: foliage LOD range "
+                f"[{corner_begin}, {corner_end}) is not quad-aligned"
+            )
+        corner_count = corner_end - corner_begin
+        if corner_count > MAX_FOLIAGE_CORNERS:
+            raise FormatError(
+                f"{label}: unreasonable foliage corner count {corner_count}"
+            )
+        corner_byte_end = corner_end * FOLIAGE_CORNER_STRIDE
+        center_byte_end = (corner_end // 4) * center_stride
+        if corner_byte_end > len(corner_buffer):
+            raise FormatError(f"{label}: foliage corner buffer overrun")
+        if center_byte_end > len(center_buffer):
+            raise FormatError(f"{label}: foliage center buffer overrun")
+
+        corners = np.ndarray(
+            shape=(corner_count, 4),
+            dtype=endian + "f2",
+            buffer=corner_buffer,
+            offset=corner_begin * FOLIAGE_CORNER_STRIDE,
+        ).astype(np.float32)
+        centers = np.ndarray(
+            shape=(corner_count // 4, 3),
+            dtype=endian + "f2",
+            buffer=center_buffer,
+            offset=(corner_begin // 4) * center_stride,
+            strides=(center_stride, 2),
+        ).astype(np.float32)
+        positions = np.repeat(centers, 4, axis=0)
+        positions[:, 0] += corners[:, 0]
+        positions[:, 1] += corners[:, 1] * corner_y_sign
+        positions *= position_scale
+        uvs = corners[:, 2:].copy()
+        if not np.isfinite(positions).all() or not np.isfinite(uvs).all():
+            raise FormatError(f"{label}: foliage vertices are not finite")
+
+        quad_starts = (
+            np.arange(corner_count // 4, dtype=np.int32) * 4
+        )
+        indices = np.column_stack(
+            (
+                quad_starts,
+                quad_starts + 1,
+                quad_starts + 2,
+                quad_starts + 3,
+                quad_starts,
+                quad_starts + 2,
+            )
+        ).reshape(-1)
+        return MeshGeometry(
+            shader_index=0,
+            positions=positions,
+            uvs=uvs,
+            indices=indices,
         )
 
     @staticmethod
@@ -873,6 +1089,11 @@ class Resistance2Reader:
         shader_index: int,
         endian: str,
         label: str,
+        *,
+        secondary_vertex_buffer: memoryview | None = None,
+        secondary_vertex_index: int = 0,
+        use_secondary_uvs: bool = False,
+        decode_vertex_lighting: bool = False,
     ) -> MeshGeometry:
         stride = 0x14
         vertex_offset = vertex_index * stride
@@ -896,6 +1117,35 @@ class Resistance2Reader:
             offset=vertex_offset + 8,
             strides=(stride, 2),
         ).astype(np.float32)
+        secondary_uvs = None
+        if use_secondary_uvs:
+            secondary_stride = 4
+            secondary_offset = secondary_vertex_index * secondary_stride
+            if (
+                secondary_vertex_buffer is None
+                or secondary_offset + vertex_count * secondary_stride
+                > len(secondary_vertex_buffer)
+            ):
+                raise FormatError(
+                    f"{label}: tie secondary UV buffer overrun"
+                )
+            secondary_uvs = np.ndarray(
+                shape=(vertex_count, 2),
+                dtype=endian + "f2",
+                buffer=secondary_vertex_buffer,
+                offset=secondary_offset,
+                strides=(secondary_stride, 2),
+            ).astype(np.float32)
+        colors = None
+        if decode_vertex_lighting:
+            purposes = np.ndarray(
+                shape=(vertex_count,),
+                dtype=endian + "i2",
+                buffer=vertex_buffer,
+                offset=vertex_offset + 6,
+                strides=(stride,),
+            )
+            colors = _decode_vertex_colors(purposes)
         indices = np.frombuffer(
             index_buffer,
             dtype=endian + "u2",
@@ -907,12 +1157,27 @@ class Resistance2Reader:
             positions=positions,
             uvs=uvs,
             indices=indices,
+            secondary_uvs=secondary_uvs,
+            colors=colors,
         )
 
     def read_shader(self, tuid: int) -> ShaderInfo:
         cached = self._shader_cache.get(tuid)
         if cached is not None:
             return cached
+        if tuid >= FOLIAGE_SHADER_TUID_BASE:
+            source_tuid = tuid - FOLIAGE_SHADER_TUID_BASE
+            if source_tuid > 0xFFFF_FFFF_FFFF_FFFF:
+                raise MissingResourceError(
+                    f"Invalid foliage shader identity 0x{tuid:X}"
+                )
+            shader = replace(
+                self.read_shader(source_tuid),
+                tuid=tuid,
+                alpha_mode_override="MASK",
+            )
+            self._shader_cache[tuid] = shader
+            return shader
         data = self._asset_bytes(AssetKind.SHADER, tuid)
         ighw = IghwFile(data, label=f"shader 0x{tuid:016X}")
         section = ighw.section(SECT_SHADER_REFS)
@@ -1543,9 +1808,21 @@ class Resistance2Reader:
             )
         return zones
 
+    def _tie_instance_lightmap_index(
+        self,
+        ighw: IghwFile,
+        instance_offset: int,
+    ) -> int | None:
+        if not self.tie_instance_lightmaps:
+            return None
+        lightmap_index = ighw.i16(instance_offset + 0x5A)
+        return lightmap_index if lightmap_index >= 0 else None
+
     def _parse_zone(self, ighw: IghwFile, tuid: int) -> Zone:
         shader_tuids = self._read_shader_table(ighw, SECT_UFRAG_SHADER_TABLE)
         terrain = self._parse_terrain(ighw)
+        lightmap_infos = self._cache_zone_lightmap_infos(ighw, tuid)
+        lightmaps = self._parse_zone_lightmaps(ighw, tuid, terrain)
         instances: list[PlacedInstance] = []
         instance_section = ighw.section(SECT_TIE_INSTANCES)
         if instance_section is not None and instance_section.count:
@@ -1565,28 +1842,237 @@ class Resistance2Reader:
                     if name_offset
                     else f"tie_{instance_tuid:016X}"
                 )
+                lightmap_index = self._tie_instance_lightmap_index(ighw, base)
+                if (
+                    lightmap_index is not None
+                    and lightmap_index not in lightmap_infos
+                ):
+                    raise FormatError(
+                        f"{ighw.label}: Tie instance lightmap index "
+                        f"{lightmap_index} exceeds the "
+                        f"{len(lightmap_infos)}-entry table"
+                    )
                 instances.append(
                     PlacedInstance(
                         asset_tuid=asset_tuid,
                         instance_tuid=instance_tuid,
                         name=name,
                         matrix=matrix,
+                        lightmap_index=lightmap_index,
+                        lightmap_zone_tuid=(
+                            tuid if lightmap_index is not None else None
+                        ),
                     )
                 )
+        foliage_instances = self._parse_foliage_instances(
+            ighw,
+            zone_tuid=tuid,
+        )
         shrub_section = ighw.section(SECT_SHRUB_INSTANCES)
-        foliage_section = ighw.section(SECT_FOLIAGE_INSTANCES)
         return Zone(
             tuid=tuid,
             tie_instances=instances,
             terrain_meshes=terrain,
             shader_tuids=shader_tuids,
+            lightmaps=lightmaps,
+            foliage_instances=foliage_instances,
             unsupported_shrub_instances=(
                 shrub_section.count if shrub_section else 0
             ),
-            unsupported_foliage_instances=(
-                foliage_section.count if foliage_section else 0
-            ),
         )
+
+    def _cache_zone_lightmap_infos(
+        self,
+        ighw: IghwFile,
+        zone_tuid: int,
+    ) -> dict[int, TextureInfo]:
+        cached = self._zone_lightmap_info_cache.get(zone_tuid)
+        if cached is not None:
+            return cached
+        if not (self.terrain_lightmaps or self.tie_instance_lightmaps):
+            infos: dict[int, TextureInfo] = {}
+            self._zone_lightmap_info_cache[zone_tuid] = infos
+            return infos
+        descriptors = ighw.section(SECT_ZONE_LIGHTMAPS)
+        if descriptors is None:
+            infos: dict[int, TextureInfo] = {}
+            self._zone_lightmap_info_cache[zone_tuid] = infos
+            return infos
+        if descriptors.length != 0x20:
+            raise FormatError(
+                f"{ighw.label}: lightmap descriptor stride is "
+                f"{descriptors.length:#x}; expected 0x20"
+            )
+        infos = {}
+        for lightmap_index in range(descriptors.count):
+            base = descriptors.offset + lightmap_index * descriptors.length
+            width = ighw.u16(base + 0x18)
+            height = ighw.u16(base + 0x1A)
+            format_code = ighw.u8(base + 6)
+            infos[lightmap_index] = TextureInfo(
+                id=lightmap_index,
+                tuid=zone_tuid,
+                format_code=format_code,
+                mip_count=ighw.u16(base + 4),
+                width=width,
+                height=height,
+                offset=ighw.u32(base),
+                length=texture_mip_size(width, height, format_code),
+            )
+        self._zone_lightmap_info_cache[zone_tuid] = infos
+        return infos
+
+    def zone_lightmap_infos(
+        self,
+        zone_tuid: int,
+    ) -> dict[int, TextureInfo]:
+        cached = self._zone_lightmap_info_cache.get(zone_tuid)
+        if cached is not None:
+            return cached
+        data = self._asset_bytes(AssetKind.ZONE, zone_tuid)
+        return self._cache_zone_lightmap_infos(
+            IghwFile(data, label=f"zone 0x{zone_tuid:016X}"),
+            zone_tuid,
+        )
+
+    def read_zone_lightmap(
+        self,
+        zone_tuid: int,
+        lightmap_index: int,
+    ) -> DecodedTexture:
+        info = self.zone_lightmap_infos(zone_tuid).get(lightmap_index)
+        if info is None:
+            raise MissingResourceError(
+                f"Zone 0x{zone_tuid:016X} has no lightmap "
+                f"{lightmap_index}"
+            )
+        lighting = self._pointer(AssetKind.LIGHTING, zone_tuid)
+        if info.offset + info.length > lighting.length:
+            raise FormatError(
+                f"Zone 0x{zone_tuid:016X} lightmap {lightmap_index} range "
+                f"{info.offset:#x}..{info.offset + info.length:#x} exceeds "
+                f"the matching lighting asset's {lighting.length:#x} bytes"
+            )
+        lighting_path = self.resource_path(AssetKind.LIGHTING.filename)
+        raw = self.source.read_slice(
+            lighting_path,
+            lighting.offset + info.offset,
+            info.length,
+        )
+        return decode_texture(info, raw)
+
+    def _parse_zone_lightmaps(
+        self,
+        ighw: IghwFile,
+        zone_tuid: int,
+        terrain: list[TerrainMesh],
+    ) -> dict[int, DecodedTexture]:
+        if not self.terrain_lightmaps:
+            return {}
+        lightmap_indices = sorted(
+            {
+                mesh.lightmap_index
+                for mesh in terrain
+                if mesh.lightmap_index is not None
+            }
+        )
+        if not lightmap_indices:
+            return {}
+        infos = self._cache_zone_lightmap_infos(ighw, zone_tuid)
+        if not infos:
+            raise FormatError(
+                f"{ighw.label}: terrain references lightmaps but section "
+                f"0x{SECT_ZONE_LIGHTMAPS:X} is absent"
+            )
+        lightmaps: dict[int, DecodedTexture] = {}
+        for lightmap_index in lightmap_indices:
+            if lightmap_index not in infos:
+                raise FormatError(
+                    f"{ighw.label}: terrain lightmap index {lightmap_index} "
+                    f"exceeds the {len(infos)}-entry table"
+                )
+            lightmaps[lightmap_index] = self.read_zone_lightmap(
+                zone_tuid,
+                lightmap_index,
+            )
+        return lightmaps
+
+    def _parse_foliage_instances(
+        self,
+        ighw: IghwFile,
+        *,
+        zone_tuid: int,
+    ) -> list[PlacedInstance]:
+        instance_section = ighw.section(SECT_FOLIAGE_INSTANCES)
+        if instance_section is None:
+            return []
+        lookup_section = ighw.section(SECT_FOLIAGE_TUID_TABLE)
+        if lookup_section is None:
+            raise FormatError(
+                f"{ighw.label}: foliage instances have no TUID table"
+            )
+        if instance_section.length != self.foliage_instance_stride:
+            raise FormatError(
+                f"{ighw.label}: foliage instance stride is "
+                f"{instance_section.length:#x}; expected "
+                f"{self.foliage_instance_stride:#x}"
+            )
+        if lookup_section.length != 8:
+            raise FormatError(
+                f"{ighw.label}: foliage lookup stride is "
+                f"{lookup_section.length:#x}; expected 0x8"
+            )
+        if instance_section.count > MAX_FOLIAGE_INSTANCES:
+            raise FormatError(
+                f"{ighw.label}: unreasonable foliage instance count "
+                f"{instance_section.count}"
+            )
+        ighw.require(
+            instance_section.offset,
+            instance_section.count * self.foliage_instance_stride,
+            purpose="foliage instances",
+        )
+        ighw.require(
+            lookup_section.offset,
+            lookup_section.count * 8,
+            purpose="foliage TUID table",
+        )
+
+        instances: list[PlacedInstance] = []
+        for index in range(instance_section.count):
+            base = (
+                instance_section.offset
+                + index * self.foliage_instance_stride
+            )
+            foliage_index = ighw.u32(
+                base + self.foliage_instance_lookup_offset
+            )
+            if foliage_index >= lookup_section.count:
+                raise FormatError(
+                    f"{ighw.label}: foliage instance {index} references "
+                    f"lookup {foliage_index}, outside "
+                    f"{lookup_section.count} entries"
+                )
+            asset_tuid = ighw.u64(
+                lookup_section.offset + foliage_index * 8
+            )
+            instance_tuid = (
+                (ord("F") << 56)
+                | (
+                    (zone_tuid ^ (index << 32))
+                    & 0x00FF_FFFF_FFFF_FFFF
+                )
+                | index
+            )
+            instances.append(
+                PlacedInstance(
+                    asset_tuid=asset_tuid,
+                    instance_tuid=instance_tuid,
+                    name=f"FoliageInstance_{index:04X}",
+                    matrix=self._read_single_matrix(ighw, base),
+                )
+            )
+        return instances
 
     @staticmethod
     def _read_single_matrix(ighw: IghwFile, offset: int) -> np.ndarray:
@@ -1617,8 +2103,12 @@ class Resistance2Reader:
             vertex_offset = ighw.u32(base + 0x44)
             index_count = ighw.u16(base + 0x48)
             vertex_count = ighw.u16(base + 0x4A)
+            raw_lightmap_index = ighw.u16(base + 0x4E)
             shader_index = ighw.u16(base + 0x50)
-            position = np.asarray(ighw.vec3(base + 0x60), dtype=np.float32)
+            position = np.asarray(
+                ighw.vec3(base + self.terrain_position_offset),
+                dtype=np.float32,
+            )
             position *= np.float32(1.0 / 256.0)
             stride = 0x18
             if vertex_offset + vertex_count * stride > len(vertices):
@@ -1641,6 +2131,24 @@ class Resistance2Reader:
                 offset=vertex_offset + 8,
                 strides=(stride, 2),
             ).astype(np.float32)
+            secondary_uvs = None
+            colors = None
+            if self.terrain_vertex_lighting:
+                secondary_uvs = np.ndarray(
+                    shape=(vertex_count, 2),
+                    dtype=ighw.endian + "f2",
+                    buffer=vertices,
+                    offset=vertex_offset + 0x0C,
+                    strides=(stride, 2),
+                ).astype(np.float32)
+                purposes = np.ndarray(
+                    shape=(vertex_count,),
+                    dtype=ighw.endian + "i2",
+                    buffer=vertices,
+                    offset=vertex_offset + 6,
+                    strides=(stride,),
+                ).astype(np.int32)
+                colors = _decode_vertex_colors(purposes)
             mesh_indices = np.frombuffer(
                 indices,
                 dtype=ighw.endian + "u2",
@@ -1654,6 +2162,13 @@ class Resistance2Reader:
                     positions=mesh_positions,
                     uvs=uvs,
                     indices=mesh_indices,
+                    secondary_uvs=secondary_uvs,
+                    colors=colors,
+                    lightmap_index=(
+                        None
+                        if raw_lightmap_index == 0xFFFF
+                        else raw_lightmap_index
+                    ),
                 )
             )
         return terrain

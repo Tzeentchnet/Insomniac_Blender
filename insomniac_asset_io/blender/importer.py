@@ -4,8 +4,8 @@ import logging
 import math
 import re
 import zlib
-from dataclasses import dataclass
-from typing import Iterable
+from dataclasses import dataclass, replace
+from typing import Callable, Iterable
 
 import bpy
 import numpy as np
@@ -16,11 +16,15 @@ from ..games.resistance_2.formats import (
     CollisionMesh,
     CollisionPrimitive,
     DecodedClip,
+    DecodedTexture,
     MeshGeometry,
     MobyAsset,
     PlacedInstance,
     ShaderInfo,
     Skeleton,
+    TextureInfo,
+    TieAsset,
+    Zone,
 )
 from ..games.resistance_2.materials import (
     EMISSIVE_CHANNEL_NAME,
@@ -39,6 +43,12 @@ _LINEAR_INTERPOLATION = (
     .value
 )
 _ACTION_VALUE_EPSILON = 1e-6
+_TIE_LIGHTMAP_ATLAS_DOWNSAMPLE = 4
+_TIE_LIGHTMAP_ATLAS_PADDING = 2
+_TIE_LIGHTMAP_ATLAS_WIDTHS = (4096, 8192)
+_TIE_LIGHTMAP_ATLAS_MAX_HEIGHT = 8192
+_TIE_LIGHTMAP_SCALE_ATTRIBUTE = "insomniac_lightmap_uv_scale"
+_TIE_LIGHTMAP_OFFSET_ATTRIBUTE = "insomniac_lightmap_uv_offset"
 
 
 def _reader_game_id(reader: object | None) -> str:
@@ -102,6 +112,7 @@ class LevelImportOptions:
     materials: bool = True
     terrain: bool = True
     ties: bool = True
+    vegetation: bool = True
     gameplay: bool = True
     convert_axes: bool = True
     cycles_materials: bool = False
@@ -180,6 +191,19 @@ class _MaterialFactory:
             )
         )
         self.materials: dict[int, bpy.types.Material] = {}
+        self.terrain_materials: dict[
+            tuple[int, int, int | None],
+            bpy.types.Material,
+        ] = {}
+        self.vertex_lit_materials: dict[
+            tuple[str, int, bool],
+            bpy.types.Material,
+        ] = {}
+        self.tie_lightmap_atlas: bpy.types.Image | None = None
+        self.tie_lightmap_transforms: dict[
+            tuple[int, int],
+            tuple[float, float, float, float],
+        ] = {}
         self.images: dict[
             tuple[int, str, str],
             bpy.types.Image,
@@ -192,6 +216,277 @@ class _MaterialFactory:
             tuple[int, str, str],
             bool,
         ] = {}
+
+    @property
+    def material_count(self) -> int:
+        return (
+            len(self.materials)
+            + len(self.terrain_materials)
+            + len(self.vertex_lit_materials)
+        )
+
+    def prepare_tie_lightmap_atlas(
+        self,
+        zones: Iterable[Zone],
+    ) -> None:
+        if (
+            not self.enabled
+            or not bool(
+                getattr(self.reader, "tie_instance_lightmaps", False)
+            )
+        ):
+            return
+        references = {
+            (instance.lightmap_zone_tuid, instance.lightmap_index)
+            for zone in zones
+            for instance in zone.tie_instances
+            if instance.lightmap_zone_tuid is not None
+            and instance.lightmap_index is not None
+        }
+        if not references:
+            return
+        info_reader = getattr(self.reader, "zone_lightmap_infos", None)
+        texture_reader = getattr(self.reader, "read_zone_lightmap", None)
+        if not callable(info_reader) or not callable(texture_reader):
+            message = (
+                "Tie instances reference baked lightmaps, but the reader "
+                "does not expose zone lightmap data"
+            )
+            LOGGER.warning(message)
+            self.warnings.append(message)
+            return
+
+        records = []
+        infos_by_zone: dict[int, dict[int, TextureInfo]] = {}
+        for zone_tuid, lightmap_index in sorted(references):
+            infos = infos_by_zone.get(zone_tuid)
+            if infos is None:
+                infos = info_reader(zone_tuid)
+                infos_by_zone[zone_tuid] = infos
+            info = infos.get(lightmap_index)
+            if info is None:
+                message = (
+                    f"Zone 0x{zone_tuid:016X} has no Tie lightmap "
+                    f"{lightmap_index}"
+                )
+                LOGGER.warning(message)
+                self.warnings.append(message)
+                continue
+            width = max(
+                1,
+                info.width // _TIE_LIGHTMAP_ATLAS_DOWNSAMPLE,
+            )
+            height = max(
+                1,
+                info.height // _TIE_LIGHTMAP_ATLAS_DOWNSAMPLE,
+            )
+            records.append(
+                ((zone_tuid, lightmap_index), info, width, height)
+            )
+        if not records:
+            return
+
+        atlas_width, atlas_height, placements = (
+            self._pack_tie_lightmap_atlas(records)
+        )
+        scope = _safe_name(
+            str(getattr(self.reader, "resource_prefix", "level"))
+            .replace("\\", "_")
+            .replace("/", "_")
+        )
+        name = "_".join(
+            part
+            for part in (
+                _reader_asset_prefix(self.reader),
+                scope,
+                "Tie_Lightmap_Atlas",
+            )
+            if part
+        )
+        image = next(
+            (
+                candidate
+                for candidate in bpy.data.images
+                if candidate.name == name
+                and candidate.get("insomniac_texture_role")
+                == "tie_lightmap_atlas"
+                and candidate.size[0] == atlas_width
+                and candidate.size[1] == atlas_height
+            ),
+            None,
+        )
+        if image is None:
+            image = bpy.data.images.new(
+                name,
+                width=atlas_width,
+                height=atlas_height,
+                alpha=True,
+                float_buffer=False,
+                is_data=False,
+            )
+            atlas = np.full(
+                (atlas_height, atlas_width, 4),
+                255,
+                dtype=np.uint8,
+            )
+            for key, _info, width, height in records:
+                placement = placements[key]
+                try:
+                    texture = texture_reader(*key)
+                except InsomniacError as exc:
+                    message = (
+                        f"Tie lightmap {key[1]} in zone "
+                        f"0x{key[0]:016X} skipped: {exc}"
+                    )
+                    LOGGER.warning(message)
+                    self.warnings.append(message)
+                    continue
+                reduced = self._downsample_tie_lightmap(
+                    texture.rgba,
+                    width,
+                    height,
+                )
+                tile = np.pad(
+                    np.flipud(reduced),
+                    (
+                        (
+                            _TIE_LIGHTMAP_ATLAS_PADDING,
+                            _TIE_LIGHTMAP_ATLAS_PADDING,
+                        ),
+                        (
+                            _TIE_LIGHTMAP_ATLAS_PADDING,
+                            _TIE_LIGHTMAP_ATLAS_PADDING,
+                        ),
+                        (0, 0),
+                    ),
+                    mode="edge",
+                )
+                packed_x, packed_y = placement[:2]
+                atlas[
+                    packed_y : packed_y + tile.shape[0],
+                    packed_x : packed_x + tile.shape[1],
+                ] = tile
+            pixels = np.multiply(
+                atlas,
+                np.float32(1.0 / 255.0),
+                dtype=np.float32,
+            ).ravel()
+            image.pixels.foreach_set(pixels)
+            image.pack()
+            image.update()
+        self._apply_colorspace(image, "lightmap")
+        image["insomniac_texture_role"] = "tie_lightmap_atlas"
+        image["insomniac_asset_scope"] = scope
+        image["insomniac_lightmap_count"] = len(placements)
+        image["insomniac_lightmap_downsample"] = (
+            _TIE_LIGHTMAP_ATLAS_DOWNSAMPLE
+        )
+        image[_IMAGE_HAS_ALPHA_KEY] = False
+        key = (0, "tie_lightmap_atlas", scope)
+        self.images[key] = image
+        self.tie_lightmap_atlas = image
+        self.tie_lightmap_transforms = {
+            reference: (
+                width / atlas_width,
+                height / atlas_height,
+                (packed_x + _TIE_LIGHTMAP_ATLAS_PADDING) / atlas_width,
+                (packed_y + _TIE_LIGHTMAP_ATLAS_PADDING) / atlas_height,
+            )
+            for reference, (
+                packed_x,
+                packed_y,
+                width,
+                height,
+            ) in placements.items()
+        }
+
+    @staticmethod
+    def _pack_tie_lightmap_atlas(
+        records: list[
+            tuple[tuple[int, int], TextureInfo, int, int]
+        ],
+    ) -> tuple[
+        int,
+        int,
+        dict[tuple[int, int], tuple[int, int, int, int]],
+    ]:
+        padding = _TIE_LIGHTMAP_ATLAS_PADDING
+        ordered = sorted(
+            records,
+            key=lambda record: (record[3], record[2], record[0]),
+            reverse=True,
+        )
+        for atlas_width in _TIE_LIGHTMAP_ATLAS_WIDTHS:
+            placements: dict[
+                tuple[int, int],
+                tuple[int, int, int, int],
+            ] = {}
+            x = 4
+            y = 0
+            row_height = 4
+            for key, _info, width, height in ordered:
+                packed_width = width + padding * 2
+                packed_height = height + padding * 2
+                if x + packed_width > atlas_width:
+                    y += row_height
+                    x = 0
+                    row_height = 0
+                placements[key] = (x, y, width, height)
+                x += packed_width
+                row_height = max(row_height, packed_height)
+            atlas_height = (y + row_height + 3) & ~3
+            if atlas_height <= _TIE_LIGHTMAP_ATLAS_MAX_HEIGHT:
+                return atlas_width, max(4, atlas_height), placements
+        raise InsomniacError(
+            "Tie lightmaps exceed the supported 8192x8192 compact atlas"
+        )
+
+    @staticmethod
+    def _downsample_tie_lightmap(
+        rgba: np.ndarray,
+        width: int,
+        height: int,
+    ) -> np.ndarray:
+        source_height, source_width = rgba.shape[:2]
+        if source_width == width and source_height == height:
+            return rgba
+        if source_width % width or source_height % height:
+            raise InsomniacError(
+                f"Tie lightmap {source_width}x{source_height} cannot be "
+                f"reduced to {width}x{height} with integral blocks"
+            )
+        block_width = source_width // width
+        block_height = source_height // height
+        encoded = rgba.astype(np.float32) * np.float32(1.0 / 255.0)
+        rgb = encoded[..., :3]
+        linear_rgb = np.where(
+            rgb <= 0.04045,
+            rgb / 12.92,
+            ((rgb + 0.055) / 1.055) ** 2.4,
+        )
+        reduced_rgb = linear_rgb.reshape(
+            height,
+            block_height,
+            width,
+            block_width,
+            3,
+        ).mean(axis=(1, 3), dtype=np.float32)
+        encoded_rgb = np.where(
+            reduced_rgb <= 0.0031308,
+            reduced_rgb * 12.92,
+            1.055 * (reduced_rgb ** (1.0 / 2.4)) - 0.055,
+        )
+        reduced_alpha = encoded[..., 3].reshape(
+            height,
+            block_height,
+            width,
+            block_width,
+        ).mean(axis=(1, 3), dtype=np.float32)
+        reduced = np.concatenate(
+            (encoded_rgb, reduced_alpha[..., np.newaxis]),
+            axis=2,
+        )
+        return np.rint(reduced * 255.0).astype(np.uint8)
 
     def material(self, shader_tuid: int) -> bpy.types.Material:
         cached = self.materials.get(shader_tuid)
@@ -280,6 +575,318 @@ class _MaterialFactory:
         self.materials[shader_tuid] = material
         self.release_decoded_textures()
         return material
+
+    def terrain_material(
+        self,
+        shader_tuid: int,
+        zone_tuid: int,
+        lightmap_index: int | None,
+        lightmap: DecodedTexture | None,
+        *,
+        vertex_colors: bool,
+    ) -> bpy.types.Material:
+        base_material = self.material(shader_tuid)
+        if not self.enabled or (not vertex_colors and lightmap is None):
+            return base_material
+        key = (zone_tuid, shader_tuid, lightmap_index)
+        cached = self.terrain_materials.get(key)
+        if cached is not None:
+            return cached
+
+        suffix = (
+            f"Lightmap_{lightmap_index:04X}"
+            if lightmap_index is not None
+            else "Vertex_Lighting"
+        )
+        material = base_material.copy()
+        material.name = (
+            f"{base_material.name}_Zone_{zone_tuid:016X}_{suffix}"
+        )
+        material["insomniac_terrain_material"] = True
+        material["insomniac_zone_tuid"] = f"0x{zone_tuid:016X}"
+        material["insomniac_vertex_lighting"] = vertex_colors
+        if lightmap_index is not None:
+            material["insomniac_lightmap_index"] = lightmap_index
+
+        principled = material.node_tree.nodes.get("Principled BSDF")
+        if principled is not None:
+            color_socket = principled.inputs["Base Color"]
+            color_output = self._disconnect_color_input(material, color_socket)
+            if vertex_colors:
+                color_output = self._multiply_vertex_color(
+                    material,
+                    principled,
+                    color_output,
+                    prefix="R3_Terrain",
+                    node_label="R3",
+                )
+            if lightmap is not None and lightmap_index is not None:
+                image = self.terrain_lightmap_image(
+                    zone_tuid,
+                    lightmap_index,
+                    lightmap,
+                )
+                uv_map = material.node_tree.nodes.new("ShaderNodeUVMap")
+                uv_map.name = "R3_Terrain_Lightmap_UV"
+                uv_map.label = "R3 lightmap UV1"
+                uv_map.uv_map = "LightmapUV"
+                uv_map.location = (-600.0, -100.0)
+                texture = material.node_tree.nodes.new("ShaderNodeTexImage")
+                texture.name = (
+                    f"R3_Terrain_Lightmap_{lightmap_index:04X}"
+                )
+                texture.label = "R3 baked zone lightmap"
+                texture.image = image
+                texture.extension = "EXTEND"
+                texture.location = (-350.0, -100.0)
+                material.node_tree.links.new(
+                    uv_map.outputs["UV"],
+                    texture.inputs["Vector"],
+                )
+                multiply = material.node_tree.nodes.new("ShaderNodeMixRGB")
+                multiply.name = "R3_Terrain_Lightmap_Multiply"
+                multiply.label = "R3 lit albedo x zone lightmap"
+                multiply.blend_type = "MULTIPLY"
+                multiply.inputs[0].default_value = 1.0
+                multiply.location = (200.0, 175.0)
+                material.node_tree.links.new(
+                    color_output,
+                    multiply.inputs[1],
+                )
+                material.node_tree.links.new(
+                    texture.outputs["Color"],
+                    multiply.inputs[2],
+                )
+                color_output = multiply.outputs["Color"]
+                material["insomniac_lightmap_image"] = image.name
+            material.node_tree.links.new(
+                color_output,
+                color_socket,
+            )
+
+        self.terrain_materials[key] = material
+        return material
+
+    def vertex_lit_material(
+        self,
+        shader_tuid: int,
+        *,
+        variant_kind: str,
+        lightmapped: bool = False,
+    ) -> bpy.types.Material:
+        base_material = self.material(shader_tuid)
+        if not self.enabled:
+            return base_material
+        key = (variant_kind, shader_tuid, lightmapped)
+        cached = self.vertex_lit_materials.get(key)
+        if cached is not None:
+            return cached
+        material = base_material.copy()
+        suffix = "_Lightmap" if lightmapped else ""
+        material.name = (
+            f"{base_material.name}_{variant_kind}_Vertex_Lighting{suffix}"
+        )
+        material["insomniac_vertex_lit_material"] = True
+        material["insomniac_vertex_lit_kind"] = variant_kind
+        material["insomniac_tie_lightmap_material"] = lightmapped
+        principled = material.node_tree.nodes.get("Principled BSDF")
+        if principled is not None:
+            color_socket = principled.inputs["Base Color"]
+            color_output = self._disconnect_color_input(material, color_socket)
+            color_output = self._multiply_vertex_color(
+                material,
+                principled,
+                color_output,
+                prefix=f"R3_{variant_kind}",
+                node_label=f"R3 {variant_kind.lower()}",
+            )
+            if (
+                variant_kind == "TIE"
+                and lightmapped
+                and self.tie_lightmap_atlas is not None
+            ):
+                color_output = self._multiply_tie_lightmap(
+                    material,
+                    color_output,
+                )
+            material.node_tree.links.new(color_output, color_socket)
+        self.vertex_lit_materials[key] = material
+        return material
+
+    def _multiply_vertex_color(
+        self,
+        material: bpy.types.Material,
+        principled: bpy.types.Node,
+        color_output: bpy.types.NodeSocket,
+        *,
+        prefix: str,
+        node_label: str,
+    ) -> bpy.types.NodeSocket:
+        vertex_color = material.node_tree.nodes.new("ShaderNodeVertexColor")
+        vertex_color.name = f"{prefix}_Vertex_Color"
+        vertex_color.label = f"{node_label} per-vertex light"
+        vertex_color.layer_name = "InsomniacVertexColor"
+        vertex_color.location = (-350.0, 250.0)
+        multiply = material.node_tree.nodes.new("ShaderNodeMixRGB")
+        multiply.name = f"{prefix}_Vertex_Color_Multiply"
+        multiply.label = f"{node_label} albedo x per-vertex light"
+        multiply.blend_type = "MULTIPLY"
+        multiply.inputs[0].default_value = 1.0
+        multiply.location = (-50.0, 225.0)
+        material.node_tree.links.new(color_output, multiply.inputs[1])
+        material.node_tree.links.new(
+            vertex_color.outputs["Color"],
+            multiply.inputs[2],
+        )
+        self._multiply_vertex_alpha(
+            material,
+            principled,
+            vertex_color,
+            prefix=prefix,
+            node_label=node_label,
+        )
+        return multiply.outputs["Color"]
+
+    def _multiply_tie_lightmap(
+        self,
+        material: bpy.types.Material,
+        color_output: bpy.types.NodeSocket,
+    ) -> bpy.types.NodeSocket:
+        uv_map = material.node_tree.nodes.new("ShaderNodeUVMap")
+        uv_map.name = "R3_TIE_Lightmap_UV"
+        uv_map.label = "R3 Tie lightmap UV2"
+        uv_map.uv_map = "LightmapUV"
+        uv_map.location = (-350.0, -75.0)
+        scale = material.node_tree.nodes.new("ShaderNodeAttribute")
+        scale.name = "R3_TIE_Lightmap_Scale"
+        scale.label = "Per-instance atlas scale"
+        scale.attribute_type = "OBJECT"
+        scale.attribute_name = _TIE_LIGHTMAP_SCALE_ATTRIBUTE
+        scale.location = (-350.0, -225.0)
+        offset = material.node_tree.nodes.new("ShaderNodeAttribute")
+        offset.name = "R3_TIE_Lightmap_Offset"
+        offset.label = "Per-instance atlas offset"
+        offset.attribute_type = "OBJECT"
+        offset.attribute_name = _TIE_LIGHTMAP_OFFSET_ATTRIBUTE
+        offset.location = (-350.0, -375.0)
+        scale_uv = material.node_tree.nodes.new("ShaderNodeVectorMath")
+        scale_uv.name = "R3_TIE_Lightmap_UV_Scale"
+        scale_uv.operation = "MULTIPLY"
+        scale_uv.location = (-75.0, -100.0)
+        material.node_tree.links.new(
+            uv_map.outputs["UV"],
+            scale_uv.inputs[0],
+        )
+        material.node_tree.links.new(
+            scale.outputs["Vector"],
+            scale_uv.inputs[1],
+        )
+        offset_uv = material.node_tree.nodes.new("ShaderNodeVectorMath")
+        offset_uv.name = "R3_TIE_Lightmap_UV_Offset"
+        offset_uv.operation = "ADD"
+        offset_uv.location = (125.0, -100.0)
+        material.node_tree.links.new(
+            scale_uv.outputs["Vector"],
+            offset_uv.inputs[0],
+        )
+        material.node_tree.links.new(
+            offset.outputs["Vector"],
+            offset_uv.inputs[1],
+        )
+        texture = material.node_tree.nodes.new("ShaderNodeTexImage")
+        texture.name = "R3_TIE_Lightmap_Atlas"
+        texture.label = "R3 compact Tie lightmap atlas"
+        texture.image = self.tie_lightmap_atlas
+        texture.extension = "EXTEND"
+        texture.location = (350.0, -100.0)
+        material.node_tree.links.new(
+            offset_uv.outputs["Vector"],
+            texture.inputs["Vector"],
+        )
+        multiply = material.node_tree.nodes.new("ShaderNodeMixRGB")
+        multiply.name = "R3_TIE_Lightmap_Multiply"
+        multiply.label = "R3 lit albedo x Tie lightmap"
+        multiply.blend_type = "MULTIPLY"
+        multiply.inputs[0].default_value = 1.0
+        multiply.location = (575.0, 175.0)
+        material.node_tree.links.new(color_output, multiply.inputs[1])
+        material.node_tree.links.new(
+            texture.outputs["Color"],
+            multiply.inputs[2],
+        )
+        material["insomniac_lightmap_image"] = self.tie_lightmap_atlas.name
+        return multiply.outputs["Color"]
+
+    def apply_tie_lightmap_transform(
+        self,
+        obj: bpy.types.Object,
+        instance: PlacedInstance,
+    ) -> None:
+        if (
+            instance.lightmap_zone_tuid is None
+            or instance.lightmap_index is None
+        ):
+            return
+        transform = self.tie_lightmap_transforms.get(
+            (instance.lightmap_zone_tuid, instance.lightmap_index)
+        )
+        if transform is None:
+            return
+        scale_x, scale_y, offset_x, offset_y = transform
+        obj[_TIE_LIGHTMAP_SCALE_ATTRIBUTE] = (scale_x, scale_y, 1.0)
+        obj[_TIE_LIGHTMAP_OFFSET_ATTRIBUTE] = (offset_x, offset_y, 0.0)
+        obj["insomniac_lightmap_zone_tuid"] = (
+            f"0x{instance.lightmap_zone_tuid:016X}"
+        )
+        obj["insomniac_lightmap_atlas"] = self.tie_lightmap_atlas.name
+
+    @staticmethod
+    def _disconnect_color_input(
+        material: bpy.types.Material,
+        socket: bpy.types.NodeSocket,
+    ) -> bpy.types.NodeSocket:
+        if socket.is_linked:
+            link = socket.links[0]
+            source = link.from_socket
+            material.node_tree.links.remove(link)
+            return source
+        color = material.node_tree.nodes.new("ShaderNodeRGB")
+        color.name = "R3_Terrain_Base_Color"
+        color.label = "Source base color"
+        color.outputs["Color"].default_value = socket.default_value
+        color.location = (-600.0, 350.0)
+        return color.outputs["Color"]
+
+    @staticmethod
+    def _multiply_vertex_alpha(
+        material: bpy.types.Material,
+        principled: bpy.types.Node,
+        vertex_color: bpy.types.Node,
+        *,
+        prefix: str,
+        node_label: str,
+    ) -> None:
+        alpha_socket = principled.inputs["Alpha"]
+        if not alpha_socket.is_linked:
+            return
+        alpha_link = alpha_socket.links[0]
+        source = alpha_link.from_socket
+        material.node_tree.links.remove(alpha_link)
+        multiply = material.node_tree.nodes.new("ShaderNodeMath")
+        multiply.name = f"{prefix}_Vertex_Alpha_Multiply"
+        multiply.label = f"{node_label} material alpha x vertex alpha"
+        multiply.operation = "MULTIPLY"
+        multiply.use_clamp = True
+        multiply.location = (200.0, -225.0)
+        material.node_tree.links.new(source, multiply.inputs[0])
+        material.node_tree.links.new(
+            vertex_color.outputs["Alpha"],
+            multiply.inputs[1],
+        )
+        material.node_tree.links.new(
+            multiply.outputs["Value"],
+            alpha_socket,
+        )
 
     def _store_shader_metadata(
         self,
@@ -1224,6 +1831,76 @@ class _MaterialFactory:
         self.images[key] = image
         return image
 
+    def terrain_lightmap_image(
+        self,
+        zone_tuid: int,
+        lightmap_index: int,
+        texture: DecodedTexture,
+    ) -> bpy.types.Image:
+        lookup_key = f"zone:{zone_tuid:016X}"
+        key = (lightmap_index, "lightmap", lookup_key)
+        cached = self.images.get(key)
+        if cached is not None:
+            return cached
+        scope = _reader_asset_scope(self.reader)
+        name = "_".join(
+            part
+            for part in (
+                _reader_asset_prefix(self.reader),
+                scope,
+                "Zone",
+                f"{zone_tuid:016X}",
+                "Lightmap",
+                f"{lightmap_index:04X}",
+            )
+            if part
+        )
+        image = self._compatible_image(name, key, scope)
+        if image is None and bpy.data.images.get(name) is not None:
+            digest = zlib.crc32(lookup_key.encode("utf-8"))
+            name = f"{name}_{digest:08X}"
+            image = self._compatible_image(name, key, scope)
+        if image is None:
+            image = bpy.data.images.new(
+                name,
+                width=texture.info.width,
+                height=texture.info.height,
+                alpha=True,
+                float_buffer=False,
+                is_data=False,
+            )
+            pixels = np.multiply(
+                np.flipud(texture.rgba),
+                np.float32(1.0 / 255.0),
+                dtype=np.float32,
+            ).ravel()
+            image.pixels.foreach_set(pixels)
+            image.pack()
+            image.update()
+        self._apply_colorspace(image, "lightmap")
+        image["insomniac_texture_tuid"] = f"0x{texture.info.tuid:016X}"
+        image["insomniac_requested_texture_id"] = (
+            f"0x{lightmap_index:08X}"
+        )
+        image["insomniac_resolved_texture_id"] = (
+            f"0x{texture.info.id:08X}"
+        )
+        image["insomniac_lookup_path_fallback"] = False
+        image["insomniac_texture_format"] = (
+            f"0x{texture.info.format_code:02X}"
+        )
+        image["insomniac_texture_role"] = "lightmap"
+        image["insomniac_texture_lookup_path"] = ""
+        image["insomniac_texture_lookup_key"] = lookup_key
+        image["insomniac_asset_scope"] = scope
+        image["insomniac_zone_tuid"] = f"0x{zone_tuid:016X}"
+        image["insomniac_lightmap_index"] = lightmap_index
+        image[_IMAGE_HAS_ALPHA_KEY] = bool(
+            np.min(texture.rgba[..., 3]) < 255
+        )
+        self.images[key] = image
+        return image
+
     @staticmethod
     def _compatible_image(
         name: str,
@@ -1255,7 +1932,9 @@ class _MaterialFactory:
     def _apply_colorspace(image: bpy.types.Image, role: str) -> None:
         if image.alpha_mode != "CHANNEL_PACKED":
             image.alpha_mode = "CHANNEL_PACKED"
-        colorspace = "sRGB" if role == "color" else "Non-Color"
+        colorspace = (
+            "sRGB" if role in {"color", "lightmap"} else "Non-Color"
+        )
         if image.colorspace_settings.name != colorspace:
             image.colorspace_settings.name = colorspace
 
@@ -1292,6 +1971,32 @@ def import_materials(
     )
 
 
+def _source_default_moby_meshes(
+    asset: MobyAsset,
+    *,
+    include_customizations: bool,
+) -> list[MeshGeometry]:
+    customization_segments = frozenset(asset.customization_segments)
+    default_draw_mask = asset.default_draw_mask
+    return [
+        mesh
+        for mesh in asset.meshes
+        if (
+            not mesh.is_damage_permutation
+            and mesh.lod_level == 0
+            and (
+                mesh.segment_index not in customization_segments
+                or (
+                    include_customizations
+                    and default_draw_mask is not None
+                    and mesh.segment_index < 64
+                    and bool(default_draw_mask & (1 << mesh.segment_index))
+                )
+            )
+        )
+    ]
+
+
 def import_moby(
     context: bpy.types.Context,
     reader: Resistance2Reader,
@@ -1322,15 +2027,10 @@ def import_moby(
     # All materials are built; see _MaterialFactory.release_decoded_textures.
     materials.release_decoded_textures()
     customization_segments = frozenset(asset.customization_segments)
-    base_meshes = [
-        mesh
-        for mesh in asset.meshes
-        if (
-            not mesh.is_damage_permutation
-            and mesh.segment_index not in customization_segments
-            and mesh.lod_level == 0
-        )
-    ]
+    base_meshes = _source_default_moby_meshes(
+        asset,
+        include_customizations=False,
+    )
     combined = _build_mesh(
         f"{_safe_name(asset.name)}_Mesh",
         base_meshes,
@@ -1601,7 +2301,7 @@ def import_moby(
         root=root,
         objects=(3 if armature else 2) + optional_object_count,
         meshes=1 + optional_object_count,
-        materials=len(materials.materials),
+        materials=materials.material_count,
         images=len(materials.images),
         actions=len(created_actions),
         warnings=warnings,
@@ -2010,6 +2710,52 @@ def _mesh_from_geometry(
     return mesh
 
 
+def _static_asset_geometry_and_materials(
+    materials: _MaterialFactory,
+    asset: TieAsset,
+    *,
+    variant_kind: str,
+) -> tuple[list[MeshGeometry], list[bpy.types.Material]]:
+    vertex_lit = any(mesh.colors is not None for mesh in asset.meshes)
+    if not vertex_lit or not asset.shader_tuids:
+        return (
+            asset.meshes,
+            [
+                materials.material(shader_tuid)
+                for shader_tuid in asset.shader_tuids
+            ],
+        )
+
+    blender_materials: list[bpy.types.Material] = []
+    material_slots: dict[tuple[int, bool], int] = {}
+    geometries: list[MeshGeometry] = []
+    for mesh in asset.meshes:
+        shader_index = (
+            mesh.shader_index
+            if 0 <= mesh.shader_index < len(asset.shader_tuids)
+            else 0
+        )
+        lightmapped = (
+            variant_kind == "TIE"
+            and materials.tie_lightmap_atlas is not None
+            and mesh.secondary_uvs is not None
+        )
+        key = (shader_index, lightmapped)
+        material_slot = material_slots.get(key)
+        if material_slot is None:
+            material_slot = len(blender_materials)
+            material_slots[key] = material_slot
+            blender_materials.append(
+                materials.vertex_lit_material(
+                    asset.shader_tuids[shader_index],
+                    variant_kind=variant_kind,
+                    lightmapped=lightmapped,
+                )
+            )
+        geometries.append(replace(mesh, shader_index=material_slot))
+    return geometries, blender_materials
+
+
 def import_tie(
     context: bpy.types.Context,
     reader: Resistance2Reader,
@@ -2035,12 +2781,14 @@ def import_tie(
         warnings,
         cycles_materials=options.cycles_materials,
     )
-    blender_materials = [
-        materials.material(shader_tuid) for shader_tuid in asset.shader_tuids
-    ]
+    geometries, blender_materials = _static_asset_geometry_and_materials(
+        materials,
+        asset,
+        variant_kind="TIE",
+    )
     # All materials are built; see _MaterialFactory.release_decoded_textures.
     materials.release_decoded_textures()
-    combined = _build_mesh(f"{name}_Mesh", asset.meshes, blender_materials)
+    combined = _build_mesh(f"{name}_Mesh", geometries, blender_materials)
     obj = bpy.data.objects.new(name, combined.mesh)
     collection.objects.link(obj)
     obj.parent = root
@@ -2050,10 +2798,66 @@ def import_tie(
         root=root,
         objects=2,
         meshes=1,
-        materials=len(materials.materials),
+        materials=materials.material_count,
         images=len(materials.images),
         warnings=warnings,
     )
+
+
+def _import_level_static_instances(
+    collection: bpy.types.Collection,
+    root: bpy.types.Object,
+    materials: _MaterialFactory,
+    result: ImportResult,
+    warnings: list[str],
+    instances: Iterable[PlacedInstance],
+    *,
+    collection_name: str,
+    asset_label: str,
+    asset_kind: str,
+    read_asset: Callable[[int], TieAsset],
+) -> None:
+    instance_collection = _child_collection(collection, collection_name)
+    meshes: dict[int, bpy.types.Mesh] = {}
+    for instance in instances:
+        mesh = meshes.get(instance.asset_tuid)
+        if mesh is None:
+            try:
+                asset = read_asset(instance.asset_tuid)
+                (
+                    geometries,
+                    asset_materials,
+                ) = _static_asset_geometry_and_materials(
+                    materials,
+                    asset,
+                    variant_kind=asset_kind,
+                )
+                mesh = _build_mesh(
+                    f"{asset_label}_{instance.asset_tuid:016X}",
+                    geometries,
+                    asset_materials,
+                ).mesh
+                meshes[instance.asset_tuid] = mesh
+                result.meshes += 1
+            except InsomniacError as exc:
+                message = (
+                    f"{asset_label} 0x{instance.asset_tuid:016X} "
+                    f"skipped: {exc}"
+                )
+                LOGGER.warning(message)
+                warnings.append(message)
+                continue
+        obj = _create_instance_object(
+            instance_collection,
+            instance,
+            mesh,
+            root,
+            kind=asset_kind,
+        )
+        result.objects += 1
+        obj["insomniac_zone_instance"] = True
+        if asset_kind == "TIE":
+            materials.apply_tie_lightmap_transform(obj, instance)
 
 
 def import_level(
@@ -2086,24 +2890,70 @@ def import_level(
     result = ImportResult(root=root, objects=1, warnings=warnings)
 
     zones = reader.read_zones()
+    if options.ties:
+        materials.prepare_tie_lightmap_atlas(zones)
     if options.terrain:
         terrain_collection = _child_collection(collection, "Terrain")
         for zone in zones:
             if not zone.terrain_meshes:
                 continue
-            geometries = [
-                MeshGeometry(
-                    shader_index=terrain.shader_index,
-                    positions=terrain.positions,
-                    uvs=terrain.uvs,
-                    indices=terrain.indices,
-                )
+            geometries: list[MeshGeometry] = []
+            zone_materials: list[bpy.types.Material] = []
+            material_variants: dict[
+                tuple[int, int | None, bool],
+                int,
+            ] = {}
+            use_material_variants = bool(zone.shader_tuids) and any(
+                terrain.colors is not None
+                or terrain.lightmap_index in zone.lightmaps
                 for terrain in zone.terrain_meshes
-            ]
-            zone_materials = [
-                materials.material(shader_tuid)
-                for shader_tuid in zone.shader_tuids
-            ]
+            )
+            for terrain in zone.terrain_meshes:
+                shader_index = terrain.shader_index
+                if not 0 <= shader_index < len(zone.shader_tuids):
+                    shader_index = 0
+                has_vertex_colors = terrain.colors is not None
+                lightmap = (
+                    zone.lightmaps.get(terrain.lightmap_index)
+                    if terrain.lightmap_index is not None
+                    else None
+                )
+                if use_material_variants:
+                    variant_key = (
+                        shader_index,
+                        terrain.lightmap_index,
+                        has_vertex_colors,
+                    )
+                    material_index = material_variants.get(variant_key)
+                    if material_index is None:
+                        material_index = len(zone_materials)
+                        material_variants[variant_key] = material_index
+                        zone_materials.append(
+                            materials.terrain_material(
+                                zone.shader_tuids[shader_index],
+                                zone.tuid,
+                                terrain.lightmap_index,
+                                lightmap,
+                                vertex_colors=has_vertex_colors,
+                            )
+                        )
+                else:
+                    material_index = shader_index
+                geometries.append(
+                    MeshGeometry(
+                        shader_index=material_index,
+                        positions=terrain.positions,
+                        uvs=terrain.uvs,
+                        indices=terrain.indices,
+                        secondary_uvs=terrain.secondary_uvs,
+                        colors=terrain.colors,
+                    )
+                )
+            if not zone_materials:
+                zone_materials = [
+                    materials.material(shader_tuid)
+                    for shader_tuid in zone.shader_tuids
+                ]
             combined = _build_mesh(
                 f"Zone_{zone.tuid:016X}_Terrain",
                 geometries,
@@ -2120,45 +2970,78 @@ def import_level(
             result.meshes += 1
 
     if options.ties:
-        tie_collection = _child_collection(collection, "Static Props")
-        tie_meshes: dict[int, bpy.types.Mesh] = {}
         instances = [
             instance
             for zone in zones
             for instance in zone.tie_instances
         ]
-        for instance in instances:
-            mesh = tie_meshes.get(instance.asset_tuid)
-            if mesh is None:
-                try:
-                    tie = reader.read_tie(instance.asset_tuid)
-                    tie_materials = [
-                        materials.material(shader_tuid)
-                        for shader_tuid in tie.shader_tuids
-                    ]
-                    mesh = _build_mesh(
-                        f"Tie_{instance.asset_tuid:016X}",
-                        tie.meshes,
-                        tie_materials,
-                    ).mesh
-                    tie_meshes[instance.asset_tuid] = mesh
-                    result.meshes += 1
-                except InsomniacError as exc:
-                    message = (
-                        f"Tie 0x{instance.asset_tuid:016X} skipped: {exc}"
-                    )
-                    LOGGER.warning(message)
-                    warnings.append(message)
-                    continue
-            obj = _create_instance_object(
-                tie_collection,
-                instance,
-                mesh,
+        _import_level_static_instances(
+            collection,
+            root,
+            materials,
+            result,
+            warnings,
+            instances,
+            collection_name="Static Props",
+            asset_label="Tie",
+            asset_kind="TIE",
+            read_asset=reader.read_tie,
+        )
+
+    if options.vegetation:
+        vegetation = (
+            (
+                "Shrubs",
+                "Shrub",
+                "SHRUB",
+                "read_shrub",
+                [
+                    instance
+                    for zone in zones
+                    for instance in zone.shrub_instances
+                ],
+            ),
+            (
+                "Foliage",
+                "Foliage",
+                "FOLIAGE",
+                "read_foliage",
+                [
+                    instance
+                    for zone in zones
+                    for instance in zone.foliage_instances
+                ],
+            ),
+        )
+        for (
+            collection_name,
+            asset_label,
+            asset_kind,
+            reader_method,
+            instances,
+        ) in vegetation:
+            if not instances:
+                continue
+            read_asset = getattr(reader, reader_method, None)
+            if not callable(read_asset):
+                warnings.append(
+                    f"Skipped {len(instances)} {asset_label.lower()} "
+                    f"placements; {_reader_game_label(reader)} does not "
+                    f"implement their geometry reader"
+                )
+                continue
+            _import_level_static_instances(
+                collection,
                 root,
-                kind="TIE",
+                materials,
+                result,
+                warnings,
+                instances,
+                collection_name=collection_name,
+                asset_label=asset_label,
+                asset_kind=asset_kind,
+                read_asset=read_asset,
             )
-            result.objects += 1
-            obj["insomniac_zone_instance"] = True
 
         unsupported_shrubs = sum(
             zone.unsupported_shrub_instances for zone in zones
@@ -2167,9 +3050,13 @@ def import_level(
             zone.unsupported_foliage_instances for zone in zones
         )
         if unsupported_shrubs or unsupported_foliage:
+            skipped = []
+            if unsupported_shrubs:
+                skipped.append(f"{unsupported_shrubs} shrub")
+            if unsupported_foliage:
+                skipped.append(f"{unsupported_foliage} foliage")
             warnings.append(
-                f"Skipped {unsupported_shrubs} shrub and "
-                f"{unsupported_foliage} foliage placements; their "
+                f"Skipped {' and '.join(skipped)} placements; their "
                 f"{_reader_game_label(reader)} geometry chains are "
                 "documented but not implemented yet"
             )
@@ -2188,24 +3075,23 @@ def import_level(
                 if mesh is None:
                     try:
                         moby = reader.read_moby(instance.asset_tuid)
-                        customization_segments = frozenset(
-                            moby.customization_segments
-                        )
                         moby_materials = [
                             materials.material(shader_tuid)
                             for shader_tuid in moby.shader_tuids
                         ]
                         mesh = _build_mesh(
                             f"Moby_{instance.asset_tuid:016X}",
-                            (
-                                geometry
-                                for geometry in moby.meshes
-                                if not geometry.is_damage_permutation
-                                and geometry.segment_index
-                                not in customization_segments
+                            _source_default_moby_meshes(
+                                moby,
+                                include_customizations=True,
                             ),
                             moby_materials,
                         ).mesh
+                        if moby.default_draw_mask is not None:
+                            mesh["insomniac_default_draw_mask"] = (
+                                f"0x{moby.default_draw_mask:016X}"
+                            )
+                        mesh["insomniac_source_default_parts"] = True
                         moby_meshes[instance.asset_tuid] = mesh
                         result.meshes += 1
                     except InsomniacError as exc:
@@ -2216,13 +3102,19 @@ def import_level(
                         LOGGER.warning(message)
                         warnings.append(message)
                         continue
-                _create_instance_object(
+                obj = _create_instance_object(
                     region_collection,
                     instance,
                     mesh,
                     root,
                     kind="MOBY",
                 )
+                obj["insomniac_source_default_parts"] = True
+                default_draw_mask = mesh.get(
+                    "insomniac_default_draw_mask"
+                )
+                if default_draw_mask is not None:
+                    obj["insomniac_default_draw_mask"] = default_draw_mask
                 result.objects += 1
 
     # Level materials are built lazily while terrain, ties and mobys are
@@ -2230,7 +3122,7 @@ def import_level(
     # See _MaterialFactory.release_decoded_textures.
     materials.release_decoded_textures()
     warnings.extend(reader.warnings)
-    result.materials = len(materials.materials)
+    result.materials = materials.material_count
     result.images = len(materials.images)
     return result
 
@@ -2280,11 +3172,17 @@ def _build_mesh(
     geometry_list = list(geometries)
     positions_parts: list[np.ndarray] = []
     uv_parts: list[np.ndarray] = []
+    secondary_uv_parts: list[np.ndarray] = []
+    color_parts: list[np.ndarray] = []
     face_parts: list[np.ndarray] = []
     material_parts: list[np.ndarray] = []
     bone_index_parts: list[np.ndarray] = []
     bone_weight_parts: list[np.ndarray] = []
     any_skin = any(item.bone_indices is not None for item in geometry_list)
+    any_secondary_uvs = any(
+        item.secondary_uvs is not None for item in geometry_list
+    )
+    any_colors = any(item.colors is not None for item in geometry_list)
     vertex_offset = 0
 
     for geometry in geometry_list:
@@ -2304,7 +3202,30 @@ def _build_mesh(
         if not len(triangles):
             continue
         positions_parts.append(positions)
-        uv_parts.append(np.asarray(geometry.uvs, dtype=np.float32))
+        geometry_uvs = np.asarray(geometry.uvs, dtype=np.float32)
+        uv_parts.append(geometry_uvs)
+        if any_secondary_uvs:
+            secondary_uv_parts.append(
+                np.asarray(
+                    (
+                        geometry.secondary_uvs
+                        if geometry.secondary_uvs is not None
+                        else geometry_uvs
+                    ),
+                    dtype=np.float32,
+                )
+            )
+        if any_colors:
+            color_parts.append(
+                np.asarray(
+                    (
+                        geometry.colors
+                        if geometry.colors is not None
+                        else np.ones((len(positions), 4), dtype=np.float32)
+                    ),
+                    dtype=np.float32,
+                )
+            )
         face_parts.append(triangles.astype(np.int32) + vertex_offset)
         material_index = (
             geometry.shader_index
@@ -2336,6 +3257,12 @@ def _build_mesh(
         return _CombinedMesh(mesh, None, None)
     positions = np.concatenate(positions_parts)
     uvs = np.concatenate(uv_parts)
+    secondary_uvs = (
+        np.concatenate(secondary_uv_parts)
+        if secondary_uv_parts
+        else None
+    )
+    colors = np.concatenate(color_parts) if color_parts else None
     faces = np.concatenate(face_parts)
     material_indices = np.concatenate(material_parts)
 
@@ -2361,6 +3288,27 @@ def _build_mesh(
         uv_layer.uv.foreach_set("vector", loop_uvs.reshape(-1))
     else:
         uv_layer.data.foreach_set("uv", loop_uvs.reshape(-1))
+    if secondary_uvs is not None:
+        secondary_uv_layer = mesh.uv_layers.new(name="LightmapUV")
+        loop_secondary_uvs = secondary_uvs[faces.reshape(-1)].copy()
+        loop_secondary_uvs[:, 1] = 1.0 - loop_secondary_uvs[:, 1]
+        if hasattr(secondary_uv_layer, "uv"):
+            secondary_uv_layer.uv.foreach_set(
+                "vector",
+                loop_secondary_uvs.reshape(-1),
+            )
+        else:
+            secondary_uv_layer.data.foreach_set(
+                "uv",
+                loop_secondary_uvs.reshape(-1),
+            )
+    if colors is not None:
+        color_attribute = mesh.color_attributes.new(
+            name="InsomniacVertexColor",
+            type="BYTE_COLOR",
+            domain="POINT",
+        )
+        color_attribute.data.foreach_set("color", colors.reshape(-1))
     for material in materials:
         mesh.materials.append(material)
     mesh.update(calc_edges=True)
@@ -2808,6 +3756,8 @@ def _create_instance_object(
     obj["insomniac_asset_kind"] = kind
     if instance.group:
         obj["insomniac_group"] = instance.group
+    if instance.lightmap_index is not None:
+        obj["insomniac_lightmap_index"] = instance.lightmap_index
     return obj
 
 

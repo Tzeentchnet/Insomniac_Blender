@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 
 import numpy as np
@@ -96,6 +96,8 @@ class MeshGeometry:
     positions: FloatArray
     uvs: FloatArray
     indices: IntArray
+    secondary_uvs: FloatArray | None = None
+    colors: FloatArray | None = None
     bone_indices: UInt16Array | None = None
     bone_weights: UInt8Array | None = None
     segment_index: int = 0
@@ -280,6 +282,8 @@ class PlacedInstance:
     name: str
     matrix: FloatArray
     group: int = 0
+    lightmap_index: int | None = None
+    lightmap_zone_tuid: int | None = None
 
 
 @dataclass(slots=True)
@@ -289,6 +293,9 @@ class TerrainMesh:
     positions: FloatArray
     uvs: FloatArray
     indices: IntArray
+    secondary_uvs: FloatArray | None = None
+    colors: FloatArray | None = None
+    lightmap_index: int | None = None
 
 
 @dataclass(slots=True)
@@ -297,6 +304,9 @@ class Zone:
     tie_instances: list[PlacedInstance]
     terrain_meshes: list[TerrainMesh]
     shader_tuids: tuple[int, ...]
+    lightmaps: dict[int, DecodedTexture] = field(default_factory=dict)
+    shrub_instances: list[PlacedInstance] = field(default_factory=list)
+    foliage_instances: list[PlacedInstance] = field(default_factory=list)
     unsupported_shrub_instances: int = 0
     unsupported_foliage_instances: int = 0
 

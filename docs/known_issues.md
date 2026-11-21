@@ -13,8 +13,13 @@ numeric names are used.
 
 The primary gameplay Moby group is imported. Six additional gameplay groups
 have unverified record semantics and are skipped rather than guessed.
-`ps3levelcoll.dat`, directional lightmaps, shrubs, foliage, lighting, VFX,
-cubemaps, and audio are not decoded.
+`ps3levelcoll.dat`, directional lightmaps, lighting, VFX, cubemaps, and audio
+are not decoded.
+
+Shrub meshes and clustered placements are imported. Foliage branch geometry
+and sprite cards are imported from the first authored LOD. Runtime vegetation
+wind, shrub vertex colors, foliage custom normals, and camera-facing
+billboarding are not reproduced.
 
 ## Ratchet & Clank Future: Tools of Destruction
 
@@ -35,9 +40,11 @@ to edit its skeleton and Actions.
 
 Old Moby secondary-bangle semantics, damage permutations, authored lower
 LODs, and Moby collision are not yet independently verified. `collision.dat`
-also uses a separate non-IGHW level layout and is not imported. Shrub and
-foliage geometry, lighting, VFX, cubemaps, and audio are outside the current
-level importer.
+also uses a separate non-IGHW level layout and is not imported. Foliage
+branch meshes, sprite cards, and placements are imported from the first
+authored LOD with masked, double-sided materials. Runtime wind, custom
+normals, and camera-facing billboarding are not reproduced. Shrub geometry,
+lighting, VFX, cubemaps, and audio are outside the current level importer.
 
 ## Resistance: Burning Skies (experimental)
 
@@ -112,6 +119,13 @@ material parameter block for scale and blending. Their exact composition is
 not yet proven. Bound maps are preserved as unconnected Non-Color image nodes
 instead of being blended speculatively.
 
+R3 Tie primitives select their shader group with byte `+0x26`. With that
+game-specific selector, the source-authored
+`defaults/default_pink_shader/default_pink_shader` material is limited to the
+faces that actually reference it. R3's instance of that placeholder contains
+an opaque gray-grid texture, unlike R2's magenta texture; it is retained on
+those remaining source faces rather than globally replaced.
+
 Blend mode 1 is used by several deferred decal and surface-overlay families,
 but its exact source framebuffer equation is not named by the available
 public tools. The Goliath wet-leg shader `0x5966249FD0D6149B` uses an opaque
@@ -130,6 +144,11 @@ head assets are separate, have no embedded pairing, and use incompatible bone
 indices and bind skeletons. They are not automatically combined until a
 validated attachment profile can identify both the intended companion and its
 animation relationship.
+
+Placed gameplay Mobys use their class default draw mask, restoring intact
+source-default parts such as Warden Jeep wheels and body panels. Per-instance
+scripted draw-mask changes and multiplayer outfitter selections are not
+decoded, so placements that change parts at runtime retain the class default.
 
 ### R3-specific animation playback
 
@@ -154,17 +173,31 @@ idle base for an exact in-game result.
 
 ### Shared unsupported level resources
 
-As with Resistance 2, shrub and foliage geometry, lighting, level collision,
-VFX, and cubemaps are not imported. Terrain, Tie placement, and gameplay Moby
-placement are supported.
+Resistance 3's game-specific foliage sprite cards and placements are
+imported, but runtime wind, custom normals, and camera-facing billboarding
+are not reproduced. UFrag terrain imports its packed per-vertex light,
+secondary UV, and used `0x5400` baked zone lightmaps from the matching
+`lighting.dat` asset. R3 Ties likewise import packed vertex light, optional
+UV2, and per-instance `0x5400` lighting. Tie maps use a level-wide atlas
+downsampled by four in each dimension to preserve mesh sharing and avoid
+thousands of Blender images and materials. The parallel `0x5410`
+shadow/directional texture and dynamic scene lighting are not composed.
+Shrub geometry, level collision, VFX, and cubemaps are not imported.
+Terrain, Tie placement, and gameplay Moby placement are supported.
 
 ## Resistance 2
 
 ### Shrubs and foliage
 
-Zone records are counted, but shrub and foliage geometry is not imported.
-They use separate resource kinds and vertex layouts rather than Tie geometry.
-The level importer reports skipped counts.
+Foliage `0xA000` sprite buffers, `0xA200` descriptors, and
+`0x7400`/`0x7440` placements are imported with shared mesh datablocks and
+masked materials. The first authored LOD is expanded into static cards.
+Runtime wind, custom normals, and camera-facing billboarding are not
+reproduced.
+
+Shrub records are still only counted. They use a separate resource kind and
+vertex/placement layouts rather than Tie or foliage geometry, and the level
+importer reports the skipped count.
 
 ### Gameplay Mobys are static in level imports
 
@@ -213,8 +246,9 @@ Packed green remains disconnected because the public `useSpecular` bit is
 absent from every shader in the whole-disc corpus. Detail maps are
 multi-channel in most tested cases; their exact blend and scale semantics are
 not proven, so their imported Non-Color image nodes remain disconnected.
-Foliage uses a distinct material-vector family, but foliage geometry is not
-imported yet.
+Foliage uses a distinct material-vector family. Its shader textures remain
+available, but the unsafe family-specific vectors are not interpreted as
+ordinary surface color controls.
 
 The source of any additional emission tint and intensity within the six
 `0x5000` material vectors is not yet proven. Emissive color therefore uses the

@@ -20,6 +20,9 @@ except ModuleNotFoundError:
 if bpy is not None:
     from insomniac_asset_io.blender.importer import (
         AssetImportOptions,
+        LevelImportOptions,
+        _build_mesh,
+        import_level,
         import_moby,
     )
     from insomniac_asset_io.blender.preferences import (
@@ -28,8 +31,12 @@ if bpy is not None:
     from insomniac_asset_io.games.resistance_2.formats import (
         CollisionMesh,
         CollisionPrimitive,
+        GameplayRegion,
         MeshGeometry,
         MobyAsset,
+        PlacedInstance,
+        TieAsset,
+        Zone,
     )
 
 
@@ -41,6 +48,77 @@ class _Reader:
 
     def read_moby(self, _tuid):
         return self.asset
+
+    def clear_texture_cache(self):
+        pass
+
+
+class _LevelReader:
+    resource_prefix = "fixture"
+    asset_prefix = "RFOM"
+    game_id = "RESISTANCE_FOM"
+    game_label = "Resistance: Fall of Man"
+
+    def __init__(self):
+        self.warnings: list[str] = []
+        matrix = np.eye(4, dtype=np.float32)
+        self.zones = [
+            Zone(
+                tuid=0,
+                tie_instances=[],
+                terrain_meshes=[],
+                shader_tuids=(),
+                shrub_instances=[
+                    PlacedInstance(
+                        asset_tuid=1,
+                        instance_tuid=10,
+                        name="Shrub_0",
+                        matrix=matrix.copy(),
+                    )
+                ],
+                foliage_instances=[
+                    PlacedInstance(
+                        asset_tuid=2,
+                        instance_tuid=20,
+                        name="Foliage_0",
+                        matrix=matrix.copy(),
+                    )
+                ],
+            )
+        ]
+
+    @staticmethod
+    def _asset(tuid: int) -> TieAsset:
+        return TieAsset(
+            tuid=tuid,
+            meshes=[
+                MeshGeometry(
+                    shader_index=0,
+                    positions=np.asarray(
+                        ((0, 0, 0), (1, 0, 0), (0, 1, 0)),
+                        dtype=np.float32,
+                    ),
+                    uvs=np.zeros((3, 2), dtype=np.float32),
+                    indices=np.asarray((0, 1, 2), dtype=np.int32),
+                )
+            ],
+            shader_tuids=(),
+        )
+
+    def read_zones(self):
+        return self.zones
+
+    def read_shrub(self, tuid):
+        return self._asset(tuid)
+
+    def read_tie(self, tuid):
+        return self._asset(tuid)
+
+    def read_foliage(self, tuid):
+        return self._asset(tuid)
+
+    def read_gameplay_regions(self):
+        return [GameplayRegion(name="fixture", moby_instances=[])]
 
     def clear_texture_cache(self):
         pass
@@ -113,6 +191,114 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
         finally:
             bpy.utils.unregister_class(InsomniacAddonPreferences)
 
+    def test_level_vegetation_is_enabled_by_default(self) -> None:
+        bpy.utils.register_class(InsomniacAddonPreferences)
+        try:
+            properties = InsomniacAddonPreferences.bl_rna.properties
+            self.assertTrue(properties["level_import_vegetation"].default)
+        finally:
+            bpy.utils.unregister_class(InsomniacAddonPreferences)
+
+    def test_level_vegetation_uses_dedicated_collections(self) -> None:
+        result = import_level(
+            bpy.context,
+            _LevelReader(),
+            LevelImportOptions(
+                materials=False,
+                terrain=False,
+                ties=False,
+                vegetation=True,
+                gameplay=False,
+                convert_axes=False,
+            ),
+            source_path="fixture",
+        )
+        level_collection = result.root.users_collection[0]
+        child_objects = {
+            child.name: tuple(child.objects)
+            for child in level_collection.children
+        }
+
+        self.assertEqual(set(child_objects), {"Shrubs", "Foliage"})
+        self.assertEqual(
+            child_objects["Shrubs"][0]["insomniac_asset_kind"],
+            "SHRUB",
+        )
+        self.assertEqual(
+            child_objects["Foliage"][0]["insomniac_asset_kind"],
+            "FOLIAGE",
+        )
+        self.assertEqual(result.objects, 3)
+        self.assertEqual(result.meshes, 2)
+
+    def test_mesh_preserves_secondary_uvs_and_point_colors(self) -> None:
+        material = bpy.data.materials.new("Terrain")
+        geometry = MeshGeometry(
+            shader_index=0,
+            positions=np.asarray(
+                ((0, 0, 0), (1, 0, 0), (0, 1, 0)),
+                dtype=np.float32,
+            ),
+            uvs=np.asarray(
+                ((0.0, 0.0), (1.0, 0.0), (0.0, 1.0)),
+                dtype=np.float32,
+            ),
+            indices=np.asarray((0, 1, 2), dtype=np.int32),
+            secondary_uvs=np.asarray(
+                ((0.25, 0.5), (0.5, 0.75), (0.75, 1.0)),
+                dtype=np.float32,
+            ),
+            colors=np.asarray(
+                (
+                    (0.25, 0.25, 0.25, 0.0),
+                    (0.5, 0.5, 0.5, 0.5),
+                    (1.0, 1.0, 1.0, 1.0),
+                ),
+                dtype=np.float32,
+            ),
+        )
+
+        mesh = _build_mesh("Terrain", (geometry,), (material,)).mesh
+
+        self.assertEqual(
+            {layer.name for layer in mesh.uv_layers},
+            {"UVMap", "LightmapUV"},
+        )
+        color = mesh.color_attributes["InsomniacVertexColor"]
+        self.assertEqual(color.domain, "POINT")
+        self.assertEqual(color.data_type, "BYTE_COLOR")
+        self.assertEqual(len(color.data), 3)
+
+    def test_level_tie_preserves_instance_lightmap_index(self) -> None:
+        reader = _LevelReader()
+        reader.zones[0].tie_instances = [
+            PlacedInstance(
+                asset_tuid=3,
+                instance_tuid=30,
+                name="Tie_0",
+                matrix=np.eye(4, dtype=np.float32),
+                lightmap_index=17,
+            )
+        ]
+
+        result = import_level(
+            bpy.context,
+            reader,
+            LevelImportOptions(
+                materials=False,
+                terrain=False,
+                ties=True,
+                vegetation=False,
+                gameplay=False,
+                convert_axes=False,
+            ),
+            source_path="fixture",
+        )
+        level_collection = result.root.users_collection[0]
+        tie = tuple(level_collection.children["Static Props"].objects)[0]
+
+        self.assertEqual(tie["insomniac_lightmap_index"], 17)
+
     def test_source_default_customizations_can_be_shown(self) -> None:
         result = import_moby(
             bpy.context,
@@ -139,6 +325,66 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
         self.assertFalse(bangle_collection.hide_viewport)
         self.assertFalse(bangle_collection.hide_render)
         self.assertFalse(bangle_collection.hide_select)
+
+    def test_level_gameplay_uses_source_default_customizations(self) -> None:
+        reader = _LevelReader()
+        asset = self._asset()
+        asset.meshes.append(
+            MeshGeometry(
+                shader_index=0,
+                positions=np.asarray(
+                    ((0, 0, 0), (1, 0, 0), (0, 1, 0)),
+                    dtype=np.float32,
+                ),
+                uvs=np.zeros((3, 2), dtype=np.float32),
+                indices=np.asarray((0, 1, 2), dtype=np.int32),
+                segment_index=4,
+            )
+        )
+        asset.customization_segments = (3, 4)
+        reader.read_moby = lambda _tuid: asset
+        reader.read_gameplay_regions = lambda: [
+            GameplayRegion(
+                name="fixture",
+                moby_instances=[
+                    PlacedInstance(
+                        asset_tuid=1,
+                        instance_tuid=30,
+                        name="Jeep",
+                        matrix=np.eye(4, dtype=np.float32),
+                    )
+                ],
+            )
+        ]
+
+        result = import_level(
+            bpy.context,
+            reader,
+            LevelImportOptions(
+                materials=False,
+                terrain=False,
+                ties=False,
+                vegetation=False,
+                gameplay=True,
+                convert_axes=False,
+            ),
+            source_path="fixture",
+        )
+        level_collection = result.root.users_collection[0]
+        gameplay = level_collection.children["Gameplay Instances"]
+        jeep = tuple(gameplay.children["fixture"].objects)[0]
+
+        self.assertEqual(len(jeep.data.polygons), 2)
+        self.assertEqual(
+            jeep.data["insomniac_default_draw_mask"],
+            "0x0000000000000009",
+        )
+        self.assertTrue(jeep.data["insomniac_source_default_parts"])
+        self.assertEqual(
+            jeep["insomniac_default_draw_mask"],
+            "0x0000000000000009",
+        )
+        self.assertTrue(jeep["insomniac_source_default_parts"])
 
     def test_optional_geometry_uses_dedicated_collections(self) -> None:
         result = import_moby(

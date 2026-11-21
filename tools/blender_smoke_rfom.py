@@ -91,10 +91,33 @@ def main() -> None:
                     materials=args.materials,
                     terrain=True,
                     ties=True,
+                    vegetation=True,
                     gameplay=True,
                 ),
                 source_path=str(args.source),
             )
+            zones = reader.read_zones()
+            expected_vegetation = {
+                "SHRUB": sum(
+                    len(zone.shrub_instances) for zone in zones
+                ),
+                "FOLIAGE": sum(
+                    len(zone.foliage_instances) for zone in zones
+                ),
+            }
+            imported_vegetation = {
+                kind: sum(
+                    obj.get("insomniac_asset_kind") == kind
+                    for obj in bpy.data.objects
+                )
+                for kind in expected_vegetation
+            }
+            if imported_vegetation != expected_vegetation:
+                raise RuntimeError(
+                    "Vegetation placement mismatch: expected "
+                    f"{expected_vegetation}, imported "
+                    f"{imported_vegetation}"
+                )
 
     if result.root.get("insomniac_game") != "RESISTANCE_FOM":
         raise RuntimeError("Imported root does not identify the RFoM adapter")

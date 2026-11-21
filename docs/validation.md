@@ -16,9 +16,54 @@ python tools\smoke_r2.py "C:\path\to\level_cached.psarc"
 python tools\smoke_r3.py "C:\path\to\level_cached.psarc"
 ```
 
-The smoke test reports resource counts and decodes one Moby, skeleton,
-animset, diffuse texture, Tie, zone, and gameplay region without writing game
-data to the repository.
+The RFoM smoke test reports resource counts and decodes one Moby, skeleton,
+animset, diffuse texture, Tie, zone, shrub and foliage placement counts, and
+gameplay region without writing game data to the repository.
+
+The portable `test_foliage.py` fixture separately exercises the R2 and R3
+`0xA000` card buffers, their distinct `0xA200` descriptors, and their
+distinct `0x7440` placement records. A real R2 source with foliage can be
+checked by setting `R2_LEVEL_SOURCE`; Scotia Co-op contains three foliage
+assets and 200 placements.
+
+Run the real R3 foliage regression against `mine_traversal_train`:
+
+```powershell
+$env:R3_FOLIAGE_SOURCE = "C:\path\to\mine_traversal_train\level_cached.psarc"
+python -m unittest discover -s tests -p "test_real_r3.py" -v
+Remove-Item Env:R3_FOLIAGE_SOURCE
+```
+
+This decodes all 11 foliage assets, both masked leaf materials and their
+albedo textures, and all 1,050 placements. It also verifies that every
+placement resolves to one of the level's foliage assets. The same regression
+checks the exact grass, conifer, and track Tie material groups selected by
+R3 primitive byte `+0x26`, their vertex light and optional UV2, and 6,730
+placed-Tie lightmap IDs. It decodes the target grass instance's 256x256 BC3
+lightmap from zone `0x58E8829DE249D884`. For all 972 UFrag meshes in zone
+`0xEF2A7A01E249D922`, it verifies world bounds, the complete 0-to-1 UV1
+range, packed vertex-light values, lightmap index 109, and the decoded
+1024x1024 BC3 lightmap read from the matching `lighting.dat` asset.
+It also verifies that `JEEP_REINFORCEMENT_6` resolves to the Warden Jeep
+Moby, whose `0x03FFFFFF` class draw mask enables all 35 source meshes and
+16,978 raw triangles.
+
+Run a complete material-enabled R3 level import and assert its Blender
+terrain-light data:
+
+```powershell
+& "D:\Blender Foundation\Blender 5.2\blender.exe" --background `
+  --python-exit-code 1 --python tools\blender_smoke_r3.py -- `
+  "C:\path\to\mine_traversal_train\level_cached.psarc" --level `
+  --level-materials --expect-terrain-lightmaps 34 `
+  --expect-tie-lightmaps 6730 `
+  --output "C:\path\to\r3_mine_traversal_train.blend"
+```
+
+This checks point-domain vertex-light attributes, `LightmapUV`, packed sRGB
+zone-lightmap images, the packed 4096x2116 Tie atlas, all per-object atlas
+transforms, and both terrain and Tie material-graph multiplication after the
+complete scene is built.
 
 Run the Capelli R3 Game Head material and facial-animation regression against
 an extracted owner level:
@@ -69,6 +114,9 @@ Validate RFoM imports with Blender 5.2:
   --kind level --materials
 ```
 
+For level imports, the Blender smoke test compares every decoded shrub and
+foliage placement with the corresponding imported Blender object count.
+
 Run the environment-gated Tools of Destruction Metropolis regression against
 an extracted archive trio:
 
@@ -81,10 +129,11 @@ Remove-Item Env:TOD_ISO_PATH
 ```
 
 This checks the representative compressed and pair-frame animations, a shader
-texture, a Tie, UFrag terrain, Tie placements, gameplay Moby placements, the
-exact `BCUS98127`/`02.00` disc identity, and the 20-level disc inventory.
-Each source-specific test is skipped when its corresponding environment
-variable is not set.
+texture, a Tie, UFrag terrain, Tie placements, both Metropolis foliage assets,
+all 757 foliage placements, gameplay Moby placements, the exact
+`BCUS98127`/`02.00` disc identity, and the 20-level disc inventory. Each
+source-specific test is skipped when its corresponding environment variable
+is not set.
 
 Validate Tools of Destruction imports with Blender 5.2. All generated
 `.blend` files must use a disposable output directory outside the repository,
@@ -177,6 +226,10 @@ Run the optional-geometry and source-default-parts regression:
 & "C:\path\to\blender.exe" --background --factory-startup `
   --python-exit-code 1 --python tests\test_blender_optional_geometry.py
 ```
+
+This additionally verifies that level gameplay placement combines only
+mask-enabled source-default customization segments into a shared Moby mesh,
+while excluding disabled segments and damage permutations.
 
 Run the standalone Material/Action catalog metadata regression:
 

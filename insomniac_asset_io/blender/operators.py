@@ -978,6 +978,7 @@ class INSOMNIAC_OT_import_level(bpy.types.Operator):
                         materials=preferences.level_import_materials,
                         terrain=preferences.level_import_terrain,
                         ties=preferences.level_import_ties,
+                        vegetation=preferences.level_import_vegetation,
                         gameplay=preferences.level_import_gameplay,
                         convert_axes=preferences.level_convert_axes,
                         cycles_materials=cycles_materials_enabled(context),

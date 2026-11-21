@@ -33,6 +33,7 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--tuid", type=lambda value: int(value, 0))
     parser.add_argument("--animations", action="store_true")
     parser.add_argument("--level", action="store_true")
+    parser.add_argument("--level-materials", action="store_true")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--expect-normal-materials", type=int, default=0)
     parser.add_argument("--expect-gloss-materials", type=int, default=0)
@@ -54,6 +55,8 @@ def _arguments() -> argparse.Namespace:
         default=[],
         metavar="SHADER:ALBEDO:FACTOR",
     )
+    parser.add_argument("--expect-terrain-lightmaps", type=int, default=0)
+    parser.add_argument("--expect-tie-lightmaps", type=int, default=0)
     return parser.parse_args(arguments)
 
 
@@ -351,7 +354,7 @@ def main() -> int:
             result = import_level(
                 bpy.context,
                 reader,
-                LevelImportOptions(materials=False),
+                LevelImportOptions(materials=args.level_materials),
                 source_path=str(args.source.resolve()),
             )
         else:
@@ -383,6 +386,8 @@ def main() -> int:
     colored_emission_count = 0
     disabled_emission_count = 0
     luminance_alpha_count = 0
+    terrain_lightmap_count = 0
+    tie_lightmap_count = 0
     if args.expect_normal_materials or args.expect_gloss_materials:
         (
             normal_count,
@@ -411,6 +416,78 @@ def main() -> int:
         luminance_alpha_count = _validate_luminance_alpha_materials(
             args.expect_luminance_alpha
         )
+    if args.expect_terrain_lightmaps:
+        terrain_lightmap_count = sum(
+            image.get("insomniac_texture_role") == "lightmap"
+            for image in bpy.data.images
+        )
+        if terrain_lightmap_count < args.expect_terrain_lightmaps:
+            raise RuntimeError(
+                f"Expected at least {args.expect_terrain_lightmaps} terrain "
+                f"lightmaps, found {terrain_lightmap_count}"
+            )
+        terrain_meshes = [
+            obj.data
+            for obj in bpy.data.objects
+            if obj.type == "MESH" and obj.get("insomniac_zone_tuid")
+        ]
+        if not terrain_meshes or any(
+            "InsomniacVertexColor" not in mesh.color_attributes
+            or "LightmapUV" not in mesh.uv_layers
+            for mesh in terrain_meshes
+        ):
+            raise RuntimeError(
+                "R3 terrain is missing vertex lighting or lightmap UV data"
+            )
+    if args.expect_tie_lightmaps:
+        atlases = [
+            image
+            for image in bpy.data.images
+            if image.get("insomniac_texture_role")
+            == "tie_lightmap_atlas"
+        ]
+        if len(atlases) != 1:
+            raise RuntimeError(
+                f"Expected one Tie lightmap atlas, found {len(atlases)}"
+            )
+        tie_lightmap_count = int(
+            atlases[0].get("insomniac_lightmap_count", 0)
+        )
+        if tie_lightmap_count < args.expect_tie_lightmaps:
+            raise RuntimeError(
+                f"Expected at least {args.expect_tie_lightmaps} Tie "
+                f"lightmaps, found {tie_lightmap_count}"
+            )
+        lit_ties = [
+            obj
+            for obj in bpy.data.objects
+            if obj.get("insomniac_asset_kind") == "TIE"
+            and obj.get("insomniac_lightmap_index") is not None
+        ]
+        if len(lit_ties) < args.expect_tie_lightmaps or any(
+            "insomniac_lightmap_uv_scale" not in obj
+            or "insomniac_lightmap_uv_offset" not in obj
+            or "LightmapUV" not in obj.data.uv_layers
+            or "InsomniacVertexColor" not in obj.data.color_attributes
+            for obj in lit_ties
+        ):
+            raise RuntimeError(
+                "R3 Ties are missing baked-light transforms, UV2, or "
+                "vertex lighting"
+            )
+        tie_materials = [
+            material
+            for material in bpy.data.materials
+            if material.get("insomniac_vertex_lit_kind") == "TIE"
+            and material.get("insomniac_tie_lightmap_material")
+        ]
+        if not tie_materials or any(
+            material.node_tree.nodes.get("R3_TIE_Lightmap_Atlas") is None
+            for material in tie_materials
+        ):
+            raise RuntimeError(
+                "R3 Tie materials do not sample the compact lightmap atlas"
+            )
     if args.output is not None:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         bpy.ops.wm.save_as_mainfile(filepath=str(args.output.resolve()))
@@ -423,7 +500,9 @@ def main() -> int:
         f"unsupported_normals={unsupported_normal_count},"
         f"colored_emission={colored_emission_count},"
         f"disabled_emission={disabled_emission_count},"
-        f"luminance_alpha={luminance_alpha_count}"
+        f"luminance_alpha={luminance_alpha_count},"
+        f"terrain_lightmaps={terrain_lightmap_count},"
+        f"tie_lightmaps={tie_lightmap_count}"
     )
     return 0
 

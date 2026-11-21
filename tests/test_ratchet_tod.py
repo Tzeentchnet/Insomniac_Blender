@@ -70,8 +70,10 @@ def _write_fixture(root: Path) -> None:
         (0x5200, 0x440, 1, 0x20),
         (0x6200, 0x460, 1, 0x80),
         (0x9240, 0x4E0, 1, 0x80),
+        (0xA200, 0xA00, 1, 0xB0),
+        (0x9340, 0xB00, 1, 0xE0),
     )
-    main = _ighw(0xA00, sections)
+    main = _ighw(0xC00, sections)
 
     struct.pack_into(">4f", main, 0x200, 0.0, 0.0, 0.0, 2.0)
     struct.pack_into(">H", main, 0x216, 1)
@@ -158,18 +160,101 @@ def _write_fixture(root: Path) -> None:
     )
     struct.pack_into(">16f", main, 0x4E0, *tie_matrix)
     struct.pack_into(">I", main, 0x530, 0x2C0)
+
+    struct.pack_into(">3I", main, 0xA00, 0xF, 0, 0)
+    struct.pack_into(">2I", main, 0xA18, 0xC8, 4)
+    struct.pack_into(">IHH", main, 0xA20, 9, 3, 3)
+    struct.pack_into(">2I", main, 0xA40, 0x104, 0x124)
+    struct.pack_into(">I", main, 0xA48, 1)
+    struct.pack_into(">HHf", main, 0xA50, 0, 4, 0.5)
+    foliage_matrix = (
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        4.0,
+        5.0,
+        6.0,
+        1.0,
+    )
+    struct.pack_into(">16f", main, 0xB00, *foliage_matrix)
+    struct.pack_into(">I", main, 0xB00 + 0xC4, 0xA00)
     (root / "main.dat").write_bytes(main)
 
     vertex_sections = (
-        (0x9000, 0x100, 1, 0xC8),
-        (0x9100, 0x200, 1, 0x12),
+        (0x9000, 0x100, 1, 0x12C),
+        (0x9100, 0x300, 1, 0x18),
     )
-    vertices = _ighw(0x220, vertex_sections)
+    vertices = _ighw(0x320, vertex_sections)
     for base, stride in ((0x100, 0x14), (0x140, 0x14), (0x180, 0x18)):
         _vertex(vertices, base, (0, 0, 0), stride=stride)
         _vertex(vertices, base + stride, (256, 0, 0), stride=stride)
         _vertex(vertices, base + stride * 2, (0, 256, 0), stride=stride)
-    struct.pack_into(">9H", vertices, 0x200, 0, 1, 2, 0, 1, 2, 0, 1, 2)
+    for index, (x, y, z, u, v) in enumerate(
+        (
+            (0.0, 0.0, 0.0, 0.0, 0.0),
+            (2.0, 0.0, 0.0, 1.0, 0.0),
+            (0.0, 3.0, 0.0, 0.0, 1.0),
+        )
+    ):
+        struct.pack_into(
+            ">4e2e",
+            vertices,
+            0x1C8 + index * 0x14,
+            x,
+            y,
+            z,
+            1.0,
+            u,
+            v,
+        )
+    struct.pack_into(
+        ">16e",
+        vertices,
+        0x204,
+        -1.0,
+        -2.0,
+        0.0,
+        0.0,
+        1.0,
+        -2.0,
+        1.0,
+        0.0,
+        1.0,
+        2.0,
+        1.0,
+        1.0,
+        -1.0,
+        2.0,
+        0.0,
+        1.0,
+    )
+    struct.pack_into(">3eH", vertices, 0x224, 10.0, 20.0, 30.0, 0)
+    struct.pack_into(
+        ">12H",
+        vertices,
+        0x300,
+        0,
+        1,
+        2,
+        0,
+        1,
+        2,
+        0,
+        1,
+        2,
+        0,
+        1,
+        2,
+    )
     (root / "vertices.dat").write_bytes(vertices)
     (root / "textures.dat").write_bytes(bytes(8))
 
@@ -228,12 +313,64 @@ class RatchetTodReaderTests(unittest.TestCase):
                 self.assertEqual(len(tie.meshes), 1)
                 self.assertEqual(tie.shader_tuids, (0,))
 
+                foliage_id = reader.asset_pointers(
+                    AssetKind.FOLIAGE
+                )[0].tuid
+                foliage = reader.read_foliage(foliage_id)
+                self.assertEqual(foliage_id, 0xA00)
+                self.assertEqual(len(foliage.meshes), 2)
+                np.testing.assert_allclose(
+                    foliage.meshes[0].positions,
+                    np.asarray(
+                        (
+                            (0.0, 0.0, 0.0),
+                            (2.0, 0.0, 0.0),
+                            (0.0, 3.0, 0.0),
+                        )
+                    )
+                    * 0.9144,
+                )
+                np.testing.assert_array_equal(
+                    foliage.meshes[0].indices,
+                    (0, 1, 2),
+                )
+                np.testing.assert_allclose(
+                    foliage.meshes[1].positions,
+                    np.asarray(
+                        (
+                            (9.0, 18.0, 30.0),
+                            (11.0, 18.0, 30.0),
+                            (11.0, 22.0, 30.0),
+                            (9.0, 22.0, 30.0),
+                        )
+                    )
+                    * 0.9144,
+                )
+                np.testing.assert_array_equal(
+                    foliage.meshes[1].indices,
+                    (0, 1, 2, 3, 0, 2),
+                )
+                foliage_shader = reader.read_shader(
+                    foliage.shader_tuids[0]
+                )
+                self.assertEqual(foliage_shader.alpha_mode, "MASK")
+                self.assertEqual(foliage_shader.albedo_texture_id, 0x440)
+
                 zone = reader.read_zones()[0]
                 self.assertEqual(len(zone.terrain_meshes), 1)
                 self.assertEqual(len(zone.tie_instances), 1)
+                self.assertEqual(len(zone.foliage_instances), 1)
+                self.assertEqual(
+                    zone.foliage_instances[0].asset_tuid,
+                    foliage_id,
+                )
                 np.testing.assert_allclose(
                     zone.tie_instances[0].matrix[:3, 3],
                     np.asarray((1.0, 2.0, 3.0)) * 0.9144,
+                )
+                np.testing.assert_allclose(
+                    zone.foliage_instances[0].matrix[:3, 3],
+                    np.asarray((4.0, 5.0, 6.0)) * 0.9144,
                 )
 
                 gameplay = reader.read_gameplay_regions()[0]

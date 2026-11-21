@@ -67,10 +67,23 @@ def main() -> int:
         if ties:
             tie = reader.read_tie(ties[0].tuid)
             print(f"Tie 0x{tie.tuid:016X}: meshes={len(tie.meshes)}")
+        foliage_pointers = reader.asset_pointers(AssetKind.FOLIAGE)
+        if foliage_pointers:
+            foliage = reader.read_foliage(foliage_pointers[0].tuid)
+            print(
+                f"Foliage 0x{foliage.tuid:016X}: "
+                f"meshes={len(foliage.meshes)}"
+            )
         zones = reader.read_zones()
         print(
             f"Zones={len(zones)} tie_instances="
-            f"{sum(len(zone.tie_instances) for zone in zones)}"
+            f"{sum(len(zone.tie_instances) for zone in zones)} "
+            f"foliage_instances="
+            f"{sum(len(zone.foliage_instances) for zone in zones)} "
+            f"terrain_meshes="
+            f"{sum(len(zone.terrain_meshes) for zone in zones)} "
+            f"terrain_lightmaps="
+            f"{sum(len(zone.lightmaps) for zone in zones)}"
         )
         regions = reader.read_gameplay_regions()
         print(

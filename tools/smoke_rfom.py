@@ -76,7 +76,11 @@ def main() -> int:
             f"Zones={len(zones)} terrain="
             f"{sum(len(zone.terrain_meshes) for zone in zones)} "
             f"tie_instances="
-            f"{sum(len(zone.tie_instances) for zone in zones)}"
+            f"{sum(len(zone.tie_instances) for zone in zones)} "
+            f"shrub_instances="
+            f"{sum(len(zone.shrub_instances) for zone in zones)} "
+            f"foliage_instances="
+            f"{sum(len(zone.foliage_instances) for zone in zones)}"
         )
         regions = reader.read_gameplay_regions()
         print(
