@@ -135,8 +135,15 @@ descriptors. A 27-level scan found 3,322 references to 239 unique family
 members. Decompiled fragments use two normal-projected samples, fixed warm
 colors, and a runtime phase that is not stored in material section `0x5000`.
 Blender therefore does not load the effect map or invent a frozen animation
-frame. Pickup, upgrade, and other effect families remain metadata until
-separately verified.
+frame.
+
+The `R3_FLASH_OVERLAY` metadata family covers the exact `flash_002` program
+used by pickup sheen plus journal, sketchbook, pickup-body, and shield
+specializations. Its 755 retail references resolve to 52 unique shaders.
+Decompiled variants use a fractional runtime phase to move two samples across
+the DXT5 sweep map; that phase is absent from material section `0x5000`.
+Blender therefore leaves this fifth slot unloaded. Weapon upgrades and other
+effect families remain metadata until separately verified.
 
 ### Materials
 

@@ -244,6 +244,11 @@ identity, authored suffix, two verified fifth-slot paths, and three embedded
 program descriptors are classified, but its decompiled dual-sample projection
 depends on a runtime animation phase absent from the material. Blender does
 not freeze that animation at an invented phase or load the disconnected map.
+The `flash_002` program family follows that boundary as well. Program and
+texture identity classify pickup sheen, journal, sketchbook, pickup-body, and
+shield specializations without relying on a shader-name suffix. Its moving
+sweep coordinate is runtime state, so Blender preserves `R3_FLASH_OVERLAY`
+metadata while leaving the fifth slot unloaded.
 Decoded RGBA reader caches are cleared after each material while compact
 format/emission analysis and Blender image references remain cached for reuse.
 

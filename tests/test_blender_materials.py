@@ -42,6 +42,9 @@ if bpy is not None:
         FIRE_EFFECT_FAMILY,
         FIRE_EFFECT_PROGRAM_TUID,
         FIRE_EFFECT_TEXTURE_PATH,
+        FLASH_OVERLAY_EFFECT_FAMILY,
+        FLASH_OVERLAY_EFFECT_PROGRAM_TUID,
+        FLASH_OVERLAY_EFFECT_TEXTURE_PATH,
         FROZEN_EFFECT_FAMILY,
         FROZEN_EFFECT_PROGRAM_TUID,
         FROZEN_EFFECT_TEXTURE_PATH,
@@ -1537,6 +1540,55 @@ class BlenderMaterialTests(unittest.TestCase):
         )
         self.assertNotIn(
             (0x400, FIRE_EFFECT_TEXTURE_PATH),
+            reader.texture_reads,
+        )
+
+    def test_r3_flash_overlay_family_remains_runtime_metadata_only(
+        self,
+    ) -> None:
+        frozen, textures = self._frozen_fixture()
+        shader = replace(
+            frozen,
+            tuid=frozen.tuid + 1,
+            lookup_path=(
+                "fixture/pickup_electricgun_ammo_sheen/"
+                "pickup_electricgun_ammo_sheen"
+            ),
+            extra_texture_lookup_paths=(
+                FLASH_OVERLAY_EFFECT_TEXTURE_PATH,
+                None,
+            ),
+            material_program_tuid=FLASH_OVERLAY_EFFECT_PROGRAM_TUID,
+            material_word=0x1C00_1328,
+            effect_family=FLASH_OVERLAY_EFFECT_FAMILY,
+        )
+        reader = _MaterialReader("RESISTANCE_3", shader, textures)
+        material = _MaterialFactory(reader, True, []).material(shader.tuid)
+        nodes = material.node_tree.nodes
+
+        self.assertEqual(
+            material["insomniac_effect_family"],
+            FLASH_OVERLAY_EFFECT_FAMILY,
+        )
+        self.assertEqual(
+            material["insomniac_material_program_tuid"],
+            f"0x{FLASH_OVERLAY_EFFECT_PROGRAM_TUID:016X}",
+        )
+        self.assertNotIn("insomniac_frozen_overlay", material)
+        self.assertFalse(
+            any(node.name.startswith("Frozen_") for node in nodes)
+        )
+        self.assertTrue(
+            self._has_link(
+                material,
+                nodes["Diffuse_00000100"],
+                nodes["Principled BSDF"],
+                "Base Color",
+                from_socket="Color",
+            )
+        )
+        self.assertNotIn(
+            (0x400, FLASH_OVERLAY_EFFECT_TEXTURE_PATH),
             reader.texture_reads,
         )
 

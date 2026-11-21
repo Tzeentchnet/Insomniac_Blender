@@ -17,6 +17,9 @@ from insomniac_asset_io.games.resistance_3.reader import (
     FIRE_EFFECT_FAMILY,
     FIRE_EFFECT_PROGRAM_TUID,
     FIRE_EFFECT_TEXTURE_PATH,
+    FLASH_OVERLAY_EFFECT_FAMILY,
+    FLASH_OVERLAY_EFFECT_PROGRAM_TUID,
+    FLASH_OVERLAY_EFFECT_TEXTURE_PATH,
     FROZEN_EFFECT_FAMILY,
     FROZEN_EFFECT_PROGRAM_TUID,
     FROZEN_EFFECT_TEXTURE_PATH,
@@ -319,6 +322,69 @@ class RealResistance3EffectTests(unittest.TestCase):
             ):
                 self.assertIsNone(
                     reader.read_shader(shader_tuid).effect_family
+                )
+
+    def test_classifies_new_york_terraformer_flash_overlay_family(self):
+        with GameSource.open(Path(FROZEN_SOURCE)) as source:
+            reader = Resistance3Reader(source)
+            shaders = tuple(
+                reader.read_shader(pointer.tuid)
+                for pointer in reader.asset_pointers(AssetKind.SHADER)
+            )
+
+            flash_overlays = tuple(
+                shader
+                for shader in shaders
+                if shader.effect_family == FLASH_OVERLAY_EFFECT_FAMILY
+            )
+            self.assertEqual(len(flash_overlays), 37)
+            self.assertEqual(
+                {
+                    shader.material_program_tuid
+                    for shader in flash_overlays
+                },
+                {FLASH_OVERLAY_EFFECT_PROGRAM_TUID},
+            )
+            self.assertTrue(
+                all(
+                    shader.is_texture_slot_bound(4)
+                    for shader in flash_overlays
+                )
+            )
+            self.assertEqual(
+                {
+                    path.replace("\\", "/").casefold()
+                    for shader in flash_overlays
+                    for path in shader.extra_texture_lookup_paths[:1]
+                },
+                {FLASH_OVERLAY_EFFECT_TEXTURE_PATH},
+            )
+
+            representative = reader.read_shader(0x00F2_785E_D619_7EC6)
+            texture = reader.read_texture(
+                representative.extra_texture_ids[0],
+                lookup_path=representative.extra_texture_lookup_paths[0],
+            )
+            self.assertEqual(texture.info.tuid, 0xA9B6_4E9A_38B0_8640)
+            self.assertEqual(texture.info.format_code, 0x08)
+            self.assertEqual(texture.info.mip_count, 7)
+            self.assertEqual(texture.rgba.shape, (256, 256, 4))
+            self.assertEqual(int(texture.rgba[..., 3].min()), 0)
+            self.assertEqual(int(texture.rgba[..., 3].max()), 208)
+            self.assertFalse(
+                np.array_equal(
+                    texture.rgba[..., 0],
+                    texture.rgba[..., 1],
+                )
+            )
+
+            for shader_tuid in (
+                0xC996_42A9_0247_F371,
+                0xD404_4DB4_0247_F3B4,
+            ):
+                self.assertEqual(
+                    reader.read_shader(shader_tuid).effect_family,
+                    FLASH_OVERLAY_EFFECT_FAMILY,
                 )
 
 

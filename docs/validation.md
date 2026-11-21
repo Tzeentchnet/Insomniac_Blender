@@ -381,6 +381,16 @@ the 256x256 primary map, and excludes name-only, unbound, and frozen-program
 lookalikes. The Blender regression proves that family metadata persists while
 the runtime-phased map remains unloaded and base color remains unchanged.
 
+The R3 flash-overlay investigation classifies all 755 `flash_002` references,
+representing 52 unique shaders in 26 levels. Synthetic regressions cover both
+program lengths, both selector lengths, sheen and non-sheen specializations,
+invalid descriptors, and an unverified texture path. The
+`new_york_terraformer` regression requires exactly 37 family shaders,
+validates the seven-mip 256x256 DXT5 sweep texture, and confirms that the
+non-sheen sketchbook materials share the family. Blender validation preserves
+the family/program metadata without loading the runtime-phased effect map or
+changing the direct base-color connection.
+
 Analyze one extracted cached archive, or every cached level archive in an ISO:
 
 ```powershell

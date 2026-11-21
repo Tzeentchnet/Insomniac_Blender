@@ -459,6 +459,42 @@ reader therefore preserves `R3_ON_FIRE` family and program metadata, while
 the Blender bridge leaves the animated texture disconnected rather than
 freezing every imported material at an invented phase.
 
+### Flash-overlay and pickup-sheen family
+
+Program `0x22A146AAE58E49A4` and the exact fifth-slot path
+`d_action_pickup/textures/flash_002` identify a broader flash-overlay family,
+not just shader names ending in `_sheen`. A 27-level scan found 755 references
+to 52 unique shaders in 26 levels:
+
+- 44 unique `_sheen` shaders, accounting for 695 references;
+- five journal or sketchbook shaders, accounting for 29 references;
+- two pickup-body shaders, accounting for 30 references;
+- one scanner-drone shield shader.
+
+Every retail `_sheen` shader satisfies the complete family signature, and no
+active `flash_002` binding uses a conflicting program. Classification requires
+control byte `0x13`, the active exact path, the program TUID, a `0x2A10`- or
+`0x2A50`-byte `0x33001` section, three valid descriptors beginning at
+`0x22A146AAE58E49A5`, and a `0x09`- or `0x0B`-byte selector section. The three
+observed `0x33001` SHA-256 values are:
+
+- `f9761daa36417cf0301ba12deb418feab92451ca051423855fd97d5d8f2b4fa1`;
+- `d8705c78e617c59f2dae7945af36a7c92a17c735b959a3c9d1c96d32b2a5f39a`;
+- `3fee5c159746640d6638b35e3bdfefb520f15dfb557248368634c18a7b0592c3`.
+
+The decoded source texture TUID is `0xA9B64E9A38B08640`, a 256x256,
+seven-mip format-`0x08` DXT5 sweep map. Its four channels vary independently;
+decoded alpha ranges from 0 through 208. Decompiled program variants sample
+the map twice: one lookup derives from a fractional moving phase, while the
+other offsets the surface lookup with that same phase. Constants `0.8`,
+`0.909091`, `2.18182`, and `0.5` shape the sweep, but the phase itself is
+runtime state absent from material section `0x5000`.
+
+The reader classifies these shaders as `R3_FLASH_OVERLAY` and preserves their
+program metadata. Blender intentionally leaves `flash_002` disconnected
+rather than freezing pickup sheen, journal fades, and shield effects at one
+invented instant.
+
 Some level-local textures have a zero-length entry in the high-mip pointer
 table while their texture TUID still owns a complete mip-zero payload in
 `textures.dat`. The reader uses that bounded asset payload before trying
