@@ -204,11 +204,12 @@ custom properties. Collision objects are wire helpers and never participate
 in renders.
 
 Materials retain their shader lookup paths, raw material control word,
-parameter vectors, texture IDs, texture paths, and texture-map indices as
-Blender custom properties. The indices distinguish active bindings from stale
-or runtime-only reference fields. R3's two additional texture slots, two
-pre-control words, and three trailing material values are retained without
-assigning speculative rendering semantics. Diffuse images are color data.
+material-program identity, parameter vectors, texture IDs, texture paths, and
+texture-map indices as Blender custom properties. The indices distinguish
+active bindings from stale or runtime-only reference fields. R3's two
+additional texture slots, two pre-control words, and three trailing material
+values are retained without assigning global rendering semantics. Diffuse
+images are color data.
 Reconstructed normal, packed auxiliary, dedicated scalar, and detail images
 are non-color data. Blender 5.2 creates these datablocks with `is_data=True`
 so their colorspace is correct before pixel upload. Authored lookup paths and
@@ -224,10 +225,15 @@ preference additionally applies safe source color factors; it does not change
 the scene render engine. No metalness channel is inferred. Packed green is
 connected only when the shader's specular flag is present; that flag is absent
 from the current R2 corpus. Bound detail maps are exposed as unconnected
-Non-Color image nodes; unverified packed-alpha, detail composition, and R3
-overlay semantics remain disconnected. Decoded RGBA reader caches are cleared
-after each material while compact format/emission analysis and Blender image
-references remain cached for reuse.
+Non-Color image nodes. The verified R3 frozen family is an explicit exception:
+the reader requires the frozen program identity, active fifth slot, exact
+effect path, control byte, frozen shader name, and embedded program sections.
+Its graph samples the effect map with the camera-space shading normal, applies
+the decompiled blue and grazing-angle response, screens that result over base
+color, and lowers roughness under the same coverage. Unverified packed-alpha,
+detail composition, and all other R3 overlay families remain disconnected.
+Decoded RGBA reader caches are cleared after each material while compact
+format/emission analysis and Blender image references remain cached for reuse.
 
 Moby skeletons use stable `bone_NNN` names because R2 does not provide a
 reliable bone-name table in this chain. The original index and flags are

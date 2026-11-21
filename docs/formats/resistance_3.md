@@ -320,8 +320,8 @@ The fifth slot is actively bound by 967 of the 4,579 unique shaders on the
 USA disc. Common paths identify shader-family effects such as
 `gradientdissolve`, `fire_customa`, `ig_frozen_customa`, pickup sheen, and
 weapon-upgrade overlays. The sixth slot is bound by only four shaders. These
-are not universal PBR channels, so their rendering semantics remain metadata
-rather than speculative node connections.
+are not universal PBR channels, so only independently identified families are
+connected.
 
 Shader material section `0x5000` remains `0x80` bytes but shifts its control
 word and parameter values:
@@ -331,12 +331,53 @@ word and parameter values:
 | `0x00` | `i32[6]` | texture-slot indices; `-1` means unused |
 | `0x18` | `u32[2]` | unknown pre-control values |
 | `0x20` | `u32` | material control word |
-| `0x24` | `f32[5][4]` | material parameter vectors |
+| `0x24` | `f32[5][4]` | preserved raw parameter window |
+| `0x48` | `u64` | material-program TUID within that raw window |
 | `0x74` | `f32[3]` | trailing material parameters |
 
-The two pre-control words, five vectors, and three trailing values are
-retained separately as Blender custom properties. Base color uses the first
-complete vector after the control word in enhanced source-material mode.
+The raw parameter window includes mixed float and identity fields; the reader
+preserves its historical five-vector view while also exposing the proven
+program TUID at `0x48`. The two pre-control words, program identity, five raw
+vectors, and three trailing values are retained as Blender custom properties.
+Base color uses the first complete vector after the control word in enhanced
+source-material mode.
+
+### Frozen overlay family
+
+The verified frozen program identity is `0x5C8677F5D69FF338`. In
+`new_york_terraformer`, 38 shaders satisfy the complete family signature:
+
+- the shader basename ends in `frozen`;
+- control byte `material_unknown_0` is `0x13`;
+- texture slot five is active and its authored path is
+  `artdepartment/environment/decals/effects/ig_frozen_customa`;
+- material section `0x5000 + 0x48` contains the frozen program TUID;
+- embedded sections `0x33001`, `0x33002`, and `0x33003` are present.
+
+Section `0x33001` stores three concatenated RSX fragment-program chunks.
+Section `0x33002` stores three `0x10`-byte offset/size descriptors; its IGHW
+count is `1`, so records are counted from section length instead. Classification
+also requires the three consecutive program identities and bounded,
+non-overlapping chunk ranges that cover `0x33001`. Section `0x33003` stores the
+corresponding selector bytes. Two frozen binary variants occur in the reviewed
+level, with `0x33001` SHA-256 values
+`60db6353d77fc3072cbb7d553079818b1f38d8fb7c9baff772f3bcc0db8a4ed4`
+and
+`d9f3adbec5f71884c3eb0c31eb92029a313265708ab425b6362a8d45ce7d9ad5`.
+
+RSX decompilation proves that the custom map is sampled from the normalized
+transformed surface normal rather than mesh UVs. The program adds a powered
+grazing-angle response, processes the sampled RGB, and contains a fixed
+`(0.55, 0.65, 0.75)` ice tint. The Blender graph mirrors those verified
+operations with camera-space normal projection, repeated texture addressing,
+a screen response over base color, and lower roughness under the same
+coverage.
+
+Texture path alone is not a family discriminator. The molten Hulk program
+`0x2B4B1424D6F60B51` uses the same `ig_frozen_customa` map but has a distinct
+embedded program and additional molten color/emission math. Conversely,
+`cap_hair_planes_frozen` uses the frozen program identity with `fire_customa`.
+Both cases are excluded from frozen composition.
 
 Some level-local textures have a zero-length entry in the high-mip pointer
 table while their texture TUID still owns a complete mip-zero payload in

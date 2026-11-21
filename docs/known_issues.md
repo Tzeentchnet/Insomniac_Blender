@@ -104,7 +104,19 @@ A whole-disc scan found the fifth slot bound by 967 of 4,579 unique shaders.
 Its common paths identify runtime effects such as gradient dissolve, fire,
 frozen overlays, pickup sheen, and weapon upgrades rather than one universal
 surface channel. The sixth slot is bound by only four shaders. Neither slot is
-connected until its per-family composition is independently verified.
+connected globally.
+
+The independently verified frozen exception requires all of the following:
+the material-program TUID `0x5C8677F5D69FF338`, a shader basename ending in
+`frozen`, control byte `0x13`, a bound fifth slot whose path is exactly
+`artdepartment/environment/decals/effects/ig_frozen_customa`, and embedded
+program sections `0x33001` through `0x33003`. Blender samples that map from the
+camera-space shading normal, applies the decompiled fixed blue tint and
+grazing response, and uses the same coverage to add gloss. Two molten Hulk
+materials share the texture but use program `0x2B4B1424D6F60B51` and remain
+untouched. The frozen-named Capelli hair material binds `fire_customa` and is
+also excluded. Dissolve, fire, pickup, upgrade, and all other effect families
+remain metadata until separately verified.
 
 ### Materials
 

@@ -107,9 +107,17 @@ def _validate_surface_materials() -> tuple[int, int, int]:
             texture_id = str(
                 material["insomniac_packed_texture_id"]
             ).removeprefix("0x")
-            roughness = material.node_tree.nodes.get(
-                f"Roughness_{texture_id}"
-            )
+            if material.get("insomniac_effect_family") == "R3_FROZEN":
+                shader_id = str(
+                    material["insomniac_shader_tuid"]
+                ).removeprefix("0x")
+                roughness = material.node_tree.nodes.get(
+                    f"Frozen_Roughness_{shader_id}"
+                )
+            else:
+                roughness = material.node_tree.nodes.get(
+                    f"Roughness_{texture_id}"
+                )
             if roughness is None or not any(
                 link.from_node == roughness
                 and link.to_node == principled

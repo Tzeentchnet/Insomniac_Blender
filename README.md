@@ -438,9 +438,10 @@ The extension has a standard path plus one shared enhancement preference:
   verified albedo-colored blue-channel emission masks. Supported PS3 readers
   reconstruct flagged BC3/RG8 tangent normals and convert flagged packed-red
   gloss to Principled roughness in Eevee and Cycles. R3 also preserves the
-  base legs under its opaque-BC1 Goliath wet overlay. The standard path
-  recognizes the verified R2 mode-zero `ch_hex_glass_glowy` alpha exception
-  as well.
+  base legs under its opaque-BC1 Goliath wet overlay and composes the verified
+  `ig_frozen_customa` family through its camera-normal projection and
+  grazing-angle response. The standard path recognizes the verified R2
+  mode-zero `ch_hex_glass_glowy` alpha exception as well.
 - **Enhanced source materials** additionally applies the source base-color
   multiplier while keeping the same normal, packed-map, and alpha behavior.
 
@@ -453,8 +454,9 @@ Packed green remains disconnected because the corresponding R2 specular flag
 is absent from every shader in both current whole-disc corpora. Neither game
 provides a verified metalness channel. Bound detail maps are imported as
 unconnected Non-Color image nodes so their signed/packed values remain
-available without inventing a blend. R3 effect-overlay slots remain metadata
-rather than speculative node connections.
+available without inventing a blend. Apart from the narrowly identified R3
+frozen family, effect-overlay slots remain metadata rather than speculative
+node connections.
 
 ## Project layout
 

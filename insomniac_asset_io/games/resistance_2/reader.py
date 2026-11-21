@@ -146,6 +146,7 @@ class Resistance2Reader:
     shader_material_values_offset = 0x20
     shader_material_vector_count = 6
     shader_material_tail_count = 0
+    shader_material_program_tuid_offset: int | None = None
     material_surface_channels_by_default = True
     material_emission_uses_albedo = True
     material_emission_disabled_control_mask = 0
@@ -1324,6 +1325,7 @@ class Resistance2Reader:
                 ]
 
             material_word = None
+            material_program_tuid = None
             texture_map_indices: tuple[int, ...] = ()
             material_pre_control_values: tuple[int, ...] = ()
             material_values: tuple[
@@ -1346,6 +1348,11 @@ class Resistance2Reader:
                     self.shader_material_values_offset
                     + self.shader_material_vector_count * 0x10
                     + self.shader_material_tail_count * 4,
+                    (
+                        self.shader_material_program_tuid_offset + 8
+                        if self.shader_material_program_tuid_offset is not None
+                        else 0
+                    ),
                 )
                 if material.length < required_material_length:
                     raise FormatError(
@@ -1370,6 +1377,14 @@ class Resistance2Reader:
                 material_word = ighw.u32(
                     material.offset + self.shader_material_word_offset
                 )
+                if self.shader_material_program_tuid_offset is not None:
+                    material_program_tuid = (
+                        ighw.u64(
+                            material.offset
+                            + self.shader_material_program_tuid_offset
+                        )
+                        or None
+                    )
                 material_values = tuple(
                     tuple(
                         ighw.f32(
@@ -1407,12 +1422,23 @@ class Resistance2Reader:
                 extra_texture_lookup_paths=tuple(texture_paths[4:]),
                 texture_map_indices=texture_map_indices,
                 material_pre_control_values=material_pre_control_values,
+                material_program_tuid=material_program_tuid,
                 material_word=material_word,
                 material_values=material_values,
                 material_tail_values=material_tail_values,
             )
+            effect_family = self._shader_effect_family(ighw, shader)
+            if effect_family is not None:
+                shader = replace(shader, effect_family=effect_family)
         self._shader_cache[tuid] = shader
         return shader
+
+    def _shader_effect_family(
+        self,
+        ighw: IghwFile,
+        shader: ShaderInfo,
+    ) -> str | None:
+        return None
 
     @cached_property
     def texture_infos(self) -> dict[int, TextureInfo]:

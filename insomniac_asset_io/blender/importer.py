@@ -699,13 +699,24 @@ class _MaterialFactory:
                         principled,
                         shader,
                     )
+                    normal = None
                     if self.surface_material_channels:
-                        self._add_normal(material, principled, shader)
+                        normal = self._add_normal(
+                            material,
+                            principled,
+                            shader,
+                        )
                     self._add_packed(
                         material,
                         principled,
                         shader,
                         diffuse_color=diffuse_color,
+                    )
+                    self._add_frozen_overlay(
+                        material,
+                        principled,
+                        shader,
+                        normal=normal,
                     )
                     self._add_detail(material, shader)
                     self._add_dedicated_emission(
@@ -1314,6 +1325,12 @@ class _MaterialFactory:
             material["insomniac_material_pre_control_values"] = list(
                 shader.material_pre_control_values
             )
+        if shader.material_program_tuid is not None:
+            material["insomniac_material_program_tuid"] = (
+                f"0x{shader.material_program_tuid:016X}"
+            )
+        if shader.effect_family is not None:
+            material["insomniac_effect_family"] = shader.effect_family
         specular_name = {
             "GLOSS": "gloss",
             "SPECULAR": "specular",
@@ -1579,10 +1596,10 @@ class _MaterialFactory:
         material: bpy.types.Material,
         principled: bpy.types.Node,
         shader: ShaderInfo,
-    ) -> None:
+    ) -> bpy.types.NodeSocket | None:
         texture_id = shader.normal_texture_id
         if texture_id is None or not shader.is_texture_slot_bound(1):
-            return
+            return None
         lookup_path = shader.texture_lookup_paths[1]
         try:
             if shader.normal_texture_encoding != "DIRECT":
@@ -1609,7 +1626,7 @@ class _MaterialFactory:
                         f"unsupported texture format "
                         f"0x{support[1]:02X}"
                     )
-                    return
+                    return None
             image = self.image(
                 texture_id,
                 role="normal",
@@ -1619,7 +1636,7 @@ class _MaterialFactory:
             self._warn(
                 f"Shader 0x{shader.tuid:016X} normal map unavailable: {exc}"
             )
-            return
+            return None
         material["insomniac_normal_map_supported"] = True
         texture_node = material.node_tree.nodes.new("ShaderNodeTexImage")
         texture_node.name = f"Normal_{texture_id:08X}"
@@ -1643,6 +1660,201 @@ class _MaterialFactory:
         material.node_tree.links.new(
             normal.outputs["Normal"],
             principled.inputs["Normal"],
+        )
+        return normal.outputs["Normal"]
+
+    def _add_frozen_overlay(
+        self,
+        material: bpy.types.Material,
+        principled: bpy.types.Node,
+        shader: ShaderInfo,
+        *,
+        normal: bpy.types.NodeSocket | None,
+    ) -> None:
+        if shader.effect_family != "R3_FROZEN":
+            return
+        if shader.material_program_tuid is None:
+            self._warn(
+                f"Shader 0x{shader.tuid:016X} frozen overlay is missing "
+                "its material program identity"
+            )
+            return
+        texture_id = (
+            shader.extra_texture_ids[0]
+            if shader.extra_texture_ids
+            else None
+        )
+        if texture_id is None or not shader.is_texture_slot_bound(4):
+            return
+        lookup_path = (
+            shader.extra_texture_lookup_paths[0]
+            if shader.extra_texture_lookup_paths
+            else None
+        )
+        try:
+            image = self.image(
+                texture_id,
+                role="frozen",
+                lookup_path=lookup_path,
+            )
+        except InsomniacError as exc:
+            self._warn(
+                f"Shader 0x{shader.tuid:016X} frozen overlay unavailable: "
+                f"{exc}"
+            )
+            return
+
+        nodes = material.node_tree.nodes
+        links = material.node_tree.links
+        suffix = f"{shader.tuid:016X}"
+        source_normal = normal
+        if source_normal is None:
+            geometry = nodes.new("ShaderNodeNewGeometry")
+            geometry.name = f"Frozen_Geometry_{suffix}"
+            geometry.label = "Frozen overlay shading normal"
+            source_normal = geometry.outputs["Normal"]
+
+        camera_normal = nodes.new("ShaderNodeVectorTransform")
+        camera_normal.name = f"Frozen_Camera_Normal_{suffix}"
+        camera_normal.label = "RSX camera-space normal projection"
+        camera_normal.vector_type = "NORMAL"
+        camera_normal.convert_from = "WORLD"
+        camera_normal.convert_to = "CAMERA"
+        links.new(source_normal, camera_normal.inputs["Vector"])
+
+        normalized = nodes.new("ShaderNodeVectorMath")
+        normalized.name = f"Frozen_Normalize_{suffix}"
+        normalized.label = "Frozen overlay normalized projection"
+        normalized.operation = "NORMALIZE"
+        links.new(camera_normal.outputs["Vector"], normalized.inputs[0])
+
+        texture = nodes.new("ShaderNodeTexImage")
+        texture.name = f"Frozen_Texture_{texture_id:08X}"
+        texture.label = "Resistance 3 normal-projected frozen overlay"
+        texture.image = image
+        texture.extension = "REPEAT"
+        links.new(normalized.outputs["Vector"], texture.inputs["Vector"])
+
+        coverage = nodes.new("ShaderNodeRGBToBW")
+        coverage.name = f"Frozen_Coverage_{suffix}"
+        coverage.label = "Frozen overlay texture luminance"
+        links.new(texture.outputs["Color"], coverage.inputs["Color"])
+
+        layer_weight = nodes.new("ShaderNodeLayerWeight")
+        layer_weight.name = f"Frozen_Layer_Weight_{suffix}"
+        layer_weight.label = "Frozen overlay view angle"
+        links.new(source_normal, layer_weight.inputs["Normal"])
+
+        grazing = nodes.new("ShaderNodeMath")
+        grazing.name = f"Frozen_Grazing_{suffix}"
+        grazing.label = "1 - absolute view/normal dot"
+        grazing.operation = "SUBTRACT"
+        grazing.inputs[0].default_value = 1.0
+        links.new(layer_weight.outputs["Facing"], grazing.inputs[1])
+
+        fresnel_power = nodes.new("ShaderNodeMath")
+        fresnel_power.name = f"Frozen_Fresnel_{suffix}"
+        fresnel_power.label = "Frozen grazing response"
+        fresnel_power.operation = "POWER"
+        fresnel_power.inputs[1].default_value = 3.0
+        links.new(grazing.outputs["Value"], fresnel_power.inputs[0])
+
+        rim_scale = nodes.new("ShaderNodeMath")
+        rim_scale.name = f"Frozen_Rim_Scale_{suffix}"
+        rim_scale.label = "Frozen rim contribution"
+        rim_scale.operation = "MULTIPLY"
+        rim_scale.inputs[1].default_value = 0.75
+        links.new(fresnel_power.outputs["Value"], rim_scale.inputs[0])
+
+        response = nodes.new("ShaderNodeMath")
+        response.name = f"Frozen_Response_{suffix}"
+        response.label = "Frozen base plus grazing response"
+        response.operation = "ADD"
+        response.inputs[1].default_value = 0.25
+        links.new(rim_scale.outputs["Value"], response.inputs[0])
+
+        strength = nodes.new("ShaderNodeMath")
+        strength.name = f"Frozen_Strength_{suffix}"
+        strength.label = "Frozen texture x grazing coverage"
+        strength.operation = "MULTIPLY"
+        strength.use_clamp = True
+        links.new(coverage.outputs["Val"], strength.inputs[0])
+        links.new(response.outputs["Value"], strength.inputs[1])
+
+        tint = nodes.new("ShaderNodeVectorMath")
+        tint.name = f"Frozen_Tint_{suffix}"
+        tint.label = "RSX frozen blue tint"
+        tint.operation = "MULTIPLY"
+        tint.inputs[1].default_value = (0.55, 0.65, 0.75)
+        links.new(texture.outputs["Color"], tint.inputs[0])
+
+        base_input = principled.inputs["Base Color"]
+        if base_input.is_linked:
+            base_link = base_input.links[0]
+            base_color = base_link.from_socket
+            links.remove(base_link)
+        else:
+            base = nodes.new("ShaderNodeRGB")
+            base.name = f"Frozen_Base_Color_{suffix}"
+            base.label = "Source base color"
+            base.outputs["Color"].default_value = base_input.default_value
+            base_color = base.outputs["Color"]
+
+        screen = nodes.new("ShaderNodeMixRGB")
+        screen.name = f"Frozen_Screen_{suffix}"
+        screen.label = "Resistance 3 frozen color response"
+        screen.blend_type = "SCREEN"
+        screen.use_clamp = True
+        links.new(strength.outputs["Value"], screen.inputs["Fac"])
+        links.new(base_color, screen.inputs[1])
+        links.new(tint.outputs["Vector"], screen.inputs[2])
+        links.new(screen.outputs["Color"], base_input)
+
+        roughness_input = principled.inputs["Roughness"]
+        if roughness_input.is_linked:
+            roughness_link = roughness_input.links[0]
+            roughness = roughness_link.from_socket
+            links.remove(roughness_link)
+        else:
+            roughness_value = nodes.new("ShaderNodeValue")
+            roughness_value.name = f"Frozen_Base_Roughness_{suffix}"
+            roughness_value.label = "Source roughness"
+            roughness_value.outputs["Value"].default_value = (
+                roughness_input.default_value
+            )
+            roughness = roughness_value.outputs["Value"]
+
+        roughness_factor = nodes.new("ShaderNodeMath")
+        roughness_factor.name = f"Frozen_Roughness_Factor_{suffix}"
+        roughness_factor.label = "Frozen gloss response"
+        roughness_factor.operation = "MULTIPLY_ADD"
+        roughness_factor.use_clamp = True
+        roughness_factor.inputs[1].default_value = -0.7
+        roughness_factor.inputs[2].default_value = 1.0
+        links.new(strength.outputs["Value"], roughness_factor.inputs[0])
+
+        roughness_multiply = nodes.new("ShaderNodeMath")
+        roughness_multiply.name = f"Frozen_Roughness_{suffix}"
+        roughness_multiply.label = "Source roughness x frozen gloss"
+        roughness_multiply.operation = "MULTIPLY"
+        roughness_multiply.use_clamp = True
+        links.new(roughness, roughness_multiply.inputs[0])
+        links.new(
+            roughness_factor.outputs["Value"],
+            roughness_multiply.inputs[1],
+        )
+        links.new(
+            roughness_multiply.outputs["Value"],
+            roughness_input,
+        )
+
+        material["insomniac_frozen_overlay"] = True
+        material["insomniac_frozen_texture_id"] = f"0x{texture_id:08X}"
+        material["insomniac_frozen_texture_path"] = lookup_path or ""
+        material["insomniac_frozen_projection"] = "CAMERA_NORMAL_XY"
+        material["insomniac_frozen_color_response"] = "SCREEN"
+        material["insomniac_frozen_program_tuid"] = (
+            f"0x{shader.material_program_tuid:016X}"
         )
 
     def _add_detail(

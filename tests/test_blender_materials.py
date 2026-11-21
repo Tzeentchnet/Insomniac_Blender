@@ -4,6 +4,7 @@ import os
 import sys
 import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
@@ -33,6 +34,11 @@ if bpy is not None:
         TieAsset,
         TextureInfo,
         Zone,
+    )
+    from insomniac_asset_io.games.resistance_3.reader import (
+        FROZEN_EFFECT_FAMILY,
+        FROZEN_EFFECT_PROGRAM_TUID,
+        FROZEN_EFFECT_TEXTURE_PATH,
     )
 
 
@@ -1319,6 +1325,127 @@ class BlenderMaterialTests(unittest.TestCase):
             )
         )
 
+    def test_r3_frozen_overlay_uses_normal_projection_and_grazing(self) -> None:
+        shader, textures = self._frozen_fixture()
+        reader = _MaterialReader("RESISTANCE_3", shader, textures)
+        warnings: list[str] = []
+        material = _MaterialFactory(reader, True, warnings).material(
+            shader.tuid
+        )
+        nodes = material.node_tree.nodes
+        principled = nodes["Principled BSDF"]
+        camera_normal = nodes[
+            f"Frozen_Camera_Normal_{shader.tuid:016X}"
+        ]
+        normalize = nodes[f"Frozen_Normalize_{shader.tuid:016X}"]
+        texture = nodes["Frozen_Texture_00000400"]
+        coverage = nodes[f"Frozen_Coverage_{shader.tuid:016X}"]
+        layer_weight = nodes[
+            f"Frozen_Layer_Weight_{shader.tuid:016X}"
+        ]
+        grazing = nodes[f"Frozen_Grazing_{shader.tuid:016X}"]
+        fresnel = nodes[f"Frozen_Fresnel_{shader.tuid:016X}"]
+        strength = nodes[f"Frozen_Strength_{shader.tuid:016X}"]
+        tint = nodes[f"Frozen_Tint_{shader.tuid:016X}"]
+        screen = nodes[f"Frozen_Screen_{shader.tuid:016X}"]
+        roughness = nodes[f"Frozen_Roughness_{shader.tuid:016X}"]
+        normal = nodes["Normal_Map_00000200"]
+
+        self.assertEqual(warnings, [])
+        self.assertEqual(
+            material["insomniac_effect_family"],
+            FROZEN_EFFECT_FAMILY,
+        )
+        self.assertTrue(material["insomniac_frozen_overlay"])
+        self.assertEqual(
+            material["insomniac_frozen_projection"],
+            "CAMERA_NORMAL_XY",
+        )
+        self.assertEqual(
+            material["insomniac_frozen_program_tuid"],
+            f"0x{FROZEN_EFFECT_PROGRAM_TUID:016X}",
+        )
+        self.assertEqual(texture.image["insomniac_texture_role"], "frozen")
+        self.assertEqual(camera_normal.vector_type, "NORMAL")
+        self.assertEqual(camera_normal.convert_from, "WORLD")
+        self.assertEqual(camera_normal.convert_to, "CAMERA")
+        self.assertEqual(texture.extension, "REPEAT")
+        self.assertEqual(fresnel.operation, "POWER")
+        self.assertEqual(screen.blend_type, "SCREEN")
+        self.assertEqual(roughness.operation, "MULTIPLY")
+        for actual, expected in zip(
+            tint.inputs[1].default_value,
+            (0.55, 0.65, 0.75),
+            strict=True,
+        ):
+            self.assertAlmostEqual(actual, expected)
+        self.assertTrue(
+            self._has_link(
+                material,
+                normal,
+                camera_normal,
+                "Vector",
+                from_socket="Normal",
+            )
+        )
+        self.assertTrue(
+            self._has_link(material, camera_normal, normalize, 0)
+        )
+        self.assertTrue(
+            self._has_link(material, normalize, texture, "Vector")
+        )
+        self.assertTrue(
+            self._has_link(
+                material,
+                texture,
+                coverage,
+                "Color",
+                from_socket="Color",
+            )
+        )
+        self.assertTrue(
+            self._has_link(
+                material,
+                layer_weight,
+                grazing,
+                1,
+                from_socket="Facing",
+            )
+        )
+        self.assertTrue(
+            self._has_link(material, strength, screen, "Fac")
+        )
+        self.assertTrue(
+            self._has_link(material, screen, principled, "Base Color")
+        )
+        self.assertTrue(
+            self._has_link(material, roughness, principled, "Roughness")
+        )
+        self.assertIn(
+            (0x400, FROZEN_EFFECT_TEXTURE_PATH),
+            reader.texture_reads,
+        )
+
+    def test_r3_molten_program_does_not_use_frozen_overlay(self) -> None:
+        frozen, textures = self._frozen_fixture()
+        shader = replace(
+            frozen,
+            tuid=frozen.tuid + 1,
+            lookup_path="fixture/new_hulk_armor_molten",
+            material_program_tuid=0x2B4B_1424_D6F6_0B51,
+            effect_family=None,
+        )
+        reader = _MaterialReader("RESISTANCE_3", shader, textures)
+        material = _MaterialFactory(reader, True, []).material(shader.tuid)
+
+        self.assertIsNone(
+            material.node_tree.nodes.get("Frozen_Texture_00000400")
+        )
+        self.assertNotIn(
+            (0x400, FROZEN_EFFECT_TEXTURE_PATH),
+            reader.texture_reads,
+        )
+
     def test_unbound_r3_texture_references_remain_metadata_only(self) -> None:
         shader, textures = self._surface_fixture(
             0x102,
@@ -1542,6 +1669,75 @@ class BlenderMaterialTests(unittest.TestCase):
             material_word=material_word,
         )
         return shader, textures
+
+    @classmethod
+    def _frozen_fixture(
+        cls,
+    ) -> tuple[ShaderInfo, dict[int, DecodedTexture]]:
+        shader, textures = cls._surface_fixture(
+            0x030C_48D2_E3FD_8A07,
+            texture_map_indices=(0, 1, 2, -1, 3, -1),
+            material_word=0x1C00_1328,
+        )
+        albedo_id = 0x100
+        frozen_id = 0x400
+        albedo = np.full((2, 2, 4), 255, dtype=np.uint8)
+        albedo[..., :3] = (96, 64, 32)
+        frozen = np.full((2, 2, 4), 255, dtype=np.uint8)
+        frozen[..., :3] = np.array(
+            (
+                ((32, 128, 255), (96, 224, 192)),
+                ((255, 160, 64), (128, 64, 224)),
+            ),
+            dtype=np.uint8,
+        )
+        textures[albedo_id] = DecodedTexture(
+            TextureInfo(
+                id=albedo_id,
+                tuid=albedo_id,
+                format_code=0x06,
+                mip_count=1,
+                width=2,
+                height=2,
+                offset=0,
+                length=0,
+            ),
+            albedo,
+        )
+        textures[frozen_id] = DecodedTexture(
+            TextureInfo(
+                id=frozen_id,
+                tuid=frozen_id,
+                format_code=0x06,
+                mip_count=1,
+                width=2,
+                height=2,
+                offset=0,
+                length=0,
+            ),
+            frozen,
+        )
+        return (
+            replace(
+                shader,
+                albedo_texture_id=albedo_id,
+                lookup_path="fixture/cap_boots_frozen/cap_boots_frozen",
+                texture_lookup_paths=(
+                    "fixture/cap_boots_c",
+                    "fixture/cap_boots_n",
+                    "fixture/cap_boots_e",
+                    None,
+                ),
+                extra_texture_ids=(frozen_id, None),
+                extra_texture_lookup_paths=(
+                    FROZEN_EFFECT_TEXTURE_PATH,
+                    None,
+                ),
+                material_program_tuid=FROZEN_EFFECT_PROGRAM_TUID,
+                effect_family=FROZEN_EFFECT_FAMILY,
+            ),
+            textures,
+        )
 
     @staticmethod
     def _decoded_texture(

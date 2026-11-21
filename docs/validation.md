@@ -349,6 +349,18 @@ material-vector emission tint, authored emission strength, packed alpha, and
 detail-map composition remain under research. Bound detail textures are still
 imported as unconnected Non-Color nodes for inspection and downstream authoring.
 
+The R3 frozen family is validated independently of generic effect slots.
+Portable reader regressions require the exact frozen material-program identity,
+control byte, active fifth-slot path, and embedded program sections, and reject
+the molten program that shares the texture. A real-data regression over
+`new_york_terraformer` identifies exactly 38 frozen shaders, validates the
+512x512 effect texture, and confirms the molten Hulk and fire-hair exclusions.
+The Blender material regression checks normal-projected sampling, grazing
+coverage, fixed ice tint, screen composition, roughness response, and preserved
+family metadata. A Capelli review reassigned 16,481 polygons across ten frozen
+materials, then saved, rendered, reopened, and rechecked the graphs in Blender
+5.2.2 LTS.
+
 Analyze one extracted cached archive, or every cached level archive in an ISO:
 
 ```powershell
@@ -488,6 +500,12 @@ The current implementation was validated in Blender 5.2.2 LTS with:
 - all 27 R3 cached level archives: 33,860 shader references, 4,579 unique
   shader payloads, exact normal-flag/binding agreement, and no mismatched
   duplicate payloads;
+- `new_york_terraformer`: exactly 38 strictly classified frozen shaders, with
+  the shared-texture molten program and the frozen-named fire-hair material
+  excluded;
+- a saved, rendered, and reopened Capelli frozen-material review containing
+  ten frozen graphs and 16,481 reassigned polygons, with visibly pale-blue,
+  glossy frozen surfaces beside the unchanged source materials;
 - a full Ravager import with 9 objects, 7 meshes, 19 materials, 23 images,
   105 Actions, and all six source-default head/attachment Collections shown;
 - sampled parity for all 105 Ravager Actions across 245,700 dense-reference

@@ -160,9 +160,11 @@ class ShaderInfo:
     extra_texture_lookup_paths: tuple[str | None, ...] = ()
     texture_map_indices: tuple[int, ...] = ()
     material_pre_control_values: tuple[int, ...] = ()
+    material_program_tuid: int | None = None
     material_word: int | None = None
     material_values: tuple[tuple[float, float, float, float], ...] = ()
     material_tail_values: tuple[float, ...] = ()
+    effect_family: str | None = None
     normal_texture_encoding: str = "RECONSTRUCTED"
     specular_texture_semantics: str = "PACKED"
     emissive_texture_id: int | None = None

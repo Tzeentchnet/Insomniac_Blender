@@ -12,7 +12,12 @@ from insomniac_asset_io.core.errors import FormatError
 from insomniac_asset_io.core.source import GameSource
 from insomniac_asset_io.games.resistance_2.formats import AssetKind
 from insomniac_asset_io.games.resistance_2.reader import Resistance2Reader
-from insomniac_asset_io.games.resistance_3.reader import Resistance3Reader
+from insomniac_asset_io.games.resistance_3.reader import (
+    FROZEN_EFFECT_FAMILY,
+    FROZEN_EFFECT_PROGRAM_TUID,
+    FROZEN_EFFECT_TEXTURE_PATH,
+    Resistance3Reader,
+)
 
 SHADER_TUID = 0x1234_5678_90AB_CDEF
 TEXTURE_IDS = (
@@ -25,6 +30,7 @@ TEXTURE_IDS = (
 )
 MATERIAL_WORD = 0x1C04_1328
 MATERIAL_PRE_CONTROL_VALUES = (0x1234_5678, 0x9ABC_DEF0)
+MATERIAL_PROGRAM_TUID = 0x1020_3040_5060_7080
 FOLIAGE_TUID = 0x1122_3344_5566_7788
 HIGHLIGHT_TUID = 0x8877_6655_4433_2211
 EMBEDDED_TEXTURE_TUID = 0xFA8D_164F_8843_ADA3
@@ -76,10 +82,84 @@ def _shader() -> bytes:
     values = tuple(float(index) / 8.0 for index in range(20))
     tail = (10.25, 11.5, 12.75)
     struct.pack_into(">20f3f", data, 0x74, *values, *tail)
+    struct.pack_into(">Q", data, 0x98, MATERIAL_PROGRAM_TUID)
 
     struct.pack_into(">QII", data, 0xD0, SHADER_TUID, lookup_path, 0)
     struct.pack_into(">6I", data, 0xE0, *TEXTURE_IDS)
     struct.pack_into(">6I", data, 0xF8, *texture_paths)
+    return bytes(data[:cursor])
+
+
+def _frozen_shader(
+    *,
+    program_tuid: int = FROZEN_EFFECT_PROGRAM_TUID,
+    valid_descriptors: bool = True,
+) -> bytes:
+    data = bytearray(0x400)
+    struct.pack_into(">4sHHI", data, 0, b"IGHW", 1, 1, 6)
+    sections = (
+        (0x5000, 0x90, 1, 0x80),
+        (0x5D00, 0x110, 1, 0x40),
+        (0x33001, 0x150, 1, 0x30),
+        (0x33002, 0x180, 1, 0x30),
+        (0x33003, 0x1B0, 1, 0x0B),
+    )
+    for index, section in enumerate(sections):
+        struct.pack_into(">IIII", data, 0x20 + index * 0x10, *section)
+
+    cursor = 0x220
+
+    def add_string(value: str) -> int:
+        nonlocal cursor
+        encoded = value.encode("utf-8") + b"\0"
+        offset = cursor
+        data[offset : offset + len(encoded)] = encoded
+        cursor += len(encoded)
+        return offset
+
+    lookup_path = add_string(
+        "fixture/em_warden_head_04frozen/"
+        "em_warden_head_04frozen"
+    )
+    texture_paths = tuple(
+        add_string(
+            FROZEN_EFFECT_TEXTURE_PATH
+            if index == 4
+            else f"fixture/r3_texture_{index}"
+        )
+        for index in range(6)
+    )
+    struct.pack_into(
+        ">IIII",
+        data,
+        0x70,
+        0x11300,
+        0x220,
+        1,
+        cursor - 0x220,
+    )
+
+    struct.pack_into(">6i", data, 0x90, 0, 1, 2, 3, 4, -1)
+    struct.pack_into(">2I", data, 0xA8, 0, 0)
+    struct.pack_into(">I", data, 0xB0, 0x1C00_1328)
+    struct.pack_into(">20f3f", data, 0xB4, *(1.0,) * 20, 0.0, 1.0, 0.0)
+    struct.pack_into(">Q", data, 0xD8, program_tuid)
+
+    struct.pack_into(">QII", data, 0x110, SHADER_TUID, lookup_path, 0)
+    struct.pack_into(">6I", data, 0x120, *TEXTURE_IDS)
+    struct.pack_into(">6I", data, 0x138, *texture_paths)
+    data[0x150:0x180] = bytes(range(0x30))
+    if valid_descriptors:
+        for index in range(3):
+            struct.pack_into(
+                ">QII",
+                data,
+                0x180 + index * 0x10,
+                program_tuid + index + 1,
+                0x10,
+                index * 0x10,
+            )
+    data[0x1B0:0x1BB] = b"\x01\x07\x13" * 3 + b"\x01\x07"
     return bytes(data[:cursor])
 
 
@@ -244,6 +324,10 @@ class Resistance3Tests(unittest.TestCase):
             shader.material_pre_control_values,
             MATERIAL_PRE_CONTROL_VALUES,
         )
+        self.assertEqual(
+            shader.material_program_tuid,
+            MATERIAL_PROGRAM_TUID,
+        )
         self.assertTrue(shader.is_texture_slot_bound(4))
         self.assertTrue(shader.is_texture_slot_bound(5))
         self.assertEqual(shader.material_word, MATERIAL_WORD)
@@ -256,6 +340,60 @@ class Resistance3Tests(unittest.TestCase):
             shader.material_tail_values,
             (10.25, 11.5, 12.75),
         )
+        self.assertIsNone(shader.effect_family)
+
+    def test_classifies_verified_frozen_effect_family(self):
+        shader_data = _frozen_shader()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "assetlookup.dat").write_bytes(
+                _assetlookup(len(shader_data))
+            )
+            (root / "shaders.dat").write_bytes(shader_data)
+
+            with GameSource.open(root) as source:
+                shader = Resistance3Reader(source).read_shader(SHADER_TUID)
+
+        self.assertEqual(
+            shader.material_program_tuid,
+            FROZEN_EFFECT_PROGRAM_TUID,
+        )
+        self.assertEqual(shader.effect_family, FROZEN_EFFECT_FAMILY)
+        self.assertTrue(shader.is_texture_slot_bound(4))
+        self.assertEqual(
+            shader.extra_texture_lookup_paths[0],
+            FROZEN_EFFECT_TEXTURE_PATH,
+        )
+
+    def test_rejects_molten_program_from_frozen_family(self):
+        shader_data = _frozen_shader(
+            program_tuid=0x2B4B_1424_D6F6_0B51,
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "assetlookup.dat").write_bytes(
+                _assetlookup(len(shader_data))
+            )
+            (root / "shaders.dat").write_bytes(shader_data)
+
+            with GameSource.open(root) as source:
+                shader = Resistance3Reader(source).read_shader(SHADER_TUID)
+
+        self.assertIsNone(shader.effect_family)
+
+    def test_rejects_invalid_frozen_program_descriptors(self):
+        shader_data = _frozen_shader(valid_descriptors=False)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "assetlookup.dat").write_bytes(
+                _assetlookup(len(shader_data))
+            )
+            (root / "shaders.dat").write_bytes(shader_data)
+
+            with GameSource.open(root) as source:
+                shader = Resistance3Reader(source).read_shader(SHADER_TUID)
+
+        self.assertIsNone(shader.effect_family)
 
     def test_accepts_shared_collision_quantization_marker(self):
         parsed = _collision_mesh()

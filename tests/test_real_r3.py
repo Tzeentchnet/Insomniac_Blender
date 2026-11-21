@@ -10,13 +10,19 @@ from insomniac_asset_io.core.collision import validate_collision_scene
 from insomniac_asset_io.core.source import GameSource
 from insomniac_asset_io.games.resistance_2.animations import _bind_trs
 from insomniac_asset_io.games.resistance_2.formats import AssetKind
-from insomniac_asset_io.games.resistance_3.reader import Resistance3Reader
+from insomniac_asset_io.games.resistance_3.reader import (
+    FROZEN_EFFECT_FAMILY,
+    FROZEN_EFFECT_PROGRAM_TUID,
+    FROZEN_EFFECT_TEXTURE_PATH,
+    Resistance3Reader,
+)
 
 REAL_SOURCE = os.environ.get("R3_LEVEL_SOURCE")
 FOLIAGE_SOURCE = os.environ.get("R3_FOLIAGE_SOURCE")
 RAVAGER_SOURCE = os.environ.get("R3_RAVAGER_SOURCE")
 STALKER_SOURCE = os.environ.get("R3_STALKER_SOURCE")
 CAPELLI_SOURCE = os.environ.get("R3_CAPELLI_SOURCE")
+FROZEN_SOURCE = os.environ.get("R3_FROZEN_SOURCE")
 
 
 @unittest.skipUnless(REAL_SOURCE, "R3_LEVEL_SOURCE is not set")
@@ -138,6 +144,62 @@ class RealResistance3Tests(unittest.TestCase):
                 0,
             )
             self.assertTrue(reader.read_gameplay_regions())
+
+
+@unittest.skipUnless(FROZEN_SOURCE, "R3_FROZEN_SOURCE is not set")
+class RealResistance3FrozenTests(unittest.TestCase):
+    def test_classifies_new_york_terraformer_frozen_family(self):
+        with GameSource.open(Path(FROZEN_SOURCE)) as source:
+            reader = Resistance3Reader(source)
+            shaders = tuple(
+                reader.read_shader(pointer.tuid)
+                for pointer in reader.asset_pointers(AssetKind.SHADER)
+            )
+
+            frozen = tuple(
+                shader
+                for shader in shaders
+                if shader.effect_family == FROZEN_EFFECT_FAMILY
+            )
+            self.assertEqual(len(frozen), 38)
+            self.assertEqual(
+                {shader.material_program_tuid for shader in frozen},
+                {FROZEN_EFFECT_PROGRAM_TUID},
+            )
+            self.assertTrue(
+                all(shader.is_texture_slot_bound(4) for shader in frozen)
+            )
+            self.assertEqual(
+                {
+                    path.replace("\\", "/").casefold()
+                    for shader in frozen
+                    for path in shader.extra_texture_lookup_paths[:1]
+                },
+                {FROZEN_EFFECT_TEXTURE_PATH},
+            )
+
+            representative = reader.read_shader(0x030C_48D2_E3FD_8A07)
+            texture = reader.read_texture(
+                representative.extra_texture_ids[0],
+                lookup_path=representative.extra_texture_lookup_paths[0],
+            )
+            self.assertEqual(texture.rgba.shape, (512, 512, 4))
+            self.assertTrue(np.all(texture.rgba[..., 3] == 255))
+            self.assertFalse(
+                np.array_equal(
+                    texture.rgba[..., 0],
+                    texture.rgba[..., 1],
+                )
+            )
+
+            for shader_tuid in (
+                0x4E3B_B32D_D6F6_0C1A,
+                0xB964_E09D_D6F6_30F2,
+                0x9DB2_D445_E3C6_56F3,
+            ):
+                self.assertIsNone(
+                    reader.read_shader(shader_tuid).effect_family
+                )
 
 
 @unittest.skipUnless(FOLIAGE_SOURCE, "R3_FOLIAGE_SOURCE is not set")
