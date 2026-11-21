@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -80,6 +81,49 @@ class GameSourceTests(unittest.TestCase):
             actual = source.sibling_level_archives()
 
         self.assertEqual(actual, (nested, sibling))
+
+    def test_verified_cache_ignores_siblings_missing_from_provenance(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / "selected-cache"
+            levels = (
+                root
+                / "PS3_GAME"
+                / "USRDIR"
+                / "packed"
+                / "levels"
+            )
+            selected = levels / "selected" / "level_cached.psarc"
+            allowed = levels / "allowed" / "level_cached.psarc"
+            stale = levels / "stale" / "level_cached.psarc"
+            for path in (selected, allowed, stale):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.touch()
+            (root / ".insomniac-cache.json").write_text(
+                json.dumps(
+                    {
+                        "resources": [
+                            (
+                                "PS3_GAME/USRDIR/packed/levels/selected/"
+                                "level_cached.psarc"
+                            ),
+                            (
+                                "PS3_GAME/USRDIR/packed/levels/allowed/"
+                                "level_cached.psarc"
+                            ),
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            source = GameSource(
+                selected.parent,
+                [],
+                selected_path=selected,
+            )
+            actual = source.sibling_level_archives()
+
+        self.assertEqual(actual, (allowed,))
 
 
 if __name__ == "__main__":

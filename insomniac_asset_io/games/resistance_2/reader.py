@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -178,8 +179,12 @@ class Resistance2Reader:
             tuple[int, str],
             DecodedTexture,
         ] = {}
+        self._texture_paths_by_id: dict[int, tuple[str, ...]] | None = None
         self._texture_path_index: dict[str, tuple[int, ...]] | None = None
         self._sibling_texture_index: dict[int, tuple[Path, ...]] | None = None
+        self._sibling_texture_path_index: (
+            dict[str, tuple[int, ...]] | None
+        ) = None
         self._zone_lightmap_info_cache: dict[
             int,
             dict[int, TextureInfo],
@@ -1494,25 +1499,8 @@ class Resistance2Reader:
                 texture = self._read_sibling_texture(texture_id)
             self._texture_cache[texture_id] = texture
             return texture
+        raw = self.read_texture_payload(texture_id)
         if not info.length:
-            try:
-                raw = self._asset_bytes(AssetKind.TEXTURE, info.tuid)
-            except MissingResourceError as exc:
-                raise MissingResourceError(
-                    f"Texture 0x{texture_id:08X} has neither a high-mip "
-                    "nor an embedded level payload"
-                ) from exc
-            required = texture_mip_size(
-                info.width,
-                info.height,
-                info.format_code,
-            )
-            if len(raw) < required:
-                raise FormatError(
-                    f"Texture 0x{texture_id:08X} embedded payload is "
-                    f"{len(raw)} bytes, but its {info.width}x{info.height} "
-                    f"format requires at least {required}"
-                )
             info = TextureInfo(
                 id=info.id,
                 tuid=info.tuid,
@@ -1526,23 +1514,53 @@ class Resistance2Reader:
             texture = decode_texture(info, raw)
             self._texture_cache[texture_id] = texture
             return texture
-        raw = self.source.read_slice(
-            self.resource_path("highmips.dat"),
-            info.offset,
-            info.length,
-        )
         texture = decode_texture(info, raw)
         self._texture_cache[texture_id] = texture
         return texture
+
+    def read_texture_payload(self, texture_id: int) -> bytes:
+        info = self.texture_infos.get(texture_id)
+        if info is None:
+            raise MissingResourceError(
+                f"Texture 0x{texture_id:08X} is not in the level lookup"
+            )
+        if info.length:
+            return self.source.read_slice(
+                self.resource_path("highmips.dat"),
+                info.offset,
+                info.length,
+            )
+        try:
+            raw = self._asset_bytes(AssetKind.TEXTURE, info.tuid)
+        except MissingResourceError as exc:
+            raise MissingResourceError(
+                f"Texture 0x{texture_id:08X} has neither a high-mip "
+                "nor an embedded level payload"
+            ) from exc
+        required = texture_mip_size(
+            info.width,
+            info.height,
+            info.format_code,
+        )
+        if len(raw) < required:
+            raise FormatError(
+                f"Texture 0x{texture_id:08X} embedded payload is "
+                f"{len(raw)} bytes, but its {info.width}x{info.height} "
+                f"format requires at least {required}"
+            )
+        return raw
+
+    def texture_payload_digest(self, texture_id: int) -> str:
+        return hashlib.sha256(
+            self.read_texture_payload(texture_id)
+        ).hexdigest()
 
     @staticmethod
     def _normalize_texture_lookup_path(value: str | None) -> str:
         return (value or "").replace("\\", "/").strip("/").casefold()
 
-    def _texture_ids_by_lookup_path(self) -> dict[str, tuple[int, ...]]:
-        if self._texture_path_index is not None:
-            return self._texture_path_index
-        by_path: dict[str, set[int]] = {}
+    def texture_references(self) -> tuple[tuple[int, str], ...]:
+        references: set[tuple[int, str]] = set()
         for pointer in self.asset_pointers(AssetKind.SHADER):
             try:
                 shader = self.read_shader(pointer.tuid)
@@ -1554,63 +1572,162 @@ class Resistance2Reader:
                 LOGGER.warning(warning)
                 self.warnings.append(warning)
                 continue
-            texture_ids = (
-                shader.albedo_texture_id,
-                shader.normal_texture_id,
-                shader.expensive_texture_id,
-                shader.detail_texture_id,
-            )
-            for texture_id, path in zip(
-                texture_ids,
-                shader.texture_lookup_paths,
-            ):
-                normalized = self._normalize_texture_lookup_path(path)
-                if texture_id is not None and normalized:
-                    by_path.setdefault(normalized, set()).add(texture_id)
+            for texture_id, path in shader.texture_references:
+                references.add(
+                    (
+                        texture_id,
+                        self._normalize_texture_lookup_path(path),
+                    )
+                )
+        return tuple(sorted(references))
+
+    def texture_lookup_paths_by_id(self) -> dict[int, tuple[str, ...]]:
+        if self._texture_paths_by_id is not None:
+            return self._texture_paths_by_id
+        by_id: dict[int, set[str]] = {}
+        for texture_id, path in self.texture_references():
+            if path:
+                by_id.setdefault(texture_id, set()).add(path)
+        self._texture_paths_by_id = {
+            texture_id: tuple(sorted(paths))
+            for texture_id, paths in by_id.items()
+        }
+        return self._texture_paths_by_id
+
+    def _texture_ids_by_lookup_path(self) -> dict[str, tuple[int, ...]]:
+        if self._texture_path_index is not None:
+            return self._texture_path_index
+        by_path: dict[str, set[int]] = {}
+        for texture_id, paths in self.texture_lookup_paths_by_id().items():
+            for path in paths:
+                by_path.setdefault(path, set()).add(texture_id)
+        self._sibling_textures()
+        for path, texture_ids in (
+            self._sibling_texture_path_index or {}
+        ).items():
+            by_path.setdefault(path, set()).update(texture_ids)
         self._texture_path_index = {
             path: tuple(sorted(texture_ids))
             for path, texture_ids in by_path.items()
         }
         return self._texture_path_index
 
+    def unresolved_texture_references(
+        self,
+    ) -> tuple[tuple[int, str], ...]:
+        return tuple(
+            (texture_id, lookup_path)
+            for texture_id, lookup_path
+            in self.missing_exact_texture_references()
+            if not self.has_available_texture_for_path(
+                texture_id,
+                lookup_path,
+            )
+        )
+
+    def missing_exact_texture_references(
+        self,
+    ) -> tuple[tuple[int, str], ...]:
+        available = (
+            set(self.texture_infos)
+            | set(self.global_texture_locations)
+            | set(self._sibling_textures())
+        )
+        return tuple(
+            (texture_id, lookup_path)
+            for texture_id, lookup_path in self.texture_references()
+            if texture_id not in available
+        )
+
+    def has_available_texture_for_path(
+        self,
+        texture_id: int,
+        lookup_path: str,
+    ) -> bool:
+        return bool(
+            self.available_texture_ids_for_path(
+                texture_id,
+                lookup_path,
+            )
+        )
+
+    def available_texture_ids_for_path(
+        self,
+        texture_id: int,
+        lookup_path: str,
+    ) -> tuple[int, ...]:
+        if not lookup_path:
+            return ()
+        available = (
+            set(self.texture_infos)
+            | set(self.global_texture_locations)
+            | set(self._sibling_textures())
+        )
+        return tuple(
+            candidate_id
+            for candidate_id in self._texture_ids_by_lookup_path().get(
+                lookup_path,
+                (),
+            )
+            if candidate_id != texture_id and candidate_id in available
+        )
+
     def _read_texture_by_lookup_path(
         self,
         texture_id: int,
         normalized_path: str,
     ) -> tuple[int, DecodedTexture] | None:
-        candidates: list[tuple[int, DecodedTexture]] = []
-        for candidate_id in self._texture_ids_by_lookup_path().get(
+        available_here = (
+            set(self.texture_infos)
+            | set(self.global_texture_locations)
+        )
+        path_ids = self._texture_ids_by_lookup_path().get(
             normalized_path,
             (),
-        ):
-            if candidate_id == texture_id:
+        )
+        local_ids = tuple(
+            candidate_id
+            for candidate_id in path_ids
+            if candidate_id in available_here
+        )
+        local_id_set = set(local_ids)
+        sibling_ids = tuple(
+            candidate_id
+            for candidate_id in path_ids
+            if candidate_id not in local_id_set
+        )
+        for candidate_ids in (local_ids, sibling_ids):
+            candidates: list[tuple[int, DecodedTexture]] = []
+            for candidate_id in candidate_ids:
+                if candidate_id == texture_id:
+                    continue
+                try:
+                    texture = self._read_texture_exact(candidate_id)
+                except MissingResourceError:
+                    continue
+                candidates.append((candidate_id, texture))
+            if not candidates:
                 continue
-            try:
-                texture = self._read_texture_exact(candidate_id)
-            except MissingResourceError:
-                continue
-            candidates.append((candidate_id, texture))
-        if not candidates:
-            return None
 
-        first_id, first = candidates[0]
-        if any(
-            texture.info.format_code != first.info.format_code
-            or texture.info.width != first.info.width
-            or texture.info.height != first.info.height
-            or not np.array_equal(texture.rgba, first.rgba)
-            for _candidate_id, texture in candidates[1:]
-        ):
-            choices = ", ".join(
-                f"0x{candidate_id:08X}"
-                for candidate_id, _texture in candidates
-            )
-            raise AmbiguousResourceError(
-                f"Texture 0x{texture_id:08X} lookup path "
-                f"{normalized_path!r} matches multiple different "
-                f"available payloads: {choices}"
-            )
-        return first_id, first
+            first_id, first = candidates[0]
+            if any(
+                texture.info.format_code != first.info.format_code
+                or texture.info.width != first.info.width
+                or texture.info.height != first.info.height
+                or not np.array_equal(texture.rgba, first.rgba)
+                for _candidate_id, texture in candidates[1:]
+            ):
+                choices = ", ".join(
+                    f"0x{candidate_id:08X}"
+                    for candidate_id, _texture in candidates
+                )
+                raise AmbiguousResourceError(
+                    f"Texture 0x{texture_id:08X} lookup path "
+                    f"{normalized_path!r} matches multiple different "
+                    f"available payloads: {choices}"
+                )
+            return first_id, first
+        return None
 
     @cached_property
     def global_texture_locations(
@@ -1815,12 +1932,18 @@ class Resistance2Reader:
         if self._sibling_texture_index is not None:
             return self._sibling_texture_index
         by_id: dict[int, list[Path]] = {}
+        by_path: dict[str, set[int]] = {}
         for archive_path in self.source.sibling_level_archives():
             try:
                 with GameSource.open(archive_path) as source:
                     sibling = Resistance2Reader(source)
                     for texture_id in sibling.texture_infos:
                         by_id.setdefault(texture_id, []).append(archive_path)
+                    for texture_id, paths in (
+                        sibling.texture_lookup_paths_by_id().items()
+                    ):
+                        for path in paths:
+                            by_path.setdefault(path, set()).add(texture_id)
             except InsomniacError as exc:
                 warning = (
                     f"Sibling level texture lookup skipped "
@@ -1831,6 +1954,10 @@ class Resistance2Reader:
         self._sibling_texture_index = {
             texture_id: tuple(paths)
             for texture_id, paths in by_id.items()
+        }
+        self._sibling_texture_path_index = {
+            path: tuple(sorted(texture_ids))
+            for path, texture_ids in by_path.items()
         }
         return self._sibling_texture_index
 
@@ -1865,8 +1992,7 @@ class Resistance2Reader:
 
         first = textures[0]
         if any(
-            texture.info.tuid != first.info.tuid
-            or texture.info.format_code != first.info.format_code
+            texture.info.format_code != first.info.format_code
             or texture.info.width != first.info.width
             or texture.info.height != first.info.height
             or not np.array_equal(texture.rgba, first.rgba)

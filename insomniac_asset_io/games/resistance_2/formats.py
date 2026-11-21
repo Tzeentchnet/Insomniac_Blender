@@ -180,6 +180,27 @@ class ShaderInfo:
     def expensive_texture_id(self) -> int | None:
         return self.specular_texture_id
 
+    @property
+    def texture_references(
+        self,
+    ) -> tuple[tuple[int, str | None], ...]:
+        texture_ids = (
+            self.albedo_texture_id,
+            self.normal_texture_id,
+            self.specular_texture_id,
+            self.detail_texture_id,
+            *self.extra_texture_ids,
+        )
+        lookup_paths = (
+            *self.texture_lookup_paths,
+            *self.extra_texture_lookup_paths,
+        )
+        return tuple(
+            (texture_id, lookup_path)
+            for texture_id, lookup_path in zip(texture_ids, lookup_paths)
+            if texture_id is not None
+        )
+
     def is_texture_slot_bound(self, index: int) -> bool:
         if not self.texture_map_indices:
             return True

@@ -640,6 +640,171 @@ class Resistance2IsoTests(unittest.TestCase):
         )
         self.assertTrue(globals_are_linked)
 
+    def test_prepares_only_requested_sibling_archives(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            iso = root / "game.iso"
+            iso.write_bytes(b"same disc")
+            cache = root / "cache"
+            extracted_members: list[set[str]] = []
+
+            def extract_members(_iso, outputs, *, game_label):
+                self.assertEqual(game_label, "Resistance 2")
+                extracted_members.append(set(outputs))
+                for member, path in outputs.items():
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(member.encode())
+
+            dependency_metadata = {
+                "schema_version": 1,
+                "kind": "r2_texture_owners",
+                "levels": ["owner_a", "owner_b"],
+            }
+            with mock.patch(
+                "insomniac_asset_io.core.iso.extract_game_iso_members",
+                side_effect=extract_members,
+            ):
+                prepare_game_level(
+                    iso,
+                    "selected",
+                    cache,
+                    cache_key="resistance_2",
+                    game_label="Resistance 2",
+                )
+                prepare_game_level(
+                    iso,
+                    "selected",
+                    cache,
+                    cache_key="resistance_2",
+                    game_label="Resistance 2",
+                    sibling_levels=("owner_b", "owner_a"),
+                    dependency_metadata=dependency_metadata,
+                )
+
+            provenance_path = (
+                cache
+                / "resistance_2"
+                / "selected"
+                / ".insomniac-cache.json"
+            )
+            provenance = json.loads(
+                provenance_path.read_text(encoding="utf-8")
+            )
+
+        self.assertEqual(len(extracted_members), 2)
+        self.assertEqual(
+            extracted_members[1],
+            {
+                (
+                    "PS3_GAME/USRDIR/packed/levels/owner_a/"
+                    "level_cached.psarc"
+                ),
+                (
+                    "PS3_GAME/USRDIR/packed/levels/owner_a/"
+                    "level_uncached.psarc"
+                ),
+                (
+                    "PS3_GAME/USRDIR/packed/levels/owner_b/"
+                    "level_cached.psarc"
+                ),
+                (
+                    "PS3_GAME/USRDIR/packed/levels/owner_b/"
+                    "level_uncached.psarc"
+                ),
+            },
+        )
+        self.assertEqual(
+            provenance["dependencies"],
+            dependency_metadata,
+        )
+        self.assertEqual(len(provenance["resources"]), 8)
+
+    def test_reuses_verified_sibling_archives_with_hardlinks(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            iso = root / "game.iso"
+            iso.write_bytes(b"same disc")
+            cache = root / "cache"
+            extracted_members: list[set[str]] = []
+
+            def extract_members(_iso, outputs, *, game_label):
+                extracted_members.append(set(outputs))
+                for member, path in outputs.items():
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(member.encode())
+
+            with mock.patch(
+                "insomniac_asset_io.core.iso.extract_game_iso_members",
+                side_effect=extract_members,
+            ):
+                prepare_game_level(
+                    iso,
+                    "owner",
+                    cache,
+                    cache_key="resistance_2",
+                    game_label="Resistance 2",
+                )
+                prepare_game_level(
+                    iso,
+                    "selected",
+                    cache,
+                    cache_key="resistance_2",
+                    game_label="Resistance 2",
+                )
+                prepare_game_level(
+                    iso,
+                    "selected",
+                    cache,
+                    cache_key="resistance_2",
+                    game_label="Resistance 2",
+                    sibling_levels=("owner",),
+                    dependency_metadata={
+                        "schema_version": 1,
+                        "kind": "r2_texture_owners",
+                        "levels": ["owner"],
+                    },
+                )
+
+            owner = (
+                cache
+                / "resistance_2"
+                / "owner"
+                / "PS3_GAME"
+                / "USRDIR"
+                / "packed"
+                / "levels"
+                / "owner"
+                / "level_cached.psarc"
+            )
+            linked = (
+                cache
+                / "resistance_2"
+                / "selected"
+                / "PS3_GAME"
+                / "USRDIR"
+                / "packed"
+                / "levels"
+                / "owner"
+                / "level_cached.psarc"
+            )
+            siblings_are_linked = os.path.samefile(owner, linked)
+
+        self.assertEqual(len(extracted_members), 2)
+        self.assertEqual(
+            extracted_members[1],
+            {
+                (
+                    "PS3_GAME/USRDIR/packed/levels/selected/"
+                    "level_cached.psarc"
+                ),
+                (
+                    "PS3_GAME/USRDIR/packed/levels/selected/"
+                    "level_uncached.psarc"
+                ),
+            },
+        )
+        self.assertTrue(siblings_are_linked)
+
     def test_refreshes_cache_with_wrong_title_provenance(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

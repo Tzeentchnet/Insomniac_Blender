@@ -314,6 +314,17 @@ reused; global archives from another verified level cache for the same disc
 are reused with NTFS hard links instead of being extracted and duplicated for
 every level. Legacy caches or caches produced from a different ISO are
 refreshed once before use.
+
+Resistance 2 catalog generation also records a metadata-only texture owner
+index: low-32 texture ID, full TUID, descriptor shape, authored paths, and a
+SHA-256 payload fingerprint, but no texel payload. When a selected level
+references an exact texture stored elsewhere, ISO preparation extracts only
+the smallest greedy set of matching sibling level pairs. Byte-identical
+owners are interchangeable; conflicting fingerprints or descriptors stop
+with an explicit ambiguity error. The selected cache provenance records the
+chosen owner levels and texture references, and verified owner caches are
+reused through NTFS hard links when available.
+
 **Extract Selected Level Now**
 remains available when an explicit extracted source is useful for external
 tools. When **Inspect Source** needs ISO extraction, the sidebar and status

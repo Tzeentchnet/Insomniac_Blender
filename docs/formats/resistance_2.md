@@ -652,9 +652,25 @@ guessing from the folder TUID.
 R2 also contains cross-level references. For example,
 `chicxulub_multiplayer` references diffuse texture `0x1585EA44` from
 Chicago/Iceland2 and `0x6782D663` from Bay Area/Scotia Co-op. The reader
-indexes already-extracted sibling level lookups lazily and reads the matching
-`highmips.dat` payload. It does not assume that equal low-32 IDs are equal:
-duplicate candidates are decoded and compared before use.
+indexes provenance-approved or manually co-located sibling level lookups
+lazily and reads the matching `highmips.dat` payload. It does not assume that
+equal low-32 IDs are equal: duplicate candidates must have the same decoded
+format, dimensions, and pixels before use. Distinct full TUID prefixes are
+accepted only when those payload checks agree.
+
+R2 import catalogs add a compact `texture_index` keyed by the shader's
+low-32 texture ID. Records group the full TUID, descriptor dimensions and
+format, high-mip length, normalized authored paths, owner levels, and SHA-256
+of the compressed mip-zero bytes. The index therefore contains metadata and
+fingerprints but no copyrighted texel payload.
+
+ISO preparation prefers an exact indexed ID over an unverified same-path
+alias. A local alias is retained without extraction only when its indexed
+descriptor and SHA-256 match the exact payload. Byte-identical duplicate
+owners are collapsed with a greedy set cover; conflicting descriptors or
+fingerprints fail explicitly. The chosen sibling pairs are added to the
+selected cache's resource list and dependency provenance. On the USA disc the
+index contains 42,658 level-owner records, 7,440 unique IDs, and 7,506 paths.
 
 ## Zones and gameplay placement
 

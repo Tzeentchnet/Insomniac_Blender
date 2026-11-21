@@ -171,6 +171,20 @@ def _resolved_asset_source(
     for level in asset.levels:
         cached = adapter.cached_level_path(cache_directory, level)
         if adapter.is_level_cached(cache_directory, level):
+            configured = _configured_iso(context)
+            dependency_iso = (
+                find_iso(configured)
+                if configured
+                and adapter.prepare_level_dependencies is not None
+                else None
+            )
+            if dependency_iso is not None:
+                cached = adapter.prepare_level(
+                    dependency_iso,
+                    level,
+                    cache_directory,
+                )
+                return str(cached), str(dependency_iso)
             return str(cached), str(cached)
 
     iso = _configured_iso(context)
@@ -268,6 +282,20 @@ def _resolved_level_source(
 
     cached = adapter.cached_level_path(cache_directory, level_name)
     if adapter.is_level_cached(cache_directory, level_name):
+        configured = _configured_iso(context)
+        dependency_iso = (
+            find_iso(configured)
+            if configured
+            and adapter.prepare_level_dependencies is not None
+            else None
+        )
+        if dependency_iso is not None:
+            cached = adapter.prepare_level(
+                dependency_iso,
+                level_name,
+                cache_directory,
+            )
+            return str(cached), str(dependency_iso)
         return str(cached), str(cached)
 
     iso = _configured_iso(context)

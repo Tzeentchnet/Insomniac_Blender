@@ -4,6 +4,7 @@ from pathlib import Path
 import struct
 import tempfile
 import unittest
+from unittest import mock
 from unittest.mock import patch
 
 import numpy as np
@@ -187,6 +188,8 @@ class ShaderTests(unittest.TestCase):
         reader = Resistance2Reader.__new__(Resistance2Reader)
         reader._texture_cache = {}
         reader._texture_fallback_cache = {}
+        reader.texture_infos = {resolved_id: texture.info}
+        reader.global_texture_locations = {}
         reader._texture_path_index = {
             "artdepartment/character/attackdrone/attackdrone_c": (
                 requested_id,
@@ -232,6 +235,11 @@ class ShaderTests(unittest.TestCase):
         reader = Resistance2Reader.__new__(Resistance2Reader)
         reader._texture_cache = {}
         reader._texture_fallback_cache = {}
+        reader.texture_infos = {
+            texture_id: texture.info
+            for texture_id, texture in textures.items()
+        }
+        reader.global_texture_locations = {}
         reader._texture_path_index = {
             "fixture/texture": (requested_id, *candidate_ids)
         }
@@ -257,6 +265,133 @@ class ShaderTests(unittest.TestCase):
                     requested_id,
                     lookup_path="fixture/texture",
                 )
+
+    def test_lookup_path_includes_extracted_sibling_shader_paths(self):
+        requested_id = 0x1111_1111
+        resolved_id = 0x2222_2222
+        texture = self._texture(resolved_id, 32)
+        reader = Resistance2Reader.__new__(Resistance2Reader)
+        reader._texture_cache = {}
+        reader._texture_fallback_cache = {}
+        reader.texture_infos = {}
+        reader.global_texture_locations = {}
+        reader._texture_paths_by_id = {
+            requested_id: ("fixture/texture",),
+        }
+        reader._texture_path_index = None
+        reader._sibling_texture_index = {
+            resolved_id: (Path("owner/level_cached.psarc"),),
+        }
+        reader._sibling_texture_path_index = {
+            "fixture/texture": (resolved_id,),
+        }
+
+        def read_exact(texture_id: int) -> DecodedTexture:
+            if texture_id == resolved_id:
+                return texture
+            raise MissingResourceError(f"Missing 0x{texture_id:08X}")
+
+        with patch.object(
+            reader,
+            "_read_texture_exact",
+            side_effect=read_exact,
+        ):
+            actual = reader.read_texture(
+                requested_id,
+                lookup_path="fixture/texture",
+            )
+
+        self.assertIs(actual, texture)
+
+    def test_lookup_path_prefers_selected_level_alias_over_sibling_alias(self):
+        requested_id = 0x1111_1111
+        local_id = 0x2222_2222
+        sibling_id = 0x3333_3333
+        local = self._texture(local_id, 32)
+        sibling = self._texture(sibling_id, 64)
+        reader = Resistance2Reader.__new__(Resistance2Reader)
+        reader._texture_cache = {}
+        reader._texture_fallback_cache = {}
+        reader.texture_infos = {local_id: local.info}
+        reader.global_texture_locations = {}
+        reader._texture_paths_by_id = {
+            requested_id: ("fixture/texture",),
+            local_id: ("fixture/texture",),
+        }
+        reader._texture_path_index = None
+        reader._sibling_texture_index = {
+            sibling_id: (Path("owner/level_cached.psarc"),),
+        }
+        reader._sibling_texture_path_index = {
+            "fixture/texture": (sibling_id,),
+        }
+
+        def read_exact(texture_id: int) -> DecodedTexture:
+            if texture_id == local_id:
+                return local
+            if texture_id == sibling_id:
+                return sibling
+            raise MissingResourceError(f"Missing 0x{texture_id:08X}")
+
+        with patch.object(
+            reader,
+            "_read_texture_exact",
+            side_effect=read_exact,
+        ):
+            actual = reader.read_texture(
+                requested_id,
+                lookup_path="fixture/texture",
+            )
+
+        self.assertIs(actual, local)
+
+    def test_sibling_textures_allow_identical_payloads_with_distinct_tuids(self):
+        texture_id = 0x1234_5678
+        first = self._texture(texture_id, 32)
+        second = self._texture(texture_id, 32)
+        second.info = TextureInfo(
+            id=texture_id,
+            tuid=0xABCD_EF01_1234_5678,
+            format_code=second.info.format_code,
+            mip_count=second.info.mip_count,
+            width=second.info.width,
+            height=second.info.height,
+            offset=second.info.offset,
+            length=second.info.length,
+        )
+        reader = Resistance2Reader.__new__(Resistance2Reader)
+        paths = (
+            Path("owner_a/level_cached.psarc"),
+            Path("owner_b/level_cached.psarc"),
+        )
+        reader._sibling_texture_index = {texture_id: paths}
+        reader.warnings = []
+        contexts = []
+        siblings = []
+        for texture in (first, second):
+            context = mock.MagicMock()
+            context.__enter__.return_value = object()
+            contexts.append(context)
+            sibling = mock.Mock()
+            sibling.read_texture.return_value = texture
+            siblings.append(sibling)
+
+        read_sibling = Resistance2Reader._read_sibling_texture
+        with (
+            patch.object(
+                GameSource,
+                "open",
+                side_effect=contexts,
+            ),
+            patch(
+                "insomniac_asset_io.games.resistance_2.reader."
+                "Resistance2Reader",
+                side_effect=siblings,
+            ),
+        ):
+            actual = read_sibling(reader, texture_id)
+
+        self.assertIs(actual, first)
 
     @staticmethod
     def _texture(texture_id: int, value: int) -> DecodedTexture:

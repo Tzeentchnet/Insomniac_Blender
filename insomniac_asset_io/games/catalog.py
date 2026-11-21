@@ -25,6 +25,21 @@ _CATALOG_ASSET_FIELDS = (
 )
 
 
+def normalize_texture_lookup_path(value: str | None) -> str:
+    return (value or "").replace("\\", "/").strip("/").casefold()
+
+
+def _catalog_integer(
+    value: object,
+    *,
+    label: str,
+    minimum: int = 0,
+) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < minimum:
+        raise InsomniacError(f"{label} must be an integer >= {minimum}")
+    return value
+
+
 def _kind_label(kind: AssetKind) -> str:
     return {
         AssetKind.MOBY: "Moby",
@@ -122,6 +137,36 @@ class CatalogAsset:
         return f"{self.source_name}; {identity}; available in {owners}"
 
 
+@dataclass(frozen=True, slots=True)
+class CatalogDiscIdentity:
+    size: int
+    modified_ns: int
+    title_id: str | None = None
+    version: str | None = None
+
+    def as_dict(self) -> dict[str, int | str | None]:
+        return {
+            "size": self.size,
+            "modified_ns": self.modified_ns,
+            "title_id": self.title_id,
+            "version": self.version,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class CatalogTextureOwner:
+    level: str
+    texture_id: int
+    tuid: int
+    format_code: int
+    mip_count: int
+    width: int
+    height: int
+    length: int
+    lookup_paths: tuple[str, ...] = ()
+    payload_sha256: str | None = None
+
+
 def filter_catalog_assets(
     assets: Iterable[CatalogAsset],
     query: str,
@@ -178,6 +223,8 @@ class GameCatalog:
         region: str,
         levels: tuple[str, ...],
         assets: tuple[CatalogAsset, ...],
+        disc: CatalogDiscIdentity | None = None,
+        texture_owners: tuple[CatalogTextureOwner, ...] = (),
     ) -> None:
         self.game_id = game_id
         self.game_label = game_label
@@ -185,12 +232,28 @@ class GameCatalog:
         self.region = region
         self.levels = levels
         self.assets = assets
+        self.disc = disc
+        self.texture_owners = texture_owners
         self._assets_by_identifier = {
             asset.identifier: asset for asset in assets
         }
         self._asset_numbers_by_identifier = {
             asset.identifier: index
             for index, asset in enumerate(assets, start=1)
+        }
+        owners_by_id: dict[int, list[CatalogTextureOwner]] = {}
+        owners_by_path: dict[str, list[CatalogTextureOwner]] = {}
+        for owner in texture_owners:
+            owners_by_id.setdefault(owner.texture_id, []).append(owner)
+            for lookup_path in owner.lookup_paths:
+                owners_by_path.setdefault(lookup_path, []).append(owner)
+        self._texture_owners_by_id = {
+            texture_id: tuple(owners)
+            for texture_id, owners in owners_by_id.items()
+        }
+        self._texture_owners_by_path = {
+            lookup_path: tuple(owners)
+            for lookup_path, owners in owners_by_path.items()
         }
 
     def asset(self, identifier: str) -> CatalogAsset:
@@ -208,6 +271,31 @@ class GameCatalog:
             raise MissingResourceError(
                 f"Asset catalog entry {identifier!r} is unavailable"
             ) from exc
+
+    def texture_candidates(
+        self,
+        texture_id: int,
+        lookup_path: str | None = None,
+    ) -> tuple[CatalogTextureOwner, ...]:
+        exact = self.texture_owners_for_id(texture_id)
+        if exact:
+            return exact
+        return self.texture_owners_for_path(lookup_path)
+
+    def texture_owners_for_id(
+        self,
+        texture_id: int,
+    ) -> tuple[CatalogTextureOwner, ...]:
+        return self._texture_owners_by_id.get(texture_id, ())
+
+    def texture_owners_for_path(
+        self,
+        lookup_path: str | None,
+    ) -> tuple[CatalogTextureOwner, ...]:
+        normalized = normalize_texture_lookup_path(lookup_path)
+        if not normalized:
+            return ()
+        return self._texture_owners_by_path.get(normalized, ())
 
 
 def bundled_catalog_path(game_id: str) -> Path:
@@ -280,9 +368,95 @@ def _load_catalog_cached(
             f"{path}: catalog is not for {game_label}"
         )
 
+    raw_disc = payload.get("disc")
+    disc: CatalogDiscIdentity | None = None
+    if raw_disc is not None:
+        if not isinstance(raw_disc, dict):
+            raise InsomniacError(f"{path}: catalog disc must be an object")
+        title_id = raw_disc.get("title_id")
+        version = raw_disc.get("version")
+        if title_id is not None and not isinstance(title_id, str):
+            raise InsomniacError(
+                f"{path}: catalog disc title_id must be a string"
+            )
+        if version is not None and not isinstance(version, str):
+            raise InsomniacError(
+                f"{path}: catalog disc version must be a string"
+            )
+        disc = CatalogDiscIdentity(
+            size=_catalog_integer(
+                raw_disc.get("size"),
+                label=f"{path}: catalog disc size",
+                minimum=1,
+            ),
+            modified_ns=_catalog_integer(
+                raw_disc.get("modified_ns"),
+                label=f"{path}: catalog disc modified_ns",
+            ),
+            title_id=title_id or None,
+            version=version or None,
+        )
+
     raw_levels = payload.get("levels")
     if not isinstance(raw_levels, list) or not raw_levels:
         raise InsomniacError(f"{path}: catalog contains no levels")
+    raw_level_entries: list[tuple[str, dict[str, object]]] = []
+    level_ids: list[str] = []
+    for raw_level in raw_levels:
+        if not isinstance(raw_level, dict):
+            raise InsomniacError(f"{path}: malformed level catalog entry")
+        level_id = raw_level.get("id")
+        if not isinstance(level_id, str) or not level_id:
+            raise InsomniacError(f"{path}: level catalog entry has no ID")
+        if level_id in level_ids:
+            raise InsomniacError(f"{path}: duplicate level {level_id!r}")
+        level_ids.append(level_id)
+        raw_level_entries.append((level_id, raw_level))
+
+    indexed_textures: dict[str, list[dict[str, object]]] = {}
+    raw_texture_index = payload.get("texture_index", {})
+    if not isinstance(raw_texture_index, dict):
+        raise InsomniacError(
+            f"{path}: catalog texture_index must be an object"
+        )
+    known_levels = set(level_ids)
+    for raw_texture_id, raw_records in raw_texture_index.items():
+        if not isinstance(raw_texture_id, str) or not isinstance(
+            raw_records,
+            list,
+        ):
+            raise InsomniacError(
+                f"{path}: malformed catalog texture index entry"
+            )
+        for raw_record in raw_records:
+            if not isinstance(raw_record, dict):
+                raise InsomniacError(
+                    f"{path}: texture {raw_texture_id!r} has a "
+                    "malformed index record"
+                )
+            raw_owners = raw_record.get("owners")
+            if not isinstance(raw_owners, list) or not all(
+                isinstance(owner, str) and owner
+                for owner in raw_owners
+            ):
+                raise InsomniacError(
+                    f"{path}: texture {raw_texture_id!r} has malformed "
+                    "owners"
+                )
+            for owner in raw_owners:
+                if owner not in known_levels:
+                    raise InsomniacError(
+                        f"{path}: texture {raw_texture_id!r} names "
+                        f"unknown owner {owner!r}"
+                    )
+                expanded = {
+                    key: value
+                    for key, value in raw_record.items()
+                    if key != "owners"
+                }
+                expanded["id"] = raw_texture_id
+                indexed_textures.setdefault(owner, []).append(expanded)
+
     raw_names = payload.get("names", {})
     if not isinstance(raw_names, dict):
         raise InsomniacError(f"{path}: catalog names must be an object")
@@ -295,17 +469,10 @@ def _load_catalog_cached(
         ):
             raise InsomniacError(f"{path}: malformed catalog name entry")
         names[identifier] = source_name
-    level_ids: list[str] = []
     owners: dict[tuple[str, AssetKind, int], list[str]] = {}
-    for raw_level in raw_levels:
-        if not isinstance(raw_level, dict):
-            raise InsomniacError(f"{path}: malformed level catalog entry")
-        level_id = raw_level.get("id")
-        if not isinstance(level_id, str) or not level_id:
-            raise InsomniacError(f"{path}: level catalog entry has no ID")
-        if level_id in level_ids:
-            raise InsomniacError(f"{path}: duplicate level {level_id!r}")
-        level_ids.append(level_id)
+    texture_owners: list[CatalogTextureOwner] = []
+    texture_owner_keys: set[tuple[str, int]] = set()
+    for level_id, raw_level in raw_level_entries:
         for field, kind, required in _CATALOG_ASSET_FIELDS:
             values = raw_level.get(field, [] if not required else None)
             if not isinstance(values, list):
@@ -328,6 +495,138 @@ def _load_catalog_cached(
                     (identifier, kind, tuid),
                     [],
                 ).append(level_id)
+        raw_level_textures = raw_level.get("textures", [])
+        if not isinstance(raw_level_textures, list):
+            raise InsomniacError(
+                f"{path}: level {level_id!r} textures must be a list"
+            )
+        raw_textures = [
+            *raw_level_textures,
+            *indexed_textures.get(level_id, ()),
+        ]
+        for raw_texture in raw_textures:
+            if not isinstance(raw_texture, dict):
+                raise InsomniacError(
+                    f"{path}: level {level_id!r} has a malformed "
+                    "texture owner"
+                )
+            raw_texture_id = raw_texture.get("id")
+            raw_tuid = raw_texture.get("tuid")
+            try:
+                texture_id = int(raw_texture_id, 16)
+                tuid = int(raw_tuid, 16)
+            except (TypeError, ValueError) as exc:
+                raise InsomniacError(
+                    f"{path}: level {level_id!r} has invalid texture "
+                    f"identity {raw_texture_id!r}/{raw_tuid!r}"
+                ) from exc
+            if not 0 <= texture_id <= 0xFFFF_FFFF:
+                raise InsomniacError(
+                    f"{path}: level {level_id!r} texture ID "
+                    f"{raw_texture_id!r} is not a u32"
+                )
+            if not 0 <= tuid <= 0xFFFF_FFFF_FFFF_FFFF:
+                raise InsomniacError(
+                    f"{path}: level {level_id!r} texture TUID "
+                    f"{raw_tuid!r} is not a u64"
+                )
+            if tuid & 0xFFFF_FFFF != texture_id:
+                raise InsomniacError(
+                    f"{path}: level {level_id!r} texture "
+                    f"0x{texture_id:08X} does not match TUID "
+                    f"0x{tuid:016X}"
+                )
+            owner_key = (level_id, texture_id)
+            if owner_key in texture_owner_keys:
+                raise InsomniacError(
+                    f"{path}: level {level_id!r} repeats texture "
+                    f"0x{texture_id:08X}"
+                )
+            texture_owner_keys.add(owner_key)
+            raw_paths = raw_texture.get("paths", [])
+            if not isinstance(raw_paths, list) or not all(
+                isinstance(value, str) and value
+                for value in raw_paths
+            ):
+                raise InsomniacError(
+                    f"{path}: level {level_id!r} texture "
+                    f"0x{texture_id:08X} has malformed paths"
+                )
+            lookup_paths = tuple(
+                sorted(
+                    {
+                        normalize_texture_lookup_path(value)
+                        for value in raw_paths
+                    }
+                )
+            )
+            if any(not value for value in lookup_paths):
+                raise InsomniacError(
+                    f"{path}: level {level_id!r} texture "
+                    f"0x{texture_id:08X} has an empty path"
+                )
+            payload_sha256 = raw_texture.get("sha256")
+            if payload_sha256 is not None:
+                if (
+                    not isinstance(payload_sha256, str)
+                    or len(payload_sha256) != 64
+                    or any(
+                        character not in "0123456789abcdefABCDEF"
+                        for character in payload_sha256
+                    )
+                ):
+                    raise InsomniacError(
+                        f"{path}: level {level_id!r} texture "
+                        f"0x{texture_id:08X} has an invalid SHA-256 digest"
+                    )
+                payload_sha256 = payload_sha256.casefold()
+            texture_owners.append(
+                CatalogTextureOwner(
+                    level=level_id,
+                    texture_id=texture_id,
+                    tuid=tuid,
+                    format_code=_catalog_integer(
+                        raw_texture.get("format_code"),
+                        label=(
+                            f"{path}: level {level_id!r} texture "
+                            f"0x{texture_id:08X} format_code"
+                        ),
+                    ),
+                    mip_count=_catalog_integer(
+                        raw_texture.get("mip_count"),
+                        label=(
+                            f"{path}: level {level_id!r} texture "
+                            f"0x{texture_id:08X} mip_count"
+                        ),
+                        minimum=1,
+                    ),
+                    width=_catalog_integer(
+                        raw_texture.get("width"),
+                        label=(
+                            f"{path}: level {level_id!r} texture "
+                            f"0x{texture_id:08X} width"
+                        ),
+                        minimum=1,
+                    ),
+                    height=_catalog_integer(
+                        raw_texture.get("height"),
+                        label=(
+                            f"{path}: level {level_id!r} texture "
+                            f"0x{texture_id:08X} height"
+                        ),
+                        minimum=1,
+                    ),
+                    length=_catalog_integer(
+                        raw_texture.get("length"),
+                        label=(
+                            f"{path}: level {level_id!r} texture "
+                            f"0x{texture_id:08X} length"
+                        ),
+                    ),
+                    lookup_paths=lookup_paths,
+                    payload_sha256=payload_sha256,
+                )
+            )
 
     levels = tuple(
         sorted(
@@ -371,7 +670,115 @@ def _load_catalog_cached(
         region=str(payload.get("region") or "Custom"),
         levels=levels,
         assets=assets,
+        disc=disc,
+        texture_owners=tuple(
+            sorted(
+                texture_owners,
+                key=lambda owner: (
+                    owner.texture_id,
+                    owner.level.casefold(),
+                ),
+            )
+        ),
     )
+
+
+def _group_texture_index(
+    catalog_levels: list[dict[str, object]],
+) -> tuple[list[dict[str, object]], dict[str, list[dict[str, object]]]]:
+    payload_levels: list[dict[str, object]] = []
+    grouped: dict[
+        tuple[object, ...],
+        dict[str, object],
+    ] = {}
+    for level in catalog_levels:
+        level_id = str(level["id"])
+        payload_levels.append(
+            {
+                key: value
+                for key, value in level.items()
+                if key != "textures"
+            }
+        )
+        textures = level.get("textures")
+        if textures is None:
+            continue
+        if not isinstance(textures, list):
+            raise InsomniacError(
+                f"Catalog level {level_id!r} textures must be a list"
+            )
+        for texture in textures:
+            if not isinstance(texture, dict):
+                raise InsomniacError(
+                    f"Catalog level {level_id!r} has malformed "
+                    "texture metadata"
+                )
+            key = (
+                texture.get("id"),
+                texture.get("tuid"),
+                texture.get("format_code"),
+                texture.get("mip_count"),
+                texture.get("width"),
+                texture.get("height"),
+                texture.get("length"),
+                texture.get("sha256"),
+            )
+            record = grouped.get(key)
+            if record is None:
+                record = {
+                    "tuid": texture.get("tuid"),
+                    "format_code": texture.get("format_code"),
+                    "mip_count": texture.get("mip_count"),
+                    "width": texture.get("width"),
+                    "height": texture.get("height"),
+                    "length": texture.get("length"),
+                    "sha256": texture.get("sha256"),
+                    "owners": set(),
+                    "paths": set(),
+                }
+                grouped[key] = record
+            owners = record["owners"]
+            paths = record["paths"]
+            assert isinstance(owners, set)
+            assert isinstance(paths, set)
+            owners.add(level_id)
+            raw_paths = texture.get("paths", ())
+            if not isinstance(raw_paths, list) or not all(
+                isinstance(path, str) for path in raw_paths
+            ):
+                raise InsomniacError(
+                    f"Catalog texture {texture.get('id')!r} has "
+                    "malformed paths"
+                )
+            paths.update(raw_paths)
+
+    texture_index: dict[str, list[dict[str, object]]] = {}
+    for key, record in sorted(
+        grouped.items(),
+        key=lambda item: (
+            str(item[0][0]),
+            str(item[0][1]),
+            str(item[0][7]),
+        ),
+    ):
+        texture_id = key[0]
+        if not isinstance(texture_id, str):
+            raise InsomniacError(
+                "Catalog texture metadata has no string ID"
+            )
+        owners = record["owners"]
+        paths = record["paths"]
+        assert isinstance(owners, set)
+        assert isinstance(paths, set)
+        compact = {
+            field: value
+            for field, value in record.items()
+            if field not in {"owners", "paths"}
+        }
+        compact["owners"] = sorted(owners, key=str.casefold)
+        compact["paths"] = sorted(paths)
+        texture_index.setdefault(texture_id, []).append(compact)
+    return payload_levels, texture_index
 
 
 def build_catalog_from_iso(
@@ -389,7 +796,8 @@ def build_catalog_from_iso(
         raise MissingResourceError(
             f"{adapter.label} ISO was not found: {iso}"
         )
-    adapter.validate_iso(iso)
+    iso_values = adapter.validate_iso(iso)
+    iso_stat = iso.stat()
     levels = adapter.list_levels(iso)
     work_parent = (
         Path(work_directory).expanduser().resolve()
@@ -454,6 +862,32 @@ def build_catalog_from_iso(
                         ]
                         for field, _kind, _required in _CATALOG_ASSET_FIELDS
                     }
+                    level_metadata: dict[str, object] = {}
+                    if adapter.catalog_level_metadata is not None:
+                        level_metadata = adapter.catalog_level_metadata(
+                            reader,
+                            level,
+                        )
+                        if not isinstance(level_metadata, dict):
+                            raise InsomniacError(
+                                f"{adapter.label} catalog metadata hook "
+                                "did not return an object"
+                            )
+                        reserved = {
+                            "id",
+                            *(
+                                field
+                                for field, _kind, _required
+                                in _CATALOG_ASSET_FIELDS
+                            ),
+                        }
+                        overlap = reserved.intersection(level_metadata)
+                        if overlap:
+                            raise InsomniacError(
+                                f"{adapter.label} catalog metadata hook "
+                                "replaced reserved fields: "
+                                + ", ".join(sorted(overlap))
+                            )
             finally:
                 if cache_root.is_dir():
                     shutil.rmtree(cache_root)
@@ -461,20 +895,31 @@ def build_catalog_from_iso(
                 {
                     "id": level,
                     **level_assets,
+                    **level_metadata,
                 }
             )
 
+    disc = {
+        "size": iso_stat.st_size,
+        "modified_ns": iso_stat.st_mtime_ns,
+    }
+    title_id = iso_values.get("TITLE_ID")
+    version = iso_values.get("VERSION") or iso_values.get("APP_VER")
+    if title_id:
+        disc["title_id"] = title_id
+    if version:
+        disc["version"] = version
+    payload_levels, texture_index = _group_texture_index(catalog_levels)
     payload = {
         "schema_version": CATALOG_SCHEMA_VERSION,
         "game": adapter.id,
         "region": region,
-        "disc": {
-            "size": iso.stat().st_size,
-            "modified_ns": iso.stat().st_mtime_ns,
-        },
-        "levels": catalog_levels,
+        "disc": disc,
+        "levels": payload_levels,
         "names": asset_names,
     }
+    if texture_index:
+        payload["texture_index"] = texture_index
     output = Path(output_path).expanduser().resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     temporary_output = output.with_suffix(output.suffix + ".tmp")
@@ -514,5 +959,27 @@ def build_catalog_from_iso(
         )
         report[f"named_{field}"] = sum(
             identifier.startswith(prefix) for identifier in asset_names
+        )
+    texture_records = tuple(
+        texture
+        for level in catalog_levels
+        for texture in level.get("textures", ())
+        if isinstance(texture, dict)
+    )
+    if texture_records:
+        report["texture_owners"] = len(texture_records)
+        report["unique_textures"] = len(
+            {
+                texture.get("id")
+                for texture in texture_records
+            }
+        )
+        report["texture_paths"] = len(
+            {
+                lookup_path
+                for texture in texture_records
+                for lookup_path in texture.get("paths", ())
+                if isinstance(lookup_path, str)
+            }
         )
     return report

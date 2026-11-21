@@ -28,6 +28,16 @@ class GameAdapter:
     create_reader: Callable[[GameSource], object]
     create_catalog_reader: Callable[[GameSource], object] | None = None
     create_source_catalog: Callable[[str | Path | None], object] | None = None
+    catalog_level_metadata: (
+        Callable[[object, str], dict[str, object]] | None
+    ) = None
+    prepare_level_dependencies: (
+        Callable[
+            ["GameAdapter", str | Path, str, str | Path, Path],
+            None,
+        ]
+        | None
+    ) = None
     supports_iso: bool = True
     supports_levels: bool = True
     experimental: bool = False
@@ -64,7 +74,7 @@ class GameAdapter:
     ) -> Path:
         if not self.supports_iso or not self.supports_levels:
             raise ValueError(f"{self.label} does not use ISO level extraction")
-        return prepare_game_level(
+        cached_level = prepare_game_level(
             iso_path,
             level_name,
             cache_directory,
@@ -77,6 +87,15 @@ class GameAdapter:
             expected_title_id=self.iso_title_id,
             expected_version=self.iso_version,
         )
+        if self.prepare_level_dependencies is not None:
+            self.prepare_level_dependencies(
+                self,
+                iso_path,
+                level_name,
+                cache_directory,
+                cached_level,
+            )
+        return cached_level
 
     def prepare_catalog_level(
         self,
@@ -181,6 +200,33 @@ def _create_resistance_2_reader(source: GameSource):
     from .resistance_2.reader import Resistance2Reader
 
     return Resistance2Reader(source)
+
+
+def _resistance_2_catalog_level_metadata(
+    reader: object,
+    _level_name: str,
+) -> dict[str, object]:
+    from .resistance_2.dependencies import build_texture_catalog_metadata
+
+    return build_texture_catalog_metadata(reader)
+
+
+def _prepare_resistance_2_level_dependencies(
+    adapter: GameAdapter,
+    iso_path: str | Path,
+    level_name: str,
+    cache_directory: str | Path,
+    cached_level: Path,
+) -> None:
+    from .resistance_2.dependencies import prepare_texture_dependencies
+
+    prepare_texture_dependencies(
+        adapter,
+        iso_path,
+        level_name,
+        cache_directory,
+        cached_level,
+    )
 
 
 def _create_resistance_fom_reader(source: GameSource):
@@ -288,6 +334,12 @@ GAME_ADAPTERS = {
             _GAMES_ROOT / "resistance_2" / "data" / "resistance_2_us_catalog.json"
         ),
         create_reader=_create_resistance_2_reader,
+        catalog_level_metadata=_resistance_2_catalog_level_metadata,
+        prepare_level_dependencies=_prepare_resistance_2_level_dependencies,
+        catalog_level_archives=(
+            "level_cached.psarc",
+            "level_uncached.psarc",
+        ),
         iso_title_id="BCUS98120",
         iso_version="01.00",
     ),

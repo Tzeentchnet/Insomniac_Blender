@@ -268,20 +268,26 @@ global replacement.
 
 Some shaders contain stale texture IDs even though another shader references
 the intended payload through the same authored lookup path. The importer
-accepts that path fallback only when all available candidates decode
-identically; conflicting candidates are reported as ambiguous instead of
-being guessed.
+prefers selected-level/global path aliases over sibling-only aliases and
+accepts a domain only when all of its available candidates decode identically;
+conflicting candidates are reported as ambiguous instead of being guessed.
 
-### Cross-level texture references
+### Cross-level texture dependency scope
 
 The global per-TUID texture layout is supported when the global archives are
 available beside an extracted `packed/levels` tree. Some multiplayer/co-op
-level shaders reference texture IDs that are instead stored in a different
-level archive. Already-extracted sibling level pairs are discovered
-automatically. The ISO preparation operator still extracts only the selected
-level and global pairs because dependency ownership is not encoded in the
-selected level. If a required sibling has not been extracted, the importer
-reports the reference and uses a deterministic placeholder material.
+level shaders reference exact texture IDs stored in different level archives.
+With a configured ISO, the R2 ownership index now prepares only the verified
+sibling pairs needed by that selected level and records them in cache
+provenance.
+
+A manually selected extracted source has no ISO from which to prepare a
+missing owner. It can still use provenance-approved or manually co-located
+sibling pairs and byte-identical authored-path aliases. References absent from
+all of those domains remain reported and receive a deterministic placeholder.
+Non-USA or modified discs must regenerate their local import catalog before
+automatic owner preparation; an index whose disc identity or payload
+fingerprints conflict is rejected rather than guessed.
 
 ### Asset Browser cache scope
 

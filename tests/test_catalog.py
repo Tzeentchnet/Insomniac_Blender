@@ -319,6 +319,68 @@ class Resistance2CatalogTests(unittest.TestCase):
             asset.label,
             "Moby 0x0000000000001234 - legacy",
         )
+        self.assertEqual(catalog.texture_owners, ())
+
+    def test_loads_texture_owner_metadata_and_indexes_authored_paths(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            path = root / "resistance_2" / "disc_catalog.json"
+            path.parent.mkdir(parents=True)
+            path.write_text(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "game": "RESISTANCE_2",
+                        "disc": {
+                            "size": 1234,
+                            "modified_ns": 5678,
+                            "title_id": "BCUS98120",
+                            "version": "01.00",
+                        },
+                        "levels": [
+                            {
+                                "id": "owner",
+                                "mobys": [],
+                                "ties": [],
+                            }
+                        ],
+                        "texture_index": {
+                            "0x12345678": [
+                                {
+                                    "tuid": "0xABCDEF0112345678",
+                                    "format_code": 0x88,
+                                    "mip_count": 9,
+                                    "width": 256,
+                                    "height": 128,
+                                    "length": 32768,
+                                    "sha256": "a" * 64,
+                                    "owners": ["owner"],
+                                    "paths": [
+                                        r"Art\Fixture\Texture_C",
+                                    ],
+                                }
+                            ]
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            catalog = load_catalog(root)
+
+        self.assertEqual(catalog.disc.size, 1234)
+        exact = catalog.texture_candidates(0x1234_5678)
+        by_path = catalog.texture_candidates(
+            0xFFFF_FFFF,
+            "art/fixture/texture_c",
+        )
+        self.assertEqual(exact, by_path)
+        self.assertEqual(exact[0].level, "owner")
+        self.assertEqual(exact[0].tuid, 0xABCD_EF01_1234_5678)
+        self.assertEqual(
+            exact[0].lookup_paths,
+            ("art/fixture/texture_c",),
+        )
+        self.assertEqual(exact[0].payload_sha256, "a" * 64)
 
     def test_tod_catalog_keeps_level_local_ids_separate(self):
         with tempfile.TemporaryDirectory() as temporary:

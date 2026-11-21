@@ -187,10 +187,36 @@ material, or no requested Action.
 Diffuse lookup first uses the level texture tables, then the global archive's
 per-TUID texture bundles, then already-extracted sibling level pairs under the
 same `packed/levels` tree. A missing/stale texture ID can also resolve through
-another available ID with the identical authored lookup path, provided every
-available candidate decodes to the same image. Ambiguous path matches remain
-errors. References that remain unavailable are reported and receive a
-deterministic placeholder material.
+another available ID with the identical authored lookup path. Selected-level
+and global candidates take precedence over sibling-only aliases; candidates
+within the first available domain must decode to the same image. Ambiguous
+matches remain errors. References that remain unavailable are reported and
+receive a deterministic placeholder material.
+
+The regenerated USA R2 catalog contains 42,658 level-owner records for 7,440
+unique texture IDs and 7,506 normalized authored paths. Each compact owner
+record includes descriptor metadata and the SHA-256 of the compressed
+mip-zero payload; it contains no texel payload. A metadata-only scan of all 27
+retail levels planned 401 exact cross-level dependencies without an ambiguous
+or conflicting payload.
+
+Clean-cache ISO preparation was also exercised with no sibling archives
+present initially:
+
+- `chicxulub_multiplayer` selected six non-alias exact dependencies across
+  two owner levels. Exact `0x1585EA44` and `0x6782D663` resolved from sibling
+  archives rather than their available path aliases, and no texture reference
+  remained unresolved; all 870 shader texture references decoded.
+- `scotia_coop` selected 24 non-alias exact dependencies across seven owner
+  levels. Its resulting provenance listed 18 resources: two global archives,
+  the selected pair, and seven sibling pairs. All remaining stale IDs had
+  available authored-path aliases, so all 2,047 shader texture references
+  decoded and no avoidable placeholder remained.
+
+Portable regressions cover compact-index parsing, disc identity, conflicting
+descriptor and payload fingerprints, path fallback through sibling shader
+metadata, provenance filtering, selective extraction, and verified NTFS
+hard-link reuse.
 
 R2 also contains an authored `defaults/default_pink_shader` material. Its
 magenta texture is real source data, not Blender's missing-image indicator.

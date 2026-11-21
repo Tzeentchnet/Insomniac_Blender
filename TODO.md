@@ -79,16 +79,16 @@ Created from the feature-gap review of [README.md](README.md) and
 
 ## 4. Resolve R2 cross-level texture dependencies automatically
 
-- [ ] Build a metadata-only texture TUID/path-to-owner index during catalog
+- [x] Build a metadata-only texture TUID/path-to-owner index during catalog
   generation.
-- [ ] Persist the ownership index with disc identity and cache provenance.
-- [ ] Detect and report ambiguous owners or conflicting payloads.
-- [ ] Prepare only the required sibling archive when a selected level lacks a
+- [x] Persist the ownership index with disc identity and cache provenance.
+- [x] Detect and report ambiguous owners or conflicting payloads.
+- [x] Prepare only the required sibling archive when a selected level lacks a
   referenced texture.
-- [ ] Reuse verified extraction caches and existing NTFS hard-link behavior.
-- [ ] Avoid turning the feature into full-disc Asset Browser generation.
-- [ ] Test from a clean cache containing only the selected level.
-- [ ] Verify representative co-op and multiplayer shaders no longer use
+- [x] Reuse verified extraction caches and existing NTFS hard-link behavior.
+- [x] Avoid turning the feature into full-disc Asset Browser generation.
+- [x] Test from a clean cache containing only the selected level.
+- [x] Verify representative co-op and multiplayer shaders no longer use
   avoidable placeholder textures.
 
 ## 5. Add a shared level-collision foundation

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
+import json
+from pathlib import Path, PurePosixPath
 import threading
 from typing import Protocol
 
@@ -265,6 +266,56 @@ class GameSource:
         levels = packed / "levels"
         if not levels.is_dir():
             return ()
+        allowed: set[Path] | None = None
+        provenance_path = next(
+            (
+                parent / ".insomniac-cache.json"
+                for parent in packed.parents
+                if (parent / ".insomniac-cache.json").is_file()
+            ),
+            None,
+        )
+        if provenance_path is not None:
+            try:
+                provenance = json.loads(
+                    provenance_path.read_text(encoding="utf-8")
+                )
+            except (
+                OSError,
+                UnicodeError,
+                json.JSONDecodeError,
+            ):
+                provenance = None
+            resources = (
+                provenance.get("resources")
+                if isinstance(provenance, dict)
+                else None
+            )
+            if isinstance(resources, list) and all(
+                isinstance(resource, str) for resource in resources
+            ):
+                allowed = set()
+                for resource in resources:
+                    normalized = resource.replace("\\", "/")
+                    marker = "/packed/"
+                    lower = "/" + normalized.casefold().lstrip("/")
+                    marker_index = lower.find(marker)
+                    if marker_index < 0:
+                        continue
+                    relative = normalized.lstrip("/")[
+                        marker_index + len(marker) - 1 :
+                    ]
+                    if not relative.casefold().startswith("levels/"):
+                        continue
+                    if not relative.casefold().endswith(
+                        "/level_cached.psarc"
+                    ):
+                        continue
+                    allowed.add(
+                        (
+                            packed / Path(*PurePosixPath(relative).parts)
+                        ).resolve()
+                    )
         opened = {archive.path.resolve() for archive in self._archives}
         if (
             self.selected_path is not None
@@ -275,6 +326,7 @@ class GameSource:
             path
             for path in sorted(levels.rglob("level_cached.psarc"))
             if path.resolve() not in opened
+            and (allowed is None or path.resolve() in allowed)
         )
 
     def close(self) -> None:

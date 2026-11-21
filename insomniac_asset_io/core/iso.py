@@ -901,21 +901,37 @@ def _cache_provenance_matches(
     members: tuple[str, ...],
 ) -> bool:
     provenance = _read_cache_provenance(path)
-    if provenance is None:
-        return False
-    if (
-        provenance.get("schema_version") != _CACHE_PROVENANCE_SCHEMA_VERSION
-        or provenance.get("cache_key") != cache_key
-        or provenance.get("level") != level_name
-        or provenance.get("source") != source_identity
+    if not _cache_provenance_identity_matches(
+        provenance,
+        cache_key=cache_key,
+        level_name=level_name,
+        source_identity=source_identity,
     ):
         return False
+    assert provenance is not None
     resources = provenance.get("resources")
     if not isinstance(resources, list) or not all(
         isinstance(resource, str) for resource in resources
     ):
         return False
     return set(members).issubset(resources)
+
+
+def _cache_provenance_identity_matches(
+    provenance: dict[str, object] | None,
+    *,
+    cache_key: str,
+    level_name: str,
+    source_identity: dict[str, int | str | None],
+) -> bool:
+    return bool(
+        provenance is not None
+        and provenance.get("schema_version")
+        == _CACHE_PROVENANCE_SCHEMA_VERSION
+        and provenance.get("cache_key") == cache_key
+        and provenance.get("level") == level_name
+        and provenance.get("source") == source_identity
+    )
 
 
 def _write_cache_provenance(
@@ -926,6 +942,7 @@ def _write_cache_provenance(
     level_name: str,
     source_identity: dict[str, int | str | None],
     members: tuple[str, ...],
+    dependencies: dict[str, object] | None = None,
 ) -> None:
     payload = {
         "schema_version": _CACHE_PROVENANCE_SCHEMA_VERSION,
@@ -935,6 +952,8 @@ def _write_cache_provenance(
         "source": source_identity,
         "resources": list(members),
     }
+    if dependencies is not None:
+        payload["dependencies"] = dependencies
     temporary_path: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -1016,6 +1035,66 @@ def _reuse_verified_global_archives(
     return set()
 
 
+def _cache_member_path(cache_root: Path, member: str) -> Path:
+    relative = PurePosixPath(member)
+    if relative.parts and relative.parts[0].casefold() == "packed":
+        relative = PurePosixPath("PS3_GAME/USRDIR") / relative
+    return cache_root / Path(*relative.parts)
+
+
+def _reuse_verified_level_archives(
+    cache_root: Path,
+    target_provenance: Path,
+    *,
+    cache_key: str,
+    source_identity: dict[str, int | str | None],
+    level_outputs: dict[str, Path],
+) -> set[str]:
+    if not level_outputs or not cache_root.is_dir():
+        return set()
+    remaining = set(level_outputs)
+    reused: set[str] = set()
+    for provenance_path in sorted(
+        cache_root.rglob(_CACHE_PROVENANCE_FILENAME)
+    ):
+        if not remaining:
+            break
+        if provenance_path == target_provenance:
+            continue
+        provenance = _read_cache_provenance(provenance_path)
+        if (
+            provenance is None
+            or provenance.get("schema_version")
+            != _CACHE_PROVENANCE_SCHEMA_VERSION
+            or provenance.get("cache_key") != cache_key
+            or provenance.get("source") != source_identity
+        ):
+            continue
+        resources = provenance.get("resources")
+        if not isinstance(resources, list):
+            continue
+        available = remaining.intersection(
+            resource
+            for resource in resources
+            if isinstance(resource, str)
+        )
+        for member in sorted(available):
+            source = _cache_member_path(provenance_path.parent, member)
+            if not source.is_file():
+                continue
+            target = level_outputs[member]
+            target.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                target.unlink(missing_ok=True)
+                os.link(source, target)
+            except OSError:
+                target.unlink(missing_ok=True)
+            else:
+                reused.add(member)
+                remaining.remove(member)
+    return reused
+
+
 def prepare_game_level(
     iso_path: str | Path,
     level_name: str,
@@ -1036,8 +1115,10 @@ def prepare_game_level(
     expected_title_id: str | None = None,
     expected_version: str | None = None,
     validate_iso_identity: bool = True,
+    sibling_levels: tuple[str, ...] = (),
+    dependency_metadata: dict[str, object] | None = None,
 ) -> Path:
-    """Extract selected level resources into the local cache."""
+    """Extract selected and required sibling level resources into the cache."""
 
     iso = _iso_path(iso_path, game_label)
     iso_values: dict[str, str] = {}
@@ -1050,6 +1131,15 @@ def prepare_game_level(
                 expected_version=expected_version,
             )
     level = _level_path(level_name, game_label)
+    normalized_siblings: list[PurePosixPath] = []
+    seen_levels = {level.as_posix().casefold()}
+    for sibling_name in sibling_levels:
+        sibling = _level_path(sibling_name, game_label)
+        key = sibling.as_posix().casefold()
+        if key in seen_levels:
+            continue
+        seen_levels.add(key)
+        normalized_siblings.append(sibling)
     output = game_level_cache_root(
         cache_directory,
         level.as_posix(),
@@ -1063,12 +1153,19 @@ def prepare_game_level(
         if container_member is not None
         else _PACKED_ROOT.as_posix()
     )
-    members = tuple(
+    global_members = tuple(
         f"{base}/game/{name}" for name in global_archives
-    ) + tuple(
+    )
+    selected_members = tuple(
         f"{base}/levels/{level.as_posix()}/{name}"
         for name in level_archives
     )
+    sibling_members = tuple(
+        f"{base}/levels/{sibling.as_posix()}/{name}"
+        for sibling in normalized_siblings
+        for name in level_archives
+    )
+    members = global_members + selected_members + sibling_members
     source_identity = _cache_source_identity(
         iso,
         iso_values=iso_values,
@@ -1088,13 +1185,20 @@ def prepare_game_level(
             f"{game_label} adapter declares no level archives"
         )
     extracted_root = output / "PS3_GAME" / "USRDIR" / "packed"
-    expected = tuple(
+    global_expected = tuple(
         extracted_root / "game" / name
         for name in global_archives
-    ) + tuple(
+    )
+    selected_expected = tuple(
         extracted_root / "levels" / Path(*level.parts) / name
         for name in level_archives
     )
+    sibling_expected = tuple(
+        extracted_root / "levels" / Path(*sibling.parts) / name
+        for sibling in normalized_siblings
+        for name in level_archives
+    )
+    expected = global_expected + selected_expected + sibling_expected
     level_start = len(global_archives)
     level_directory = (
         extracted_root / "levels" / Path(*level.parts)
@@ -1111,13 +1215,43 @@ def prepare_game_level(
             ) from exc
         cached_level = expected[level_start + primary_index]
     if provenance_matches and all(path.is_file() for path in expected):
+        if dependency_metadata is not None:
+            provenance = _read_cache_provenance(provenance_path)
+            if (
+                provenance is None
+                or provenance.get("resources") != list(members)
+                or provenance.get("dependencies") != dependency_metadata
+            ):
+                _write_cache_provenance(
+                    provenance_path,
+                    cache_key=cache_key,
+                    game_label=game_label,
+                    level_name=level.as_posix(),
+                    source_identity=source_identity,
+                    members=members,
+                    dependencies=dependency_metadata,
+                )
         return cached_level
 
-    if provenance_matches:
+    provenance = _read_cache_provenance(provenance_path)
+    identity_matches = _cache_provenance_identity_matches(
+        provenance,
+        cache_key=cache_key,
+        level_name=level.as_posix(),
+        source_identity=source_identity,
+    )
+    if identity_matches:
+        assert provenance is not None
+        resources = provenance.get("resources")
+        trusted_resources = {
+            resource
+            for resource in resources
+            if isinstance(resource, str)
+        } if isinstance(resources, list) else set()
         pending = {
             member: path
             for member, path in zip(members, expected)
-            if not path.is_file()
+            if member not in trusted_resources or not path.is_file()
         }
     else:
         pending = dict(zip(members, expected))
@@ -1140,19 +1274,37 @@ def prepare_game_level(
     )
     for member in reused_globals:
         pending.pop(member, None)
-    if container_member is None:
-        extract_game_iso_members(
-            iso,
-            pending,
-            game_label=game_label,
+    level_outputs = {
+        member: path
+        for member, path in zip(
+            members[len(global_members) :],
+            expected[len(global_expected) :],
         )
-    else:
-        _extract_psarc_members_from_iso(
-            iso,
-            container_member,
-            pending,
-            game_label=game_label,
-        )
+        if member in pending
+    }
+    reused_levels = _reuse_verified_level_archives(
+        Path(cache_directory).expanduser() / cache_key,
+        provenance_path,
+        cache_key=cache_key,
+        source_identity=source_identity,
+        level_outputs=level_outputs,
+    )
+    for member in reused_levels:
+        pending.pop(member, None)
+    if pending:
+        if container_member is None:
+            extract_game_iso_members(
+                iso,
+                pending,
+                game_label=game_label,
+            )
+        else:
+            _extract_psarc_members_from_iso(
+                iso,
+                container_member,
+                pending,
+                game_label=game_label,
+            )
     missing = [str(path) for path in expected if not path.is_file()]
     if missing:
         raise InsomniacError(
@@ -1166,6 +1318,7 @@ def prepare_game_level(
         level_name=level.as_posix(),
         source_identity=source_identity,
         members=members,
+        dependencies=dependency_metadata,
     )
     return cached_level
 

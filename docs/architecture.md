@@ -46,7 +46,8 @@ smaller metadata-only resource set than interactive imports.
 The sidebar selectors are backed by per-game metadata-only disc catalogs. The
 bundled USA catalogs record level IDs, source names, supported
 Moby/Tie/Shrub/Foliage identities, and verified shader identities, but no
-geometry, textures, or archive payloads. A selected asset first resolves
+geometry or archive payloads. The R2 catalog additionally stores compact
+texture ownership metadata and payload digests, never texel data. A selected asset first resolves
 against its manual source override, then extracted owner levels, then the
 active game's configured ISO. Level selection follows the same cache-first
 resolution. A background catalog worker can replace a bundled catalog with a
@@ -57,11 +58,15 @@ TUIDs, while RFoM and Tools of Destruction include the owner level in each
 catalog identifier because their Moby IDs/indices, Tie and vegetation
 offsets, shader indices, and texture record offsets are level-local.
 
-If a shader texture is absent from both domains, the R2 adapter lazily indexes
-already-extracted sibling `level_cached.psarc` files under the same
-`packed/levels` tree. Only a matching archive's cached/uncached pair is opened
-for payload decoding. Duplicate texture IDs must decode to identical metadata
-and pixels or the lookup fails as ambiguous.
+If an R2 shader's exact texture ID is absent from the selected and global
+domains, the adapter consults the catalog's ID/path-to-owner index. Descriptor
+and SHA-256 metadata reject conflicting candidates before extraction.
+Byte-identical duplicates are collapsed with a greedy owner cover, then only
+those sibling cached/uncached pairs are materialized inside the selected
+verified cache. Existing verified owner caches are hard-linked when possible.
+`GameSource` exposes only sibling archives named by that cache's provenance.
+The reader still compares duplicate decoded pixels if more than one available
+archive contains an ID.
 
 `BinaryView` and `IghwFile` bounds-check every access and preserve the
 container's detected endianness.
