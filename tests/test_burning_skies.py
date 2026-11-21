@@ -81,7 +81,7 @@ def _model_resource(
     material_names: tuple[str, ...] = ("00000000_11111111_22222222_33333333",),
     material_indices: tuple[int, ...] = (0,),
     lod_material_indices: tuple[tuple[int, ...], ...] | None = None,
-    bone_parents: tuple[int, ...] = (),
+    bone_parents: tuple[int, ...] | None = None,
     primary_bone_count: int | None = None,
     skin_palette: tuple[int, ...] | None = None,
     skin_weights: tuple[tuple[float, float, float, float], ...] | None = None,
@@ -91,6 +91,17 @@ def _model_resource(
     gib_mesh_indices: tuple[int, ...] = (),
     gib_bone_index: int = 0,
 ) -> bytes:
+    if bone_parents is None:
+        default_bone_count = (
+            max(1, gib_bone_index + 1 if gib_mesh_indices else 1)
+            if renderable
+            else 0
+        )
+        bone_parents = (
+            (-1, *(0 for _ in range(default_bone_count - 1)))
+            if default_bone_count
+            else ()
+        )
     if not renderable:
         lod_material_indices = ()
     elif lod_material_indices is None:
@@ -258,13 +269,6 @@ def _model_resource(
             record_offset + 0x0C,
             summary_pointer,
         )
-        if mesh_index in gib_mesh_index_set:
-            struct.pack_into(
-                "<I",
-                data,
-                DATA_BASE + entry_offset + 0x44,
-                (1 << 16) | gib_bone_index,
-            )
         if skin_palette is not None:
             struct.pack_into(
                 "<I",
@@ -278,6 +282,22 @@ def _model_resource(
                 DATA_BASE + entry_offset + 0x70 :
                 DATA_BASE + entry_offset + 0x70 + len(skin_palette)
             ] = bytes(skin_palette)
+        else:
+            rigid_bone_index = (
+                gib_bone_index if mesh_index in gib_mesh_index_set else 0
+            )
+            struct.pack_into(
+                "<I",
+                data,
+                DATA_BASE + entry_offset + 0x44,
+                (1 << 16)
+                | (
+                    gib_bone_index
+                    if mesh_index in gib_mesh_index_set
+                    else 0
+                ),
+            )
+            data[DATA_BASE + entry_offset + 0x70] = rigid_bone_index
     summary_offset = DATA_BASE + summary_pointer
     descriptor_offset = DATA_BASE + descriptor_pointer
     struct.pack_into(
@@ -488,6 +508,23 @@ class BurningSkiesFormatTests(unittest.TestCase):
                 dtype=np.float32,
             ),
         )
+        np.testing.assert_array_equal(
+            mesh.bone_indices,
+            np.zeros((4, 4), dtype=np.uint16),
+        )
+        np.testing.assert_array_equal(
+            mesh.bone_weights,
+            np.array(
+                (
+                    (1.0, 0.0, 0.0, 0.0),
+                    (1.0, 0.0, 0.0, 0.0),
+                    (1.0, 0.0, 0.0, 0.0),
+                    (1.0, 0.0, 0.0, 0.0),
+                ),
+                dtype=np.float32,
+            ),
+        )
+        self.assertIsNotNone(model.skeleton)
 
     def test_rejects_model_without_render_geometry(self):
         with self.assertRaisesRegex(
@@ -559,7 +596,9 @@ class BurningSkiesFormatTests(unittest.TestCase):
             label="models/TestSkinned.smf",
         )
 
-        self.assertIsNone(model.skeleton)
+        self.assertIsNotNone(model.skeleton)
+        assert model.skeleton is not None
+        self.assertEqual(model.skeleton.bone_count, 4)
         mesh = model.meshes[0]
         np.testing.assert_array_equal(
             mesh.bone_indices,
@@ -744,6 +783,20 @@ class BurningSkiesFormatTests(unittest.TestCase):
 
         with self.assertRaisesRegex(FormatError, "index exceeds"):
             decode_smf(bytes(data), label="models/Invalid.smf")
+
+    def test_rejects_invalid_rigid_bone_palette(self):
+        entry_offset = DATA_BASE + 0x150
+        cases = (
+            ("rigid mesh 0 has 2 palette bones", 2, 0),
+            ("bone palette exceeds", 1, 1),
+        )
+        for message, palette_count, bone_index in cases:
+            with self.subTest(message=message):
+                data = bytearray(_model_resource())
+                data[entry_offset + 0x46] = palette_count
+                data[entry_offset + 0x70] = bone_index
+                with self.assertRaisesRegex(FormatError, message):
+                    decode_smf(bytes(data), label="models/InvalidRigid.smf")
 
     def test_decodes_linear_ubc1_gxt(self):
         texture = decode_p2t(

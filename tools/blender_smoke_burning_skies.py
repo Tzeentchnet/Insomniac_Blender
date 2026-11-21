@@ -246,6 +246,80 @@ def main() -> None:
                     f"{requested_name}: expected {expected_bones} bones, "
                     f"found {len(armatures[0].data.bones)}",
                 )
+                _require(
+                    mesh_objects[0].parent is armatures[0],
+                    f"{requested_name}: mesh is not parented to its armature",
+                )
+                armature_modifiers = [
+                    modifier
+                    for modifier in mesh_objects[0].modifiers
+                    if modifier.type == "ARMATURE"
+                ]
+                _require(
+                    len(armature_modifiers) == 1
+                    and armature_modifiers[0].object is armatures[0],
+                    f"{requested_name}: missing armature modifier",
+                )
+                if expected_vertices:
+                    _require(
+                        len(mesh_objects[0].vertex_groups) == expected_bones,
+                        f"{requested_name}: expected {expected_bones} vertex "
+                        f"groups, found {len(mesh_objects[0].vertex_groups)}",
+                    )
+                    expected_indices = [
+                        row
+                        for source_mesh in source_meshes
+                        for row in source_mesh.bone_indices
+                    ]
+                    expected_weights = [
+                        row
+                        for source_mesh in source_meshes
+                        for row in source_mesh.bone_weights
+                    ]
+                    sample_indices = sorted(
+                        {0, expected_vertices // 2, expected_vertices - 1}
+                    )
+                    for vertex_index in sample_indices:
+                        actual = {
+                            assignment.group: assignment.weight
+                            for assignment in mesh.vertices[vertex_index].groups
+                        }
+                        expected = {
+                            int(bone_index): float(weight)
+                            for bone_index, weight in zip(
+                                expected_indices[vertex_index],
+                                expected_weights[vertex_index],
+                                strict=True,
+                            )
+                            if weight > 0.0
+                        }
+                        _require(
+                            actual.keys() == expected.keys()
+                            and all(
+                                math.isclose(
+                                    actual[bone_index],
+                                    weight,
+                                    abs_tol=1e-6,
+                                )
+                                for bone_index, weight in expected.items()
+                            ),
+                            f"{requested_name}: vertex {vertex_index} "
+                            "weights differ from the decoded source",
+                        )
+                    bpy.context.view_layer.update()
+                    evaluated = mesh_objects[0].evaluated_get(
+                        bpy.context.evaluated_depsgraph_get()
+                    )
+                    for vertex_index in sample_indices:
+                        _require(
+                            (
+                                evaluated.data.vertices[vertex_index].co
+                                - mesh.vertices[vertex_index].co
+                            ).length
+                            <= 1e-5,
+                            f"{requested_name}: bind pose deforms vertex "
+                            f"{vertex_index}",
+                        )
             reports.append(
                 {
                     "bones": expected_bones,
@@ -256,6 +330,7 @@ def main() -> None:
                     "polygons": len(mesh.polygons),
                     "materials": result.materials,
                     "images": result.images,
+                    "vertex_groups": len(mesh_objects[0].vertex_groups),
                     "warnings": result.warnings or [],
                 }
             )

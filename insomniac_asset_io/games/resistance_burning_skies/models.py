@@ -413,19 +413,16 @@ def _decode_lod_mesh_entries(
     return tuple(entries)
 
 
-def _decode_skin_influences(
+def _decode_bone_palette(
     resource: NsirsrcFile,
     *,
     entry_offset: int,
-    vertex_data_offset: int,
-    vertex_count: int,
-    stride: int,
     model_bone_count: int,
     mesh_index: int,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> np.ndarray:
     if not model_bone_count:
         raise FormatError(
-            f"{resource.label}: skinned mesh {mesh_index} has no model bones"
+            f"{resource.label}: weighted mesh {mesh_index} has no model bones"
         )
 
     palette_count = resource.data[
@@ -447,6 +444,26 @@ def _decode_skin_influences(
             f"{resource.label}: mesh {mesh_index} bone palette exceeds its "
             f"{model_bone_count} model bones"
         )
+    return palette
+
+
+def _decode_skin_influences(
+    resource: NsirsrcFile,
+    *,
+    entry_offset: int,
+    vertex_data_offset: int,
+    vertex_count: int,
+    stride: int,
+    model_bone_count: int,
+    mesh_index: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    palette = _decode_bone_palette(
+        resource,
+        entry_offset=entry_offset,
+        model_bone_count=model_bone_count,
+        mesh_index=mesh_index,
+    )
+    palette_count = len(palette)
 
     weights = np.ndarray(
         (vertex_count, 4),
@@ -510,6 +527,32 @@ def _decode_skin_influences(
     return bone_indices, weights
 
 
+def _decode_rigid_influences(
+    resource: NsirsrcFile,
+    *,
+    entry_offset: int,
+    vertex_count: int,
+    model_bone_count: int,
+    mesh_index: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    palette = _decode_bone_palette(
+        resource,
+        entry_offset=entry_offset,
+        model_bone_count=model_bone_count,
+        mesh_index=mesh_index,
+    )
+    if len(palette) != 1:
+        raise FormatError(
+            f"{resource.label}: rigid mesh {mesh_index} has "
+            f"{len(palette)} palette bones"
+        )
+    bone_indices = np.zeros((vertex_count, 4), dtype=np.uint16)
+    bone_indices[:, 0] = palette[0]
+    bone_weights = np.zeros((vertex_count, 4), dtype=np.float32)
+    bone_weights[:, 0] = 1.0
+    return bone_indices, bone_weights
+
+
 def decode_smf(data: bytes, *, label: str) -> DecodedSmf:
     resource = NsirsrcFile(data, label=label)
     if resource.root_type != MODEL_ROOT_TYPE:
@@ -524,13 +567,11 @@ def decode_smf(data: bytes, *, label: str) -> DecodedSmf:
         serialized_size=serialized_size,
     )
     mesh_count = len(lod_mesh_entries)
-    model_bone_count = resource.u32(
-        resource.physical_offset(MODEL_BONE_RECORD_COUNT_OFFSET)
+    skeleton = _decode_skeleton(
+        resource,
+        serialized_size=serialized_size,
     )
-    if model_bone_count > MAX_BONES:
-        raise FormatError(
-            f"{label}: bone count {model_bone_count} exceeds {MAX_BONES}"
-        )
+    model_bone_count = skeleton.bone_count if skeleton is not None else 0
     all_material_names = tuple(
         dependency.name
         for dependency in resource.dependencies()
@@ -544,10 +585,6 @@ def decode_smf(data: bytes, *, label: str) -> DecodedSmf:
             f"{len(all_material_names)} BMX dependencies"
         )
     if not mesh_count:
-        skeleton = _decode_skeleton(
-            resource,
-            serialized_size=serialized_size,
-        )
         if skeleton is None:
             raise MissingResourceError(
                 f"{label}: model contains neither renderable GBuffer "
@@ -757,6 +794,14 @@ def decode_smf(data: bytes, *, label: str) -> DecodedSmf:
                 model_bone_count=model_bone_count,
                 mesh_index=mesh_index,
             )
+        else:
+            bone_indices, bone_weights = _decode_rigid_influences(
+                resource,
+                entry_offset=entry_offset,
+                vertex_count=vertex_count,
+                model_bone_count=model_bone_count,
+                mesh_index=mesh_index,
+            )
         meshes.append(
             MeshGeometry(
                 shader_index=shader_index,
@@ -788,5 +833,5 @@ def decode_smf(data: bytes, *, label: str) -> DecodedSmf:
         material_dependency_count=len(all_material_names),
         bounding_sphere=_bounding_sphere(combined_positions),
         material_binding_supported=material_binding_supported,
-        skeleton=None,
+        skeleton=skeleton,
     )

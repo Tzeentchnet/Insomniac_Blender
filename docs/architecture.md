@@ -340,8 +340,11 @@ floating-point weights without quantizing them.
 Burning Skies skinned packets map their four local vertex indices through the
 owning mesh entry's byte palette into model-wide bone-record indices. Repeated
 palette entries are valid retail data, so equal model-bone influences are
-coalesced before each vertex is normalized. Renderable SMFs deliberately
-remain static until the separate armature-binding milestone is validated.
+coalesced before each vertex is normalized. Rigid packets use an implicit
+local index zero and bind fully to their one palette entry. The reader exposes
+the complete root `+0x10` bone-record array for every model, allowing the
+shared importer to create the armature, parent the mesh, add its modifier, and
+assign the decoded groups without a Burning Skies-specific Blender path.
 
 ## Asset Browser cache
 

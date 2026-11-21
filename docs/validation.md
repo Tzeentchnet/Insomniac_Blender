@@ -500,6 +500,24 @@ the verified tolerance. A separate skeleton fixture proves that root
 `+0x10`, rather than the sometimes-smaller primary count at `+0x0C`, owns the
 complete record array.
 
+The production armature regression additionally requires all 821 SMFs to
+decode a skeleton, totaling 10,202 bone records. All 798 renderable models
+must expose normalized ownership for 3,549 packets and 2,142,432 vertices.
+The 2,330 rigid packets use exactly one valid palette bone; an
+`AP_BASE_AEscort` fixture verifies that this palette, rather than the
+independent lower word at mesh-entry `+0x44`, owns the vertices.
+
+The Blender 5.2 regression imports a synthetic repeated-palette skin, verifies
+its parent, modifier, groups, unchanged bind-pose coordinates, and weighted
+pose deformation, then saves and reopens the `.blend` and checks the
+relationships and weights again. The retail `CH_BASE_ADrone` review produced
+a 37-bone, 37-group armature for 5,957 vertices. Reopening
+`E:\Tests\InsomniacAssetIO\burning_skies_skin_review\burning_skies_adrone_skin.blend`
+measured a maximum bind-pose displacement of `2.07e-7`, a maximum weight-sum
+error of `5.85e-8`, and the expected `0.17499352` X displacement when bone 30
+moved by `0.25`. The accompanying PNG confirms a coherent undeformed retail
+model.
+
 Analyze one extracted cached archive, or every cached level archive in an ISO:
 
 ```powershell

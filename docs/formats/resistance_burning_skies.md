@@ -101,22 +101,30 @@ The parser restores source V as `1 + stored_v`; the shared Blender mesh bridge
 then performs its normal `1 - source_v` image-coordinate flip. The effective
 Blender coordinate is therefore `-stored_v`, matching the live axe atlas.
 
-Rigid format `0x15` stores an opaque packed `uint32` at `+32`. Skinned format
-`0x17` instead ends with:
+Rigid format `0x15` stores an opaque packed `uint32` at `+32`. Its vertices
+have an implicit local bone index zero. Skinned format `0x17` instead ends
+with:
 
 | Offset | Type | Meaning |
 |---:|---|---|
 | 32 | `float16[4]` | Four non-negative skin weights |
 | 40 | `uint8[4]` | Four indices local to the mesh palette |
 
-For a skinned mesh entry, byte `+0x46` is the palette count and the corresponding
-local-to-model `uint8` palette begins at `+0x70`. The lower word at `+0x44` and
-the independent flags byte at `+0x47` are not part of palette indexing.
-Weights equal to zero make their paired local byte inactive; 895 inactive
-slots in the retail corpus retain a nonzero byte and are canonicalized to
-model bone zero during decoding. Active local indices are mapped through the
-palette. If a palette repeats a model bone, its weights are coalesced before
-the four-slot row is normalized to `float32`.
+For every GBuffer mesh entry, byte `+0x46` is the palette count and the
+corresponding local-to-model `uint8` palette begins at `+0x70`. All 2,330
+rigid packets in the corpus have exactly one palette entry, and every entry is
+below the root's total bone-record count. The lower word at `+0x44` and the
+independent flags byte at `+0x47` are not part of palette indexing. The lower
+word retains its separate damage-segment role where trauma metadata verifies
+that classification.
+
+Rigid vertices receive weight one for their sole palette bone. For skinned
+vertices, weights equal to zero make their paired local byte inactive; 895
+inactive slots in the retail corpus retain a nonzero byte and are
+canonicalized to model bone zero during decoding.
+Active local indices are mapped through the palette. If a palette repeats a
+model bone, its weights are coalesced before the four-slot row is normalized
+to `float32`.
 
 The complete 821-SMF European corpus contains 240 skinned models, 1,219
 skinned packets, and 955,468 skinned vertices. Palette counts span 2 through
@@ -127,9 +135,11 @@ rows within the enforced `0.001` tolerance. The corpus uses one through four
 active influences per vertex. Sixteen palettes repeat one or more model bones,
 affecting 477 vertices and requiring the coalescing step above.
 
-Skinned positions are already in bind pose. The normalized influences are
-preserved in shared geometry, while renderable SMFs remain static until their
-armatures are connected by the next implementation milestone.
+Positions are already in bind pose. The importer creates the full model
+armature, parents the combined mesh to it, adds an Armature modifier, and
+assigns the decoded model-bone groups. The tested archive therefore exposes
+10,202 bone records across all 821 SMFs and imports all 3,549 GBuffer packets,
+covering 2,142,432 vertices, with normalized ownership.
 
 The verified archive results are:
 
@@ -267,7 +277,7 @@ white material.
 
 The experimental reader does not currently import:
 
-- renderable-model armature bindings or animation;
+- animation;
 - collision geometry not represented by GBuffer packets;
 - level `.geo` resources;
 - cutscenes, effects, lighting, or audio resources.

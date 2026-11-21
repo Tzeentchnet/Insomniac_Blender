@@ -281,28 +281,29 @@ class RealBurningSkiesTests(unittest.TestCase):
             self.assertEqual(model.skeleton.bones[1].parent_index, 0)
             self.assertEqual(model.skeleton.bones[2].parent_index, 1)
 
-    def test_decodes_complete_skinned_gbuffer_corpus(self):
-        skinned_models = 0
-        skinned_packets = 0
-        skinned_vertices = 0
+    def test_decodes_complete_weighted_gbuffer_corpus(self):
+        renderable_models = 0
+        weighted_packets = 0
+        weighted_vertices = 0
+        bone_records = 0
 
         with GameSource.open(Path(REAL_SOURCE)) as source:
             for path in source.paths:
                 if not path.casefold().endswith(".smf"):
                     continue
                 model = decode_smf(source.read(path), label=path)
+                self.assertIsNotNone(model.skeleton)
+                assert model.skeleton is not None
+                bone_records += model.skeleton.bone_count
 
-                model_is_skinned = False
+                renderable_models += bool(model.meshes)
                 for mesh in model.meshes:
-                    self.assertEqual(
-                        mesh.bone_indices is None,
-                        mesh.bone_weights is None,
-                    )
-                    if mesh.bone_weights is None:
-                        continue
-                    model_is_skinned = True
-                    skinned_packets += 1
-                    skinned_vertices += len(mesh.positions)
+                    self.assertIsNotNone(mesh.bone_indices)
+                    self.assertIsNotNone(mesh.bone_weights)
+                    assert mesh.bone_indices is not None
+                    assert mesh.bone_weights is not None
+                    weighted_packets += 1
+                    weighted_vertices += len(mesh.positions)
                     self.assertEqual(mesh.bone_indices.dtype, np.uint16)
                     self.assertEqual(mesh.bone_weights.dtype, np.float32)
                     self.assertEqual(
@@ -317,18 +318,23 @@ class RealBurningSkiesTests(unittest.TestCase):
                     np.testing.assert_allclose(
                         mesh.bone_weights.sum(axis=1),
                         1.0,
-                        atol=1e-7,
+                        atol=2e-7,
+                        rtol=0.0,
                     )
-                skinned_models += model_is_skinned
 
             adrone = decode_smf(
                 source.read("models/CH_BASE_ADrone.smf"),
                 label="models/CH_BASE_ADrone.smf",
             )
+            aescort = decode_smf(
+                source.read("models/AP_BASE_AEscort.smf"),
+                label="models/AP_BASE_AEscort.smf",
+            )
 
-        self.assertEqual(skinned_models, 240)
-        self.assertEqual(skinned_packets, 1_219)
-        self.assertEqual(skinned_vertices, 955_468)
+        self.assertEqual(renderable_models, 798)
+        self.assertEqual(weighted_packets, 3_549)
+        self.assertEqual(weighted_vertices, 2_142_432)
+        self.assertEqual(bone_records, 10_202)
         np.testing.assert_array_equal(
             adrone.meshes[0].bone_indices[870],
             np.array((30, 7, 12, 0), dtype=np.uint16),
@@ -345,6 +351,17 @@ class RealBurningSkiesTests(unittest.TestCase):
                 dtype=np.float32,
             ),
             atol=1e-7,
+        )
+        np.testing.assert_array_equal(
+            aescort.meshes[0].bone_indices[:, 0],
+            np.ones(len(aescort.meshes[0].positions), dtype=np.uint16),
+        )
+        np.testing.assert_array_equal(
+            aescort.meshes[0].bone_weights,
+            np.tile(
+                np.array((1.0, 0.0, 0.0, 0.0), dtype=np.float32),
+                (len(aescort.meshes[0].positions), 1),
+            ),
         )
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -27,8 +28,10 @@ if bpy is not None:
         _build_mesh,
         _create_actions,
         _create_armature,
+        import_moby,
         import_moby_animation,
     )
+    from insomniac_asset_io.core.source import GameSource
     from insomniac_asset_io.games.resistance_2.animations import (
         _compose_r3_overlays,
     )
@@ -39,6 +42,10 @@ if bpy is not None:
         MobyAsset,
         Skeleton,
     )
+    from insomniac_asset_io.games.resistance_burning_skies.reader import (
+        BurningSkiesReader,
+    )
+    from tests.test_burning_skies import _model_resource
 
 
 @unittest.skipUnless(bpy is not None, "Blender Python is not available")
@@ -113,6 +120,108 @@ class BlenderRigTests(unittest.TestCase):
         self.assertAlmostEqual(mesh_object.vertex_groups["bone_000"].weight(1), 0.25)
         self.assertAlmostEqual(mesh_object.vertex_groups["bone_001"].weight(1), 0.75)
         self.assertAlmostEqual(mesh_object.vertex_groups["bone_000"].weight(2), 1.0)
+
+    def test_imports_burning_skies_skin_as_working_armature(self) -> None:
+        source_weights = (
+            (0.5, 0.25, 0.25, 0.0),
+            (0.33325, 0.33325, 0.33325, 0.0),
+            (1.0, 0.0, 0.0, 0.0),
+            (0.1, 0.2, 0.3, 0.4),
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            model_path = root / "models" / "TestSkinned.smf"
+            model_path.parent.mkdir()
+            model_path.write_bytes(
+                _model_resource(
+                    bone_parents=(-1, 0, 0, 0),
+                    skin_palette=(3, 1, 1, 2),
+                    skin_weights=source_weights,
+                    skin_local_indices=(
+                        (0, 1, 2, 0),
+                        (0, 1, 3, 0),
+                        (2, 0, 0, 0),
+                        (0, 1, 2, 3),
+                    ),
+                )
+            )
+            with GameSource.open(root) as source:
+                reader = BurningSkiesReader(source)
+                result = import_moby(
+                    bpy.context,
+                    reader,
+                    reader.model_id("models/TestSkinned.smf"),
+                    AssetImportOptions(
+                        materials=False,
+                        animations=False,
+                        convert_axes=False,
+                    ),
+                    source_path=str(root),
+                )
+
+            collection = result.root.users_collection[0]
+            mesh_object = next(
+                item for item in collection.objects if item.type == "MESH"
+            )
+            armature = next(
+                item for item in collection.objects if item.type == "ARMATURE"
+            )
+            self.assertEqual(result.objects, 3)
+            self.assertIs(mesh_object.parent, armature)
+            self.assertIs(armature.parent, result.root)
+            self.assertEqual(len(armature.data.bones), 4)
+            self.assertEqual(len(mesh_object.vertex_groups), 4)
+            self.assertEqual(len(mesh_object.modifiers), 1)
+            self.assertEqual(mesh_object.modifiers[0].type, "ARMATURE")
+            self.assertIs(mesh_object.modifiers[0].object, armature)
+            self.assertAlmostEqual(
+                mesh_object.vertex_groups["bone_003"].weight(0),
+                0.5,
+            )
+            self.assertAlmostEqual(
+                mesh_object.vertex_groups["bone_001"].weight(0),
+                0.5,
+            )
+
+            bpy.context.view_layer.update()
+            evaluated = mesh_object.evaluated_get(
+                bpy.context.evaluated_depsgraph_get()
+            )
+            np.testing.assert_allclose(
+                [vertex.co[:] for vertex in evaluated.data.vertices],
+                [vertex.co[:] for vertex in mesh_object.data.vertices],
+                atol=1e-6,
+            )
+
+            armature.pose.bones["bone_003"].location.x = 2.0
+            bpy.context.view_layer.update()
+            evaluated = mesh_object.evaluated_get(
+                bpy.context.evaluated_depsgraph_get()
+            )
+            self.assertAlmostEqual(evaluated.data.vertices[0].co.x, 0.0, places=5)
+            armature.pose.bones["bone_003"].location.x = 0.0
+            bpy.context.view_layer.update()
+
+            blend_path = root / "burning_skies_skin.blend"
+            bpy.ops.wm.save_as_mainfile(filepath=str(blend_path))
+            bpy.ops.wm.open_mainfile(filepath=str(blend_path))
+
+            reopened_mesh = bpy.data.objects["TestCube"]
+            reopened_armature = bpy.data.objects["TestCube_Rig"]
+            self.assertIs(reopened_mesh.parent, reopened_armature)
+            self.assertEqual(len(reopened_armature.data.bones), 4)
+            self.assertIs(
+                reopened_mesh.modifiers[0].object,
+                reopened_armature,
+            )
+            self.assertAlmostEqual(
+                reopened_mesh.vertex_groups["bone_003"].weight(0),
+                0.5,
+            )
+            self.assertAlmostEqual(
+                reopened_mesh.vertex_groups["bone_001"].weight(0),
+                0.5,
+            )
 
     def test_imports_one_animation_with_compatible_rig(self) -> None:
         bind = np.identity(4, dtype=np.float32)[None]
