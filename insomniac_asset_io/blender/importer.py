@@ -26,6 +26,12 @@ from ..games.resistance_2.formats import (
     CollisionPrimitive,
     DecodedClip,
     DecodedTexture,
+    GameplayArea,
+    GameplayEffect,
+    GameplayMarker,
+    GameplayMobyGroup,
+    GameplayPath,
+    GameplayRegion,
     MeshGeometry,
     MobyAsset,
     PlacedInstance,
@@ -3690,13 +3696,18 @@ def import_level(
                     root,
                     kind="MOBY",
                 )
+                obj["insomniac_gameplay_kind"] = "MOBY"
+                obj["insomniac_source_group"] = "Mobys"
                 obj["insomniac_source_default_parts"] = True
-                default_draw_mask = mesh.get(
-                    "insomniac_default_draw_mask"
-                )
+                default_draw_mask = mesh.get("insomniac_default_draw_mask")
                 if default_draw_mask is not None:
                     obj["insomniac_default_draw_mask"] = default_draw_mask
                 result.objects += 1
+            result.objects += _import_gameplay_context(
+                region_collection,
+                region,
+                root,
+            )
 
     if options.collision_geometry:
         read_level_collision = getattr(
@@ -4358,6 +4369,280 @@ def _create_instance_object(
         obj["insomniac_group"] = instance.group
     if instance.lightmap_index is not None:
         obj["insomniac_lightmap_index"] = instance.lightmap_index
+    return obj
+
+
+def _import_gameplay_context(
+    region_collection: bpy.types.Collection,
+    region: GameplayRegion,
+    root: bpy.types.Object,
+) -> int:
+    object_count = 0
+    if region.paths:
+        path_collection = _child_collection(region_collection, "Paths")
+        path_collection.hide_render = True
+        for path in region.paths:
+            _create_gameplay_path(path_collection, path, root)
+            object_count += 1
+
+    if region.triggers:
+        trigger_collection = _child_collection(
+            region_collection,
+            "Trigger Volumes",
+        )
+        trigger_collection.hide_render = True
+        display_types = {
+            0: "CUBE",
+            1: "SPHERE",
+            2: "CIRCLE",
+            3: "SPHERE",
+        }
+        shape_names = {
+            0: "CUBOID",
+            1: "SPHERE",
+            2: "CYLINDER",
+            3: "PILL",
+        }
+        for trigger in region.triggers:
+            obj = _create_gameplay_empty(
+                trigger_collection,
+                f"Trigger_{trigger.index:04X}",
+                root,
+                trigger.matrix,
+                kind="TRIGGER",
+                source_group="Trigger Volumes",
+                index=trigger.index,
+                display_type=display_types[trigger.shape_kind],
+            )
+            obj["insomniac_shape_kind"] = shape_names[trigger.shape_kind]
+            obj["insomniac_shape_kind_id"] = trigger.shape_kind
+            object_count += 1
+
+    if region.effects:
+        effect_collection = _child_collection(region_collection, "Effects")
+        effect_collection.hide_render = True
+        for effect in region.effects:
+            obj = _create_gameplay_effect(
+                effect_collection,
+                effect,
+                root,
+            )
+            object_count += 1
+
+    if region.markers:
+        marker_collection = _child_collection(region_collection, "Markers")
+        marker_collection.hide_render = True
+        for marker in region.markers:
+            obj = _create_gameplay_marker(
+                marker_collection,
+                marker,
+                root,
+            )
+            object_count += 1
+
+    if region.moby_groups:
+        group_collection = _child_collection(
+            region_collection,
+            "Moby Groups",
+        )
+        group_collection.hide_render = True
+        for group in region.moby_groups:
+            obj = _create_gameplay_moby_group(
+                group_collection,
+                group,
+                region,
+                root,
+            )
+            object_count += 1
+
+    if region.areas:
+        area_collection = _child_collection(region_collection, "Areas")
+        area_collection.hide_render = True
+        for area in region.areas:
+            obj = _create_gameplay_area(
+                area_collection,
+                area,
+                region,
+                root,
+            )
+            object_count += 1
+    return object_count
+
+
+def _tag_gameplay_object(
+    obj: bpy.types.Object,
+    *,
+    kind: str,
+    source_group: str,
+    index: int,
+) -> None:
+    obj.hide_render = True
+    obj.show_in_front = True
+    obj["insomniac_gameplay_kind"] = kind
+    obj["insomniac_source_group"] = source_group
+    obj["insomniac_gameplay_index"] = index
+
+
+def _create_gameplay_empty(
+    collection: bpy.types.Collection,
+    name: str,
+    root: bpy.types.Object,
+    matrix: np.ndarray,
+    *,
+    kind: str,
+    source_group: str,
+    index: int,
+    display_type: str,
+    display_size: float = 0.5,
+) -> bpy.types.Object:
+    obj = bpy.data.objects.new(_safe_name(name), None)
+    collection.objects.link(obj)
+    obj.parent = root
+    obj.matrix_local = Matrix(np.asarray(matrix, dtype=np.float64).tolist())
+    obj.empty_display_type = display_type
+    obj.empty_display_size = display_size
+    _tag_gameplay_object(
+        obj,
+        kind=kind,
+        source_group=source_group,
+        index=index,
+    )
+    return obj
+
+
+def _create_gameplay_path(
+    collection: bpy.types.Collection,
+    path: GameplayPath,
+    root: bpy.types.Object,
+) -> bpy.types.Object:
+    name = f"Path_{path.index:04X}"
+    curve = bpy.data.curves.new(name, "CURVE")
+    curve.dimensions = "3D"
+    if len(path.points):
+        spline = curve.splines.new("POLY")
+        spline.points.add(len(path.points) - 1)
+        coordinates = np.column_stack(
+            (
+                np.asarray(path.points, dtype=np.float32),
+                np.ones(len(path.points), dtype=np.float32),
+            )
+        )
+        spline.points.foreach_set("co", coordinates.ravel())
+    obj = bpy.data.objects.new(name, curve)
+    collection.objects.link(obj)
+    obj.parent = root
+    obj.display_type = "WIRE"
+    _tag_gameplay_object(
+        obj,
+        kind="PATH",
+        source_group="Paths",
+        index=path.index,
+    )
+    obj["insomniac_point_count"] = len(path.points)
+    return obj
+
+
+def _create_gameplay_effect(
+    collection: bpy.types.Collection,
+    effect: GameplayEffect,
+    root: bpy.types.Object,
+) -> bpy.types.Object:
+    obj = _create_gameplay_empty(
+        collection,
+        f"Effect_{effect.index:04X}_{effect.effect_class:04X}",
+        root,
+        effect.matrix,
+        kind="EFFECT",
+        source_group="Effects",
+        index=effect.index,
+        display_type="SPHERE",
+    )
+    obj["insomniac_effect_class"] = effect.effect_class
+    obj["insomniac_effect_flags"] = effect.flags
+    obj["insomniac_payload_size"] = effect.payload_size
+    return obj
+
+
+def _create_gameplay_marker(
+    collection: bpy.types.Collection,
+    marker: GameplayMarker,
+    root: bpy.types.Object,
+) -> bpy.types.Object:
+    obj = _create_gameplay_empty(
+        collection,
+        f"Marker_{marker.index:04X}_{marker.marker_class:04X}",
+        root,
+        marker.matrix,
+        kind="MARKER",
+        source_group="Markers",
+        index=marker.index,
+        display_type="CUBE",
+    )
+    obj["insomniac_marker_class"] = marker.marker_class
+    obj["insomniac_payload_size"] = marker.payload_size
+    obj["insomniac_source_scale"] = marker.scale
+    return obj
+
+
+def _create_gameplay_moby_group(
+    collection: bpy.types.Collection,
+    group: GameplayMobyGroup,
+    region: GameplayRegion,
+    root: bpy.types.Object,
+) -> bpy.types.Object:
+    matrix = np.identity(4, dtype=np.float32)
+    if group.moby_indices:
+        positions = [
+            region.moby_instances[index].matrix[:3, 3]
+            for index in group.moby_indices
+        ]
+        matrix[:3, 3] = np.mean(positions, axis=0)
+    obj = _create_gameplay_empty(
+        collection,
+        f"MobyGroup_{group.index:04X}",
+        root,
+        matrix,
+        kind="MOBY_GROUP",
+        source_group="Moby Groups",
+        index=group.index,
+        display_type="PLAIN_AXES",
+    )
+    obj["insomniac_moby_indices"] = json.dumps(group.moby_indices)
+    obj["insomniac_member_count"] = len(group.moby_indices)
+    return obj
+
+
+def _create_gameplay_area(
+    collection: bpy.types.Collection,
+    area: GameplayArea,
+    region: GameplayRegion,
+    root: bpy.types.Object,
+) -> bpy.types.Object:
+    positions: list[np.ndarray] = []
+    for path_index in area.path_indices:
+        positions.extend(region.paths[path_index].points)
+    positions.extend(
+        region.triggers[trigger_index].matrix[:3, 3]
+        for trigger_index in area.trigger_indices
+    )
+    matrix = np.identity(4, dtype=np.float32)
+    if positions:
+        matrix[:3, 3] = np.mean(positions, axis=0)
+    obj = _create_gameplay_empty(
+        collection,
+        area.name or f"Area_{area.index:04X}",
+        root,
+        matrix,
+        kind="AREA",
+        source_group="Areas",
+        index=area.index,
+        display_type="CUBE",
+        display_size=0.75,
+    )
+    obj["insomniac_area_name"] = area.name
+    obj["insomniac_area_flags"] = area.flags
+    obj["insomniac_path_indices"] = json.dumps(area.path_indices)
+    obj["insomniac_trigger_indices"] = json.dumps(area.trigger_indices)
     return obj
 
 

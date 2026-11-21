@@ -102,8 +102,8 @@ face-domain surface attributes. The Metropolis real-data regression validates
 
 The RFoM smoke test reports resource counts and decodes one Moby, skeleton,
 animset, diffuse texture, Tie, zone, shrub and foliage placement counts,
-gameplay region, and the complete level-collision scene without writing game
-data to the repository.
+all seven gameplay groups, and the complete level-collision scene without
+writing game data to the repository.
 
 The portable `test_foliage.py` fixture separately exercises the R2 and R3
 `0xA000` card buffers, their distinct `0xA200` descriptors, and their
@@ -192,8 +192,10 @@ Remove-Item Env:RFOM_ISO_PATH
 This checks the exact `BCUS98107`/`01.00` identity, the 41-level inventory,
 an animated 76-bone Moby, material and texture decoding, a Tie, region
 terrain, 4,247 Tie placements, 533 primary gameplay Moby placements, and the
-13,291-instance/2,491-mesh level20 collision scene. Each source-specific test
-is skipped when its environment variable is absent.
+level20 secondary gameplay counts of 9 paths, 480 triggers, 43 effects, 1,123
+markers, 65 Moby groups, and 93 named areas, plus the
+13,291-instance/2,491-mesh collision scene. Each source-specific test is
+skipped when its environment variable is absent.
 
 Validate RFoM imports with Blender 5.2:
 
@@ -219,15 +221,27 @@ Validate RFoM imports with Blender 5.2:
   --output "E:\tests\InsomniacAssetIO\collision_review\rfom_collision.blend"
 ```
 
-For level imports, the Blender smoke test compares every decoded shrub and
-foliage placement with the corresponding imported Blender object count. The
-collision-only review saves, reopens, and revalidates all 13,291 wire objects,
-2,491 shared meshes, instance metadata, and face-domain surface attributes.
+For level imports, the Blender smoke test compares every decoded shrub,
+foliage, and gameplay placement with the corresponding imported Blender
+object count. The saved and reopened level20 gameplay review contains the six
+named contextual Collections and exact counts of 9 path curves, 480 trigger
+empties, 43 effect empties, 1,123 typed marker empties, 65 Moby-group empties,
+and 93 named-area empties. All 1,813 secondary objects remain in-front,
+non-rendering context, and none are routed to a Moby mesh. The collision-only
+review saves, reopens, and revalidates all 13,291 wire objects, 2,491 shared
+meshes, instance metadata, and face-domain surface attributes.
 
 The full USA collision corpus contains 41 `ps3levelcoll.dat` files with
 446,785 records, 90,766 shared prototypes, 8,783,640 vertices, and
 12,762,307 retained faces. Every file validates through the game-neutral
 scene contract without warnings.
+
+The full USA gameplay corpus contains 41 `ps3gameplay.dat` files with 16,422
+primary Mobys, 642 paths containing 12,017 points, 6,514 triggers, 4,202
+effects, 21,543 typed markers, 1,869 Moby groups containing 13,965
+memberships, and 2,340 named areas. The areas contain 429 path and 3,552
+trigger references. Every descriptor, nested table, embedded IGHW payload,
+transform, ordinal, membership range, and cross-group index validates.
 
 Run the environment-gated Tools of Destruction regressions against an
 extracted Metropolis archive trio and the decrypted ISO:
@@ -414,7 +428,8 @@ The current implementation was validated in Blender 5.2.2 LTS with:
 
 - Resistance: Fall of Man USA v01.00 level 20: all 155 Mobys (961 meshes),
   222 Ties (1,664 meshes), 633 Materials, 1,384 textures, 1,675 region
-  meshes, 4,247 Tie placements, and 533 primary gameplay Moby placements;
+  meshes, 4,247 Tie placements, 533 primary gameplay Moby placements, and
+  all 1,813 secondary gameplay records;
 - all 1,717 inline clips across 37 animated RFoM Mobys, including 155
   skeletons and a 186-bone asset, decoded without errors;
 - representative RFoM texture decoding for every observed format
@@ -424,9 +439,9 @@ The current implementation was validated in Blender 5.2.2 LTS with:
   Shrubs and Foliage;
 - a saved and reopened animated RFoM Moby with three Materials, ten decoded
   game images, a 76-bone rig, and one Action;
-- a saved and reopened RFoM level with 4,782 objects, 303 mesh datablocks,
-  486 source Materials, and 1,060 decoded game images, without import
-  warnings;
+- a saved and reopened RFoM gameplay review with 13,994 objects, 325 mesh
+  datablocks, exact counts for all seven gameplay groups, preserved
+  contextual metadata, and no import warnings;
 - Tools of Destruction USA v02.00 Metropolis: 201 Mobys, 193 Ties,
   631 shaders, 1,297 textures, 1,987 UFrags, 4,848 Tie placements, and
   1,378 gameplay Moby placements;

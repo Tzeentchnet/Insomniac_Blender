@@ -17,7 +17,13 @@ from ..resistance_2.formats import (
     AssetKind,
     AssetPointer,
     DecodedTexture,
+    GameplayArea,
+    GameplayEffect,
+    GameplayMarker,
+    GameplayMobyGroup,
+    GameplayPath,
     GameplayRegion,
+    GameplayTrigger,
     MeshGeometry,
     MobyAsset,
     PlacedInstance,
@@ -66,6 +72,12 @@ SHRUB_CLUSTER_STRIDE = 0x50
 SHRUB_INSTANCE_STRIDE = 0x40
 SHRUB_VERTEX_STRIDE = 0x10
 GAMEPLAY_MOBY_STRIDE = 0x40
+GAMEPLAY_PATH_STRIDE = 0x10
+GAMEPLAY_TRIGGER_STRIDE = 0x90
+GAMEPLAY_EFFECT_STRIDE = 0xA0
+GAMEPLAY_MARKER_STRIDE = 0x30
+GAMEPLAY_MOBY_GROUP_STRIDE = 0x10
+GAMEPLAY_AREA_STRIDE = 0x60
 
 YARD_TO_METERS = np.float32(0.9144)
 REGION_SCALE = np.float32(YARD_TO_METERS / 256.0)
@@ -1270,7 +1282,7 @@ class ResistanceFomReader(RatchetTodReader):
             return [GameplayRegion(name="art", moby_instances=[])]
         gameplay.require(
             instances_offset,
-            0x48,
+            0xB0,
             purpose="GameplayInstances structure",
         )
         raw_name = bytes(
@@ -1313,4 +1325,473 @@ class ResistanceFomReader(RatchetTodReader):
                     ),
                 )
             )
-        return [GameplayRegion(name=name, moby_instances=instances)]
+        paths = self._read_gameplay_paths(gameplay, instances_offset)
+        triggers = self._read_gameplay_triggers(gameplay, instances_offset)
+        effects = self._read_gameplay_effects(gameplay, instances_offset)
+        markers = self._read_gameplay_markers(gameplay, instances_offset)
+        moby_groups = self._read_gameplay_moby_groups(
+            gameplay,
+            instances_offset,
+            item_count,
+        )
+        areas = self._read_gameplay_areas(
+            gameplay,
+            instances_offset,
+            len(paths),
+            len(triggers),
+        )
+        return [
+            GameplayRegion(
+                name=name,
+                moby_instances=instances,
+                paths=paths,
+                triggers=triggers,
+                effects=effects,
+                markers=markers,
+                moby_groups=moby_groups,
+                areas=areas,
+            )
+        ]
+
+    def _gameplay_group(
+        self,
+        gameplay: IghwFile,
+        instances_offset: int,
+        descriptor_offset: int,
+        stride: int,
+        label: str,
+    ) -> tuple[int, int]:
+        table_offset = gameplay.u32(instances_offset + descriptor_offset)
+        count = gameplay.u32(instances_offset + descriptor_offset + 0x04)
+        if (
+            gameplay.u32(instances_offset + descriptor_offset + 0x08) != 0
+            or gameplay.u32(instances_offset + descriptor_offset + 0x0C) != 0
+        ):
+            raise FormatError(
+                f"{self.gameplay_path}: gameplay {label} descriptor has "
+                "non-zero reserved fields"
+            )
+        if count > MAX_GAMEPLAY_INSTANCES:
+            raise FormatError(
+                f"{self.gameplay_path}: unreasonable gameplay {label} count {count}"
+            )
+        if count and not table_offset:
+            raise FormatError(
+                f"{self.gameplay_path}: gameplay {label} table is missing"
+            )
+        gameplay.require(
+            table_offset,
+            count * stride,
+            purpose=f"gameplay {label} table",
+        )
+        return table_offset, count
+
+    def _require_finite(
+        self,
+        values: np.ndarray,
+        label: str,
+    ) -> None:
+        if not np.all(np.isfinite(values)):
+            raise FormatError(
+                f"{self.gameplay_path}: gameplay {label} contains non-finite values"
+            )
+
+    def _read_gameplay_paths(
+        self,
+        gameplay: IghwFile,
+        instances_offset: int,
+    ) -> list[GameplayPath]:
+        table_offset, count = self._gameplay_group(
+            gameplay,
+            instances_offset,
+            0x50,
+            GAMEPLAY_PATH_STRIDE,
+            "path",
+        )
+        paths: list[GameplayPath] = []
+        for index in range(count):
+            base = table_offset + index * GAMEPLAY_PATH_STRIDE
+            point_offset = gameplay.u32(base)
+            point_count = gameplay.u32(base + 0x04)
+            if (
+                gameplay.u32(base + 0x08) != 0
+                or gameplay.u32(base + 0x0C) != 0
+            ):
+                raise FormatError(
+                    f"{self.gameplay_path}: gameplay path {index} has "
+                    "non-zero reserved fields"
+                )
+            if point_count > MAX_GAMEPLAY_INSTANCES:
+                raise FormatError(
+                    f"{self.gameplay_path}: unreasonable gameplay path "
+                    f"{index} point count {point_count}"
+                )
+            if point_count and not point_offset:
+                raise FormatError(
+                    f"{self.gameplay_path}: gameplay path {index} point "
+                    "table is missing"
+                )
+            gameplay.require(
+                point_offset,
+                point_count * 0x10,
+                purpose=f"gameplay path {index} points",
+            )
+            points = np.frombuffer(
+                gameplay.data,
+                dtype=gameplay.endian + "f4",
+                count=point_count * 4,
+                offset=point_offset,
+            ).reshape((point_count, 4))
+            self._require_finite(points, f"path {index}")
+            paths.append(
+                GameplayPath(
+                    index=index,
+                    points=(points[:, :3] * YARD_TO_METERS).astype(
+                        np.float32, copy=True
+                    ),
+                )
+            )
+        return paths
+
+    def _read_gameplay_triggers(
+        self,
+        gameplay: IghwFile,
+        instances_offset: int,
+    ) -> list[GameplayTrigger]:
+        table_offset, count = self._gameplay_group(
+            gameplay,
+            instances_offset,
+            0x60,
+            GAMEPLAY_TRIGGER_STRIDE,
+            "trigger",
+        )
+        triggers: list[GameplayTrigger] = []
+        for index in range(count):
+            base = table_offset + index * GAMEPLAY_TRIGGER_STRIDE
+            values = np.frombuffer(
+                gameplay.data,
+                dtype=gameplay.endian + "f4",
+                count=32,
+                offset=base,
+            )
+            self._require_finite(values, f"trigger {index}")
+            matrix = self._read_single_matrix(gameplay, base)
+            matrix[:3, :3] *= YARD_TO_METERS
+            matrix[:3, 3] *= YARD_TO_METERS
+            shape_kind = gameplay.u32(base + 0x80)
+            ordinal = gameplay.u32(base + 0x84)
+            if shape_kind > 3:
+                raise FormatError(
+                    f"{self.gameplay_path}: gameplay trigger {index} has "
+                    f"unknown shape kind {shape_kind}"
+                )
+            if ordinal != index:
+                raise FormatError(
+                    f"{self.gameplay_path}: gameplay trigger {index} stores "
+                    f"ordinal {ordinal}"
+                )
+            if (
+                gameplay.u32(base + 0x88) != 0
+                or gameplay.u32(base + 0x8C) != 0
+            ):
+                raise FormatError(
+                    f"{self.gameplay_path}: gameplay trigger {index} has "
+                    "non-zero reserved fields"
+                )
+            triggers.append(
+                GameplayTrigger(
+                    index=index,
+                    shape_kind=shape_kind,
+                    matrix=matrix,
+                )
+            )
+        return triggers
+
+    def _read_gameplay_effects(
+        self,
+        gameplay: IghwFile,
+        instances_offset: int,
+    ) -> list[GameplayEffect]:
+        table_offset, count = self._gameplay_group(
+            gameplay,
+            instances_offset,
+            0x70,
+            GAMEPLAY_EFFECT_STRIDE,
+            "effect",
+        )
+        effects: list[GameplayEffect] = []
+        for index in range(count):
+            base = table_offset + index * GAMEPLAY_EFFECT_STRIDE
+            payload_offset = gameplay.u32(base)
+            payload_size = gameplay.u32(base + 0x9C)
+            if bool(payload_offset) != bool(payload_size):
+                raise FormatError(
+                    f"{self.gameplay_path}: gameplay effect {index} has "
+                    "an incomplete payload reference"
+                )
+            if payload_size:
+                self._read_gameplay_payload_class(
+                    gameplay,
+                    payload_offset,
+                    payload_size,
+                    f"effect {index}",
+                )
+            matrix = self._read_single_matrix(gameplay, base + 0x04)
+            inverse = self._read_single_matrix(gameplay, base + 0x44)
+            self._require_finite(matrix, f"effect {index}")
+            self._require_finite(inverse, f"effect {index} inverse")
+            if not np.allclose(
+                matrix @ inverse,
+                np.identity(4, dtype=np.float32),
+                rtol=1e-3,
+                atol=1e-3,
+            ):
+                raise FormatError(
+                    f"{self.gameplay_path}: gameplay effect {index} "
+                    "matrices are not inverses"
+                )
+            matrix[:3, :3] *= YARD_TO_METERS
+            matrix[:3, 3] *= YARD_TO_METERS
+            if gameplay.u32(base + 0x90) != 0:
+                raise FormatError(
+                    f"{self.gameplay_path}: gameplay effect {index} has "
+                    "a non-zero reserved field"
+                )
+            effects.append(
+                GameplayEffect(
+                    index=index,
+                    effect_class=gameplay.u32(base + 0x98),
+                    flags=gameplay.u32(base + 0x94),
+                    matrix=matrix,
+                    payload_size=payload_size,
+                )
+            )
+        return effects
+
+    def _read_gameplay_markers(
+        self,
+        gameplay: IghwFile,
+        instances_offset: int,
+    ) -> list[GameplayMarker]:
+        table_offset, count = self._gameplay_group(
+            gameplay,
+            instances_offset,
+            0x80,
+            GAMEPLAY_MARKER_STRIDE,
+            "marker",
+        )
+        markers: list[GameplayMarker] = []
+        for index in range(count):
+            base = table_offset + index * GAMEPLAY_MARKER_STRIDE
+            payload_offset = gameplay.u32(base)
+            payload_size = gameplay.u32(base + 0x28)
+            if not payload_offset or not payload_size:
+                raise FormatError(
+                    f"{self.gameplay_path}: gameplay marker {index} has "
+                    "no embedded payload"
+                )
+            marker_class = self._read_gameplay_payload_class(
+                gameplay,
+                payload_offset,
+                payload_size,
+                f"marker {index}",
+            )
+            if gameplay.u32(base + 0x2C) != 0:
+                raise FormatError(
+                    f"{self.gameplay_path}: gameplay marker {index} has "
+                    "a non-zero reserved field"
+                )
+            position = gameplay.vec3(base + 0x04)
+            rotation = gameplay.vec3(base + 0x10)
+            scale = gameplay.vec3(base + 0x1C)
+            self._require_finite(
+                np.asarray(position + rotation + scale, dtype=np.float32),
+                f"marker {index}",
+            )
+            matrix = _matrix_from_zyx(
+                tuple(value * float(YARD_TO_METERS) for value in position),
+                rotation,
+                1.0,
+            )
+            matrix[:3, :3] *= np.asarray(scale, dtype=np.float32)
+            markers.append(
+                GameplayMarker(
+                    index=index,
+                    marker_class=marker_class,
+                    matrix=matrix,
+                    scale=scale,
+                    payload_size=payload_size,
+                )
+            )
+        return markers
+
+    def _read_gameplay_payload_class(
+        self,
+        gameplay: IghwFile,
+        payload_offset: int,
+        payload_size: int,
+        label: str,
+    ) -> int:
+        gameplay.require(
+            payload_offset,
+            payload_size,
+            purpose=f"gameplay {label} payload",
+        )
+        payload = IghwFile(
+            gameplay.bytes(payload_offset, payload_size),
+            label=f"{self.gameplay_path} {label} payload",
+        )
+        section = payload.require_section(0x25200)
+        payload.require(
+            section.offset,
+            4,
+            purpose=f"gameplay {label} payload class",
+        )
+        return payload.u32(section.offset)
+
+    def _read_gameplay_moby_groups(
+        self,
+        gameplay: IghwFile,
+        instances_offset: int,
+        moby_count: int,
+    ) -> list[GameplayMobyGroup]:
+        table_offset, count = self._gameplay_group(
+            gameplay,
+            instances_offset,
+            0x90,
+            GAMEPLAY_MOBY_GROUP_STRIDE,
+            "Moby group",
+        )
+        groups: list[GameplayMobyGroup] = []
+        for index in range(count):
+            base = table_offset + index * GAMEPLAY_MOBY_GROUP_STRIDE
+            member_offset = gameplay.u32(base)
+            member_count = gameplay.u32(base + 0x04)
+            if (
+                gameplay.u32(base + 0x08) != 0
+                or gameplay.u32(base + 0x0C) != 0
+            ):
+                raise FormatError(
+                    f"{self.gameplay_path}: gameplay Moby group {index} "
+                    "has non-zero reserved fields"
+                )
+            if member_count > MAX_GAMEPLAY_INSTANCES:
+                raise FormatError(
+                    f"{self.gameplay_path}: unreasonable gameplay Moby "
+                    f"group {index} member count {member_count}"
+                )
+            if member_count and not member_offset:
+                raise FormatError(
+                    f"{self.gameplay_path}: gameplay Moby group {index} "
+                    "member table is missing"
+                )
+            gameplay.require(
+                member_offset,
+                member_count * 4,
+                purpose=f"gameplay Moby group {index} members",
+            )
+            members: list[int] = []
+            for member_index in range(member_count):
+                range_offset = member_offset + member_index * 4
+                range_end = gameplay.u16(range_offset)
+                range_start = gameplay.u16(range_offset + 2)
+                if range_end != range_start + 1 or range_end > moby_count:
+                    raise FormatError(
+                        f"{self.gameplay_path}: gameplay Moby group "
+                        f"{index} member {member_index} has invalid range "
+                        f"[{range_start}, {range_end}) for {moby_count} Mobys"
+                    )
+                members.append(range_start)
+            groups.append(
+                GameplayMobyGroup(
+                    index=index,
+                    moby_indices=tuple(members),
+                )
+            )
+        return groups
+
+    def _read_gameplay_areas(
+        self,
+        gameplay: IghwFile,
+        instances_offset: int,
+        path_count: int,
+        trigger_count: int,
+    ) -> list[GameplayArea]:
+        table_offset, count = self._gameplay_group(
+            gameplay,
+            instances_offset,
+            0xA0,
+            GAMEPLAY_AREA_STRIDE,
+            "area",
+        )
+        areas: list[GameplayArea] = []
+        for index in range(count):
+            base = table_offset + index * GAMEPLAY_AREA_STRIDE
+            path_offset = gameplay.u32(base)
+            trigger_offset = gameplay.u32(base + 0x04)
+            path_member_count = gameplay.u32(base + 0x48)
+            trigger_member_count = gameplay.u32(base + 0x4C)
+            for member_count, member_offset, member_label in (
+                (path_member_count, path_offset, "path"),
+                (trigger_member_count, trigger_offset, "trigger"),
+            ):
+                if member_count > MAX_GAMEPLAY_INSTANCES:
+                    raise FormatError(
+                        f"{self.gameplay_path}: unreasonable gameplay area "
+                        f"{index} {member_label} count {member_count}"
+                    )
+                if member_count and not member_offset:
+                    raise FormatError(
+                        f"{self.gameplay_path}: gameplay area {index} "
+                        f"{member_label} table is missing"
+                    )
+                gameplay.require(
+                    member_offset,
+                    member_count * 2,
+                    purpose=(f"gameplay area {index} {member_label} members"),
+                )
+            if any(
+                gameplay.u32(base + offset) != 0
+                for offset in (0x54, 0x58, 0x5C)
+            ):
+                raise FormatError(
+                    f"{self.gameplay_path}: gameplay area {index} has "
+                    "non-zero reserved fields"
+                )
+            path_indices = tuple(
+                gameplay.u16(path_offset + member_index * 2)
+                for member_index in range(path_member_count)
+            )
+            trigger_indices = tuple(
+                gameplay.u16(trigger_offset + member_index * 2)
+                for member_index in range(trigger_member_count)
+            )
+            for member_index, path_index in enumerate(path_indices):
+                if path_index >= path_count:
+                    raise FormatError(
+                        f"{self.gameplay_path}: gameplay area {index} "
+                        f"path member {member_index} references path "
+                        f"{path_index}, but only {path_count} paths exist"
+                    )
+            for member_index, trigger_index in enumerate(trigger_indices):
+                if trigger_index >= trigger_count:
+                    raise FormatError(
+                        f"{self.gameplay_path}: gameplay area {index} "
+                        f"trigger member {member_index} references trigger "
+                        f"{trigger_index}, but only {trigger_count} "
+                        "triggers exist"
+                    )
+            raw_name = bytes(gameplay.data[base + 0x08 : base + 0x48]).split(
+                b"\0",
+                1,
+            )[0]
+            areas.append(
+                GameplayArea(
+                    index=index,
+                    name=raw_name.decode("ascii", errors="replace"),
+                    path_indices=path_indices,
+                    trigger_indices=trigger_indices,
+                    flags=gameplay.u32(base + 0x50),
+                )
+            )
+        return areas

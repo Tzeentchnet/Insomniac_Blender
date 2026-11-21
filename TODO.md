@@ -114,15 +114,15 @@ Created from the feature-gap review of [README.md](README.md) and
 
 ## 6. Decode RFoM secondary gameplay groups
 
-- [ ] Inventory the six skipped gameplay groups across representative levels.
-- [ ] Identify each group's count, stride, identity lookup, and transform
+- [x] Inventory the six skipped gameplay groups across representative levels.
+- [x] Identify each group's count, stride, identity lookup, and transform
   layout.
-- [ ] Classify records as renderable Mobys, markers, triggers, or effects.
-- [ ] Route only proven renderable Moby records through the shared static
+- [x] Classify records as renderable Mobys, markers, triggers, or effects.
+- [x] Route only proven renderable Moby records through the shared static
   placement importer.
-- [ ] Preserve source group names and instance metadata.
-- [ ] Add exact-count and placement regressions.
-- [ ] Produce a contextual level review showing newly recovered objects.
+- [x] Preserve source group names and instance metadata.
+- [x] Add exact-count and placement regressions.
+- [x] Produce a contextual level review showing newly recovered objects.
 
 ## 7. Implement material refinements as verified families
 

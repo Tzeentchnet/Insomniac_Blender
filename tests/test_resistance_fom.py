@@ -7,6 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
+from insomniac_asset_io.core.errors import FormatError
 from insomniac_asset_io.core.source import GameSource
 from insomniac_asset_io.games.resistance_2.formats import AssetKind
 from insomniac_asset_io.games.resistance_fom.reader import (
@@ -296,16 +297,63 @@ def _write_fixture(root: Path) -> None:
     (root / "ps3leveltexs.dat").write_bytes(textures)
 
     gameplay = _ighw(
-        0x240,
+        0x600,
         ((0x25000, 0x100, 1, 0x30),),
         version=(0, 2),
     )
     struct.pack_into(">I", gameplay, 0x120, 0x140)
-    gameplay[0x140 : 0x148] = b"fixture\0"
+    gameplay[0x140:0x148] = b"fixture\0"
     struct.pack_into(">II", gameplay, 0x180, 0x200, 1)
+    struct.pack_into(">II", gameplay, 0x190, 0x240, 1)
+    struct.pack_into(">II", gameplay, 0x1A0, 0x280, 1)
+    struct.pack_into(">II", gameplay, 0x1B0, 0x320, 1)
+    struct.pack_into(">II", gameplay, 0x1C0, 0x3C0, 1)
+    struct.pack_into(">II", gameplay, 0x1D0, 0x3F0, 1)
+    struct.pack_into(">II", gameplay, 0x1E0, 0x400, 1)
     struct.pack_into(">3f", gameplay, 0x210, 1.0, 2.0, 3.0)
     struct.pack_into(">3f", gameplay, 0x21C, 0.0, 0.0, 0.0)
     struct.pack_into(">H", gameplay, 0x23C, 0x123)
+
+    struct.pack_into(">II", gameplay, 0x240, 0x460, 2)
+    struct.pack_into(">4f", gameplay, 0x460, 1.0, 2.0, 3.0, -1.0)
+    struct.pack_into(">4f", gameplay, 0x470, 4.0, 5.0, 6.0, -1.0)
+
+    _matrix(gameplay, 0x280, (2.0, 3.0, 4.0))
+    struct.pack_into(">I", gameplay, 0x300, 2)
+
+    effect_payload = _ighw(
+        0x50,
+        ((0x25200, 0x40, 1, 4),),
+        version=(0, 2),
+    )
+    struct.pack_into(">I", effect_payload, 0x40, 0x1234)
+    gameplay[0x480:0x4D0] = effect_payload
+    struct.pack_into(">I", gameplay, 0x320, 0x480)
+    _matrix(gameplay, 0x324, (3.0, 4.0, 5.0))
+    _matrix(gameplay, 0x364, (-3.0, -4.0, -5.0))
+    struct.pack_into(">III", gameplay, 0x3B4, 7, 2, 0x50)
+
+    marker_payload = _ighw(
+        0x50,
+        ((0x25200, 0x40, 1, 4),),
+        version=(0, 2),
+    )
+    struct.pack_into(">I", marker_payload, 0x40, 0x43E)
+    gameplay[0x4D0:0x520] = marker_payload
+    struct.pack_into(">I", gameplay, 0x3C0, 0x4D0)
+    struct.pack_into(">3f", gameplay, 0x3C4, 4.0, 5.0, 6.0)
+    struct.pack_into(">3f", gameplay, 0x3D0, 0.0, 0.0, 0.0)
+    struct.pack_into(">3f", gameplay, 0x3DC, 2.0, 3.0, 4.0)
+    struct.pack_into(">I", gameplay, 0x3E8, 0x50)
+
+    struct.pack_into(">II", gameplay, 0x3F0, 0x520, 1)
+    struct.pack_into(">2H", gameplay, 0x520, 1, 0)
+
+    struct.pack_into(">II", gameplay, 0x400, 0x524, 0x526)
+    gameplay[0x408:0x414] = b"FixtureArea\0"
+    struct.pack_into(">III", gameplay, 0x448, 1, 1, 14)
+    struct.pack_into(">H", gameplay, 0x524, 0)
+    struct.pack_into(">H", gameplay, 0x526, 0)
     (root / "ps3gameplay.dat").write_bytes(gameplay)
 
 
@@ -405,6 +453,57 @@ class ResistanceFomReaderTests(unittest.TestCase):
                     gameplay.moby_instances[0].matrix[:3, 3],
                     np.asarray((1.0, 2.0, 3.0)) * 0.9144,
                 )
+                self.assertEqual(len(gameplay.paths), 1)
+                np.testing.assert_allclose(
+                    gameplay.paths[0].points,
+                    np.asarray(((1, 2, 3), (4, 5, 6))) * 0.9144,
+                )
+                self.assertEqual(gameplay.triggers[0].shape_kind, 2)
+                np.testing.assert_allclose(
+                    gameplay.triggers[0].matrix[:3, 3],
+                    np.asarray((2.0, 3.0, 4.0)) * 0.9144,
+                )
+                self.assertEqual(gameplay.effects[0].effect_class, 2)
+                self.assertEqual(gameplay.effects[0].flags, 7)
+                self.assertEqual(gameplay.effects[0].payload_size, 0x50)
+                np.testing.assert_allclose(
+                    gameplay.effects[0].matrix[:3, 3],
+                    np.asarray((3.0, 4.0, 5.0)) * 0.9144,
+                )
+                self.assertEqual(gameplay.markers[0].marker_class, 0x43E)
+                self.assertEqual(gameplay.markers[0].scale, (2.0, 3.0, 4.0))
+                self.assertEqual(gameplay.markers[0].payload_size, 0x50)
+                np.testing.assert_allclose(
+                    gameplay.markers[0].matrix[:3, 3],
+                    np.asarray((4.0, 5.0, 6.0)) * 0.9144,
+                )
+                self.assertEqual(gameplay.moby_groups[0].moby_indices, (0,))
+                self.assertEqual(gameplay.areas[0].name, "FixtureArea")
+                self.assertEqual(gameplay.areas[0].path_indices, (0,))
+                self.assertEqual(gameplay.areas[0].trigger_indices, (0,))
+                self.assertEqual(gameplay.areas[0].flags, 14)
+
+    def test_rejects_malformed_secondary_gameplay_groups(self) -> None:
+        cases = (
+            (0x520, ">H", 2, "invalid range"),
+            (0x524, ">H", 1, "references path"),
+            (0x490, ">I", 0x25100, "required section"),
+        )
+        for offset, kind, value, message in cases:
+            with (
+                self.subTest(message=message),
+                tempfile.TemporaryDirectory() as temporary,
+            ):
+                root = Path(temporary)
+                _write_fixture(root)
+                gameplay_path = root / "ps3gameplay.dat"
+                gameplay = bytearray(gameplay_path.read_bytes())
+                struct.pack_into(kind, gameplay, offset, value)
+                gameplay_path.write_bytes(gameplay)
+                with GameSource.open(root) as source:
+                    reader = ResistanceFomReader(source)
+                    with self.assertRaisesRegex(FormatError, message):
+                        reader.read_gameplay_regions()
 
 
 if __name__ == "__main__":

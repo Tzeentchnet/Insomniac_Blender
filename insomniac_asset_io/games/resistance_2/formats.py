@@ -336,9 +336,61 @@ class Zone:
 
 
 @dataclass(slots=True)
+class GameplayPath:
+    index: int
+    points: FloatArray
+
+
+@dataclass(slots=True)
+class GameplayTrigger:
+    index: int
+    shape_kind: int
+    matrix: FloatArray
+
+
+@dataclass(slots=True)
+class GameplayEffect:
+    index: int
+    effect_class: int
+    flags: int
+    matrix: FloatArray
+    payload_size: int
+
+
+@dataclass(slots=True)
+class GameplayMarker:
+    index: int
+    marker_class: int
+    matrix: FloatArray
+    scale: tuple[float, float, float]
+    payload_size: int
+
+
+@dataclass(slots=True)
+class GameplayMobyGroup:
+    index: int
+    moby_indices: tuple[int, ...]
+
+
+@dataclass(slots=True)
+class GameplayArea:
+    index: int
+    name: str
+    path_indices: tuple[int, ...]
+    trigger_indices: tuple[int, ...]
+    flags: int
+
+
+@dataclass(slots=True)
 class GameplayRegion:
     name: str
     moby_instances: list[PlacedInstance]
+    paths: list[GameplayPath] = field(default_factory=list)
+    triggers: list[GameplayTrigger] = field(default_factory=list)
+    effects: list[GameplayEffect] = field(default_factory=list)
+    markers: list[GameplayMarker] = field(default_factory=list)
+    moby_groups: list[GameplayMobyGroup] = field(default_factory=list)
+    areas: list[GameplayArea] = field(default_factory=list)
 
 
 class TrackKind(Enum):

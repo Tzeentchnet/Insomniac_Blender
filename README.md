@@ -43,10 +43,10 @@ both fields from `PARAM.SFO`.
 | Blender Asset Browser | Moby, Tie, Shrub, and Foliage Collections plus standalone Material and optional Action assets |
 | Region terrain and Tie placement | Supported |
 | Shrub and foliage level geometry | Supported as linked static meshes and placements; foliage includes branch and sprite geometry |
-| Primary gameplay Moby placement | Supported as linked static mesh instances |
+| Gameplay groups | Primary Mobys as linked static mesh instances; paths, trigger volumes, effects, typed markers, Moby groups, and named areas as non-rendering context |
 | Retail names | Deterministic `Moby_XXXX`, `Tie_XXXXXXXX`, and `Material_XXXX` names |
 | Level collision | Optional world, Tie, and collision-only placed triangle meshes from `ps3levelcoll.dat`; disabled by default |
-| Lightmaps, lighting, VFX, cubemaps, and secondary gameplay groups | Not yet implemented |
+| Lightmaps, lighting, renderable VFX, cubemaps, and embedded gameplay payload semantics | Not yet implemented |
 
 See [Resistance: Fall of Man formats](docs/formats/resistance_fom.md) and
 [known issues](docs/known_issues.md) for the verified layouts and remaining
@@ -297,7 +297,9 @@ when needed. Terrain is created per zone. Tie and gameplay placements share
 mesh datablocks instead of duplicating geometry.
 
 Gameplay Mobys are intentionally placed as static linked meshes during a
-level import. Import an individual Moby to edit its rig and animations.
+level import. RFoM additionally creates non-rendering contextual Collections
+for paths, trigger volumes, effects, typed markers, Moby groups, and named
+areas. Import an individual Moby to edit its rig and animations.
 
 Level collision has a separate default-off **Collision geometry** option.
 Adapters that implement it feed a game-neutral mesh/instance model into
@@ -306,9 +308,9 @@ mesh datablocks, retain per-face surface/material IDs and source metadata,
 display as in-front wire geometry, and are excluded from renders. The
 R2 and R3 backends decode regional terrain and Tie collision, including
 quantized triangle prototypes and oriented box, sphere, capsule, and cylinder
-groups. TOD and RFoM level backends remain roadmap work; enabling the option
-for a game without a decoder reports that limitation instead of substituting
-render geometry.
+groups. TOD and RFoM decode their distinct raw level-collision resources.
+Enabling the option for a game without a decoder reports that limitation
+instead of substituting render geometry.
 
 ### Use an ISO directly
 

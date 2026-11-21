@@ -144,9 +144,13 @@ Materials use section `0x5001`, textures use `0x5300`, and Tie placements use
 `0x9300`.
 
 RFoM inline animations use a dedicated profile without the Tools of
-Destruction 8-bit delta shift or pair-frame reduction. The adapter exposes
-only the corroborated primary gameplay Moby group; unknown secondary groups
-remain unparsed.
+Destruction 8-bit delta shift or pair-frame reduction. Its IGHW 0.2 gameplay
+reader exposes the primary Moby placements plus six typed contextual groups:
+paths, trigger volumes, matrix-backed effects, typed transform markers, Moby
+groups, and named areas. Only the primary records use renderable Moby class
+IDs. The other groups become non-rendering curves or empties with their
+source indices, class selectors, flags, memberships, and payload sizes
+preserved as Blender metadata.
 
 RFoM collision uses the same raw header/record family as TOD but a distinct
 prototype profile. Its vertices are array-of-structures `u16` triples after

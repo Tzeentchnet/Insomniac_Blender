@@ -86,7 +86,14 @@ def main() -> int:
         regions = reader.read_gameplay_regions()
         print(
             f"Gameplay regions={len(regions)} moby_instances="
-            f"{sum(len(region.moby_instances) for region in regions)}"
+            f"{sum(len(region.moby_instances) for region in regions)} "
+            f"paths={sum(len(region.paths) for region in regions)} "
+            f"triggers={sum(len(region.triggers) for region in regions)} "
+            f"effects={sum(len(region.effects) for region in regions)} "
+            f"markers={sum(len(region.markers) for region in regions)} "
+            f"moby_groups="
+            f"{sum(len(region.moby_groups) for region in regions)} "
+            f"areas={sum(len(region.areas) for region in regions)}"
         )
         collision = reader.read_level_collision()
         validate_collision_scene(

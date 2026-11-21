@@ -42,7 +42,13 @@ if bpy is not None:
         AssetKind,
         CollisionMesh,
         CollisionPrimitive,
+        GameplayArea,
+        GameplayEffect,
+        GameplayMarker,
+        GameplayMobyGroup,
+        GameplayPath,
         GameplayRegion,
+        GameplayTrigger,
         MeshGeometry,
         MobyAsset,
         PlacedInstance,
@@ -619,6 +625,149 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
             "0x0000000000000009",
         )
         self.assertTrue(jeep["insomniac_source_default_parts"])
+
+    def test_level_gameplay_creates_non_rendering_context(self) -> None:
+        reader = _LevelReader()
+        reader.read_moby = lambda _tuid: self._asset()
+        trigger_matrix = np.eye(4, dtype=np.float32)
+        trigger_matrix[:3, 3] = (3.0, 4.0, 5.0)
+        effect_matrix = np.eye(4, dtype=np.float32)
+        effect_matrix[:3, 3] = (6.0, 7.0, 8.0)
+        marker_matrix = np.diag((2.0, 3.0, 4.0, 1.0)).astype(np.float32)
+        marker_matrix[:3, 3] = (9.0, 10.0, 11.0)
+        reader.read_gameplay_regions = lambda: [
+            GameplayRegion(
+                name="fixture",
+                moby_instances=[
+                    PlacedInstance(
+                        asset_tuid=1,
+                        instance_tuid=0,
+                        name="Moby",
+                        matrix=np.eye(4, dtype=np.float32),
+                    )
+                ],
+                paths=[
+                    GameplayPath(
+                        index=0,
+                        points=np.asarray(
+                            ((1.0, 2.0, 3.0), (4.0, 5.0, 6.0)),
+                            dtype=np.float32,
+                        ),
+                    )
+                ],
+                triggers=[
+                    GameplayTrigger(
+                        index=0,
+                        shape_kind=2,
+                        matrix=trigger_matrix,
+                    )
+                ],
+                effects=[
+                    GameplayEffect(
+                        index=0,
+                        effect_class=2,
+                        flags=7,
+                        matrix=effect_matrix,
+                        payload_size=64,
+                    )
+                ],
+                markers=[
+                    GameplayMarker(
+                        index=0,
+                        marker_class=0x43E,
+                        matrix=marker_matrix,
+                        scale=(2.0, 3.0, 4.0),
+                        payload_size=80,
+                    )
+                ],
+                moby_groups=[GameplayMobyGroup(index=0, moby_indices=(0,))],
+                areas=[
+                    GameplayArea(
+                        index=0,
+                        name="FixtureArea",
+                        path_indices=(0,),
+                        trigger_indices=(0,),
+                        flags=14,
+                    )
+                ],
+            )
+        ]
+
+        result = import_level(
+            bpy.context,
+            reader,
+            LevelImportOptions(
+                materials=False,
+                terrain=False,
+                ties=False,
+                vegetation=False,
+                gameplay=True,
+                convert_axes=False,
+            ),
+            source_path="fixture",
+        )
+        level_collection = result.root.users_collection[0]
+        region = level_collection.children["Gameplay Instances"].children[
+            "fixture"
+        ]
+        expected_groups = {
+            "Paths",
+            "Trigger Volumes",
+            "Effects",
+            "Markers",
+            "Moby Groups",
+            "Areas",
+        }
+
+        self.assertEqual(
+            {child.name for child in region.children},
+            expected_groups,
+        )
+        self.assertTrue(all(child.hide_render for child in region.children))
+        self.assertEqual(result.objects, 8)
+
+        path = next(iter(region.children["Paths"].objects))
+        self.assertEqual(path.type, "CURVE")
+        self.assertTrue(path.hide_render)
+        self.assertEqual(path["insomniac_point_count"], 2)
+        self.assertEqual(path["insomniac_source_group"], "Paths")
+
+        trigger = next(iter(region.children["Trigger Volumes"].objects))
+        self.assertIsNone(trigger.data)
+        self.assertEqual(trigger.empty_display_type, "CIRCLE")
+        self.assertEqual(trigger["insomniac_shape_kind"], "CYLINDER")
+        self.assertEqual(trigger["insomniac_gameplay_kind"], "TRIGGER")
+
+        effect = next(iter(region.children["Effects"].objects))
+        self.assertIsNone(effect.data)
+        self.assertEqual(effect["insomniac_effect_class"], 2)
+        self.assertEqual(effect["insomniac_effect_flags"], 7)
+        self.assertEqual(effect["insomniac_payload_size"], 64)
+
+        marker = next(iter(region.children["Markers"].objects))
+        self.assertIsNone(marker.data)
+        self.assertEqual(marker["insomniac_marker_class"], 0x43E)
+        self.assertEqual(marker["insomniac_payload_size"], 80)
+
+        group = next(iter(region.children["Moby Groups"].objects))
+        self.assertEqual(json.loads(group["insomniac_moby_indices"]), [0])
+        self.assertEqual(group["insomniac_member_count"], 1)
+
+        area = next(iter(region.children["Areas"].objects))
+        self.assertEqual(area.name, "FixtureArea")
+        self.assertEqual(area["insomniac_area_flags"], 14)
+        self.assertEqual(json.loads(area["insomniac_path_indices"]), [0])
+        self.assertEqual(
+            json.loads(area["insomniac_trigger_indices"]),
+            [0],
+        )
+        self.assertTrue(
+            all(
+                obj.hide_render and obj.show_in_front
+                for child in region.children
+                for obj in child.objects
+            )
+        )
 
     def test_optional_geometry_uses_dedicated_collections(self) -> None:
         result = import_moby(

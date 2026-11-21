@@ -55,6 +55,7 @@ def main() -> None:
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     _clear_scene(bpy)
+    gameplay_counts = {}
     with GameSource.open(args.source) as source:
         reader = ResistanceFomReader(source)
         if args.kind == "moby":
@@ -118,6 +119,31 @@ def main() -> None:
                     f"{expected_vegetation}, imported "
                     f"{imported_vegetation}"
                 )
+            regions = reader.read_gameplay_regions()
+            expected_gameplay = {
+                "MOBY": sum(len(region.moby_instances) for region in regions),
+                "PATH": sum(len(region.paths) for region in regions),
+                "TRIGGER": sum(len(region.triggers) for region in regions),
+                "EFFECT": sum(len(region.effects) for region in regions),
+                "MARKER": sum(len(region.markers) for region in regions),
+                "MOBY_GROUP": sum(
+                    len(region.moby_groups) for region in regions
+                ),
+                "AREA": sum(len(region.areas) for region in regions),
+            }
+            imported_gameplay = {
+                kind: sum(
+                    obj.get("insomniac_gameplay_kind") == kind
+                    for obj in bpy.data.objects
+                )
+                for kind in expected_gameplay
+            }
+            if imported_gameplay != expected_gameplay:
+                raise RuntimeError(
+                    "Gameplay placement mismatch: expected "
+                    f"{expected_gameplay}, imported {imported_gameplay}"
+                )
+            gameplay_counts = imported_gameplay
 
     if result.root.get("insomniac_game") != "RESISTANCE_FOM":
         raise RuntimeError("Imported root does not identify the RFoM adapter")
@@ -145,6 +171,7 @@ def main() -> None:
                 "materials": result.materials,
                 "images": result.images,
                 "actions": result.actions,
+                "gameplay": gameplay_counts,
                 "warnings": result.warnings or [],
             },
             indent=2,

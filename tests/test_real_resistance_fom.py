@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import unittest
+from collections import Counter
 from pathlib import Path
 
 import numpy as np
@@ -82,6 +83,36 @@ class RealResistanceFomTests(unittest.TestCase):
             gameplay = reader.read_gameplay_regions()[0]
             self.assertEqual(gameplay.name, "default")
             self.assertEqual(len(gameplay.moby_instances), 533)
+            self.assertEqual(len(gameplay.paths), 9)
+            self.assertEqual(len(gameplay.triggers), 480)
+            self.assertEqual(len(gameplay.effects), 43)
+            self.assertEqual(len(gameplay.markers), 1123)
+            self.assertEqual(len(gameplay.moby_groups), 65)
+            self.assertEqual(len(gameplay.areas), 93)
+            self.assertEqual(
+                sum(len(path.points) for path in gameplay.paths),
+                53,
+            )
+            self.assertEqual(
+                Counter(trigger.shape_kind for trigger in gameplay.triggers),
+                {0: 466, 1: 2, 2: 12},
+            )
+            self.assertEqual(gameplay.effects[0].effect_class, 1)
+            self.assertEqual(gameplay.effects[0].payload_size, 64)
+            self.assertEqual(gameplay.markers[0].marker_class, 0x43E)
+            self.assertEqual(gameplay.markers[0].payload_size, 464)
+            self.assertEqual(
+                gameplay.moby_groups[0].moby_indices,
+                (105, 104),
+            )
+            self.assertEqual(
+                gameplay.areas[0].name,
+                "00_AllyTriggersBottomOfHill",
+            )
+            self.assertEqual(
+                gameplay.areas[0].trigger_indices,
+                (45, 41, 42, 47, 43, 0),
+            )
 
             collision = reader.read_level_collision()
             validate_collision_scene(

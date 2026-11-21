@@ -190,12 +190,63 @@ Translations and all shrub/foliage vertex positions use the same
 `0.9144` yard-to-meter conversion as the other RFoM level geometry.
 
 The `0x25000` gameplay structure points to `GameplayInstances` at `0x20`.
-The primary Moby group starts at `GameplayInstances + 0x40`; its records have
-stride `0x40`. Position, ZYX Euler rotation, and Moby class ID are at `0x10`,
-`0x1C`, and `0x3C`. Position is converted from yards to meters.
+After its 64-byte region name, `GameplayInstances` contains seven
+16-byte descriptors. Every descriptor stores a table pointer, record count,
+and two zero/reserved words:
 
-The six additional gameplay groups are not imported because their record
-semantics are not yet corroborated.
+| Descriptor offset | Group | Record stride |
+|---:|---|---:|
+| `0x40` | primary Moby placements | `0x40` |
+| `0x50` | paths | `0x10` |
+| `0x60` | trigger volumes | `0x90` |
+| `0x70` | matrix-backed effects | `0xA0` |
+| `0x80` | typed transform markers | `0x30` |
+| `0x90` | Moby groups | `0x10` |
+| `0xA0` | named areas | `0x60` |
+
+Primary Moby position, ZYX Euler rotation, and class ID are at record offsets
+`0x10`, `0x1C`, and `0x3C`. Positions are converted from yards to meters and
+the records remain the only gameplay family routed through the renderable
+Moby importer.
+
+A path record contains a point-table pointer and count at `0x00`/`0x04`.
+Points are `vec4` records with stride `0x10`; the retail corpus stores `-1.0`
+in every W component. XYZ values are converted from yards to meters and
+imported as non-rendering poly curves.
+
+A trigger record contains a row-vector transform at `0x00`, inverse linear
+data at `0x40`, Euler rotation at `0x70`, shape kind at `0x80`, and its exact
+record ordinal at `0x84`. Kinds `0`, `1`, `2`, and `3` are cuboid, sphere,
+cylinder, and pill shapes. Transform translation and linear dimensions are
+converted from yards to meters before the trigger is represented by an
+in-front, non-rendering empty.
+
+The `0xA0`-byte effect records store an optional embedded-IGHW pointer at
+`0x00`, mutually inverse transforms at `0x04` and `0x44`, Euler rotation at
+`0x84`, flags at `0x94`, a small class selector at `0x98`, and embedded size
+at `0x9C`. When present, the embedded payload must contain section `0x25200`.
+The importer preserves the selector, flags, payload size, and converted
+transform without interpreting the opaque payload body.
+
+The `0x30`-byte marker records store a required embedded-IGHW pointer at
+`0x00`, position/ZYX rotation/scale at `0x04`/`0x10`/`0x1C`, and payload size
+at `0x28`. Their class identity is the first `u32` in embedded section
+`0x25200`; it is not assumed to live at a fixed byte offset within the
+embedded file. These IDs share occasional numeric values with local Moby
+classes but do not form a renderable Moby identity namespace, so markers are
+imported only as contextual empties.
+
+A Moby-group record points to packed pairs of big-endian `u16` values. Each
+pair is a one-record half-open range `(end, start)` where `end == start + 1`;
+`start` is the primary-Moby index. Named-area records contain path and trigger
+member-table pointers at `0x00`/`0x04`, a 64-byte name at `0x08`, member
+counts at `0x48`/`0x4C`, and flags at `0x50`. All memberships are validated
+against their owning source group and retained as custom metadata.
+
+Across all 41 USA retail levels, the decoder validates 16,422 primary Mobys,
+642 paths with 12,017 points, 6,514 triggers, 4,202 effects, 21,543 markers,
+1,869 Moby groups with 13,965 memberships, and 2,340 named areas. The areas
+contain 429 path and 3,552 trigger references.
 
 ## Level collision
 
@@ -290,8 +341,8 @@ Tie meshes, and five collision-only placed meshes. The retained geometry has
 - The family-3 `ps3levelcoll.dat` source table has not been correlated with a
   proven gameplay owner.
 - Directional lightmap textures in section `0x5500` are not imported.
-- Lighting, VFX, cubemaps, and the non-primary gameplay groups are not
-  decoded.
+- Lighting, renderable VFX, cubemaps, audio payloads, and the opaque bodies of
+  embedded gameplay effect/marker payloads are not decoded.
 - Shrub vertex colors, vegetation wind, foliage custom normals, and
   camera-facing billboard behavior are not reproduced.
 - Deterministic numeric names are used until retail names can be recovered
