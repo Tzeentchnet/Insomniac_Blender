@@ -455,8 +455,10 @@ is absent from every shader in both current whole-disc corpora. Neither game
 provides a verified metalness channel. Bound detail maps are imported as
 unconnected Non-Color image nodes so their signed/packed values remain
 available without inventing a blend. Apart from the narrowly identified R3
-frozen family, effect-overlay slots remain metadata rather than speculative
-node connections.
+frozen family, effect-overlay slots remain disconnected rather than receiving
+speculative node connections. The strictly classified R3 gradient-dissolve
+family is preserved as runtime-driven metadata because its controlling
+vertex-stage value is not serialized in the material.
 
 ## Project layout
 

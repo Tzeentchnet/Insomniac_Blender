@@ -232,6 +232,13 @@ Its graph samples the effect map with the camera-space shading normal, applies
 the decompiled blue and grazing-angle response, screens that result over base
 color, and lowers roughness under the same coverage. Unverified packed-alpha,
 detail composition, and all other R3 overlay families remain disconnected.
+
+The R3 reader also identifies the gradient-dissolve family from its exact
+program identity, fifth-slot path, control byte, authored suffix, and four
+embedded program descriptors. The Blender bridge preserves that family and
+program metadata but does not connect its texture. Decompiled variants depend
+on a vertex-stage/runtime transition value that is absent from the serialized
+material, so inventing a static dissolve amount would change normal imports.
 Decoded RGBA reader caches are cleared after each material while compact
 format/emission analysis and Blender image references remain cached for reuse.
 

@@ -361,6 +361,16 @@ family metadata. A Capelli review reassigned 16,481 polygons across ten frozen
 materials, then saved, rendered, reopened, and rechecked the graphs in Blender
 5.2.2 LTS.
 
+The R3 gradient-dissolve investigation scanned all 27 USA-disc level archives:
+33,860 shader references and 4,579 unique payloads with no conflicting
+duplicates. Exact program, control-byte, active-slot, texture-path, suffix, and
+embedded-program gates identify 3,475 references to 247 unique shaders across
+26 levels. Regressions cover the normal suffix, the retail `_dissovle` typo,
+invalid descriptors, the exact 44-family count in `new_york_terraformer`, the
+shared 512x512 opaque grayscale texture, and Blender metadata-only handling.
+The material test verifies that this runtime-driven family does not load or
+connect the effect texture and leaves source base color unchanged.
+
 Analyze one extracted cached archive, or every cached level archive in an ISO:
 
 ```powershell
@@ -506,6 +516,9 @@ The current implementation was validated in Blender 5.2.2 LTS with:
 - a saved, rendered, and reopened Capelli frozen-material review containing
   ten frozen graphs and 16,481 reassigned polygons, with visibly pale-blue,
   glossy frozen surfaces beside the unchanged source materials;
+- all 27 R3 cached level archives: 3,475 strictly classified
+  gradient-dissolve references representing 247 unique shaders in 26 levels,
+  including the authored `_dissovle` typo and excluding 67 name-only records;
 - a full Ravager import with 9 objects, 7 meshes, 19 materials, 23 images,
   105 Actions, and all six source-default head/attachment Collections shown;
 - sampled parity for all 105 Ravager Actions across 245,700 dense-reference

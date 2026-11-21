@@ -128,7 +128,7 @@ Created from the feature-gap review of [README.md](README.md) and
 
 - [x] Select one evidence-backed family at a time.
 - [x] Investigate R3 frozen overlays.
-- [ ] Investigate R3 dissolve and gradient effects.
+- [x] Investigate R3 dissolve and gradient effects.
 - [ ] Investigate fire, pickup-sheen, and related effect-slot families.
 - [ ] Verify R2/R3 detail-map scale and composition.
 - [ ] Investigate Shrub packed vertex metadata.

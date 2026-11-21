@@ -11,6 +11,10 @@ FROZEN_EFFECT_PROGRAM_TUID = 0x5C86_77F5_D69F_F338
 FROZEN_EFFECT_TEXTURE_PATH = (
     "artdepartment/environment/decals/effects/ig_frozen_customa"
 )
+DISSOLVE_EFFECT_FAMILY = "R3_GRADIENT_DISSOLVE"
+DISSOLVE_EFFECT_PROGRAM_TUID = 0x13C6_0114_0542_FB72
+DISSOLVE_EFFECT_TEXTURE_PATH = "ssharit/gradientdissolve"
+DISSOLVE_EFFECT_PROGRAM_LENGTH = 0x2E30
 
 
 class Resistance3Reader(Resistance2Reader):
@@ -53,25 +57,32 @@ class Resistance3Reader(Resistance2Reader):
         ighw: IghwFile,
         program: Section | None,
         descriptors: Section | None,
-        program_tuid: int,
+        *,
+        first_chunk_tuid: int,
+        descriptor_count: int,
+        expected_program_length: int | None = None,
     ) -> bool:
         if (
             program is None
             or program.length <= 0
+            or (
+                expected_program_length is not None
+                and program.length != expected_program_length
+            )
             or descriptors is None
-            or descriptors.length != 0x30
+            or descriptors.length != descriptor_count * 0x10
         ):
             return False
 
         previous_end = 0
-        for index in range(3):
+        for index in range(descriptor_count):
             descriptor = descriptors.offset + index * 0x10
             chunk_tuid = ighw.u64(descriptor)
             chunk_length = ighw.u32(descriptor + 0x08)
             chunk_offset = ighw.u32(descriptor + 0x0C)
             chunk_end = chunk_offset + chunk_length
             if (
-                chunk_tuid != program_tuid + index + 1
+                chunk_tuid != first_chunk_tuid + index
                 or chunk_length == 0
                 or chunk_offset < previous_end
                 or chunk_end > program.length
@@ -93,6 +104,12 @@ class Resistance3Reader(Resistance2Reader):
             if shader.extra_texture_lookup_paths
             else None
         )
+        shader_name = shader_path.rsplit("/", 1)[-1]
+        has_effect_texture = (
+            len(shader.extra_texture_ids) >= 1
+            and shader.extra_texture_ids[0] is not None
+            and shader.is_texture_slot_bound(4)
+        )
         normalized_effect_path = (
             (effect_path or "")
             .replace(
@@ -105,23 +122,40 @@ class Resistance3Reader(Resistance2Reader):
         descriptors = ighw.section(0x33002)
         selectors = ighw.section(0x33003)
         if (
-            shader_path.rsplit("/", 1)[-1].endswith("frozen")
+            shader_name.endswith("frozen")
             and shader.material_program_tuid == FROZEN_EFFECT_PROGRAM_TUID
             and shader.material_unknown_0 == 0x13
-            and len(shader.extra_texture_ids) >= 1
-            and shader.extra_texture_ids[0] is not None
-            and shader.is_texture_slot_bound(4)
+            and has_effect_texture
             and normalized_effect_path == FROZEN_EFFECT_TEXTURE_PATH
             and self._matches_embedded_program_descriptors(
                 ighw,
                 program,
                 descriptors,
-                FROZEN_EFFECT_PROGRAM_TUID,
+                first_chunk_tuid=FROZEN_EFFECT_PROGRAM_TUID + 1,
+                descriptor_count=3,
             )
             and selectors is not None
             and selectors.length > 0
         ):
             return FROZEN_EFFECT_FAMILY
+        if (
+            shader_name.endswith(("_dissolve", "_dissovle"))
+            and shader.material_program_tuid == DISSOLVE_EFFECT_PROGRAM_TUID
+            and shader.material_unknown_0 == 0x13
+            and has_effect_texture
+            and normalized_effect_path == DISSOLVE_EFFECT_TEXTURE_PATH
+            and self._matches_embedded_program_descriptors(
+                ighw,
+                program,
+                descriptors,
+                first_chunk_tuid=DISSOLVE_EFFECT_PROGRAM_TUID,
+                descriptor_count=4,
+                expected_program_length=DISSOLVE_EFFECT_PROGRAM_LENGTH,
+            )
+            and selectors is not None
+            and selectors.length == 0x0F
+        ):
+            return DISSOLVE_EFFECT_FAMILY
         return super()._shader_effect_family(ighw, shader)
 
     @staticmethod

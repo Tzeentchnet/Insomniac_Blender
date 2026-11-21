@@ -115,8 +115,19 @@ camera-space shading normal, applies the decompiled fixed blue tint and
 grazing response, and uses the same coverage to add gloss. Two molten Hulk
 materials share the texture but use program `0x2B4B1424D6F60B51` and remain
 untouched. The frozen-named Capelli hair material binds `fire_customa` and is
-also excluded. Dissolve, fire, pickup, upgrade, and all other effect families
-remain metadata until separately verified.
+also excluded.
+
+Gradient-dissolve shaders are now strictly identified as
+`R3_GRADIENT_DISSOLVE` metadata. Their gate requires program
+`0x13C601140542FB72`, control byte `0x13`, the exact bound
+`ssharit/gradientdissolve` fifth-slot path, four valid embedded-program
+descriptors, and either the authored `_dissolve` suffix or the retail
+`_dissovle` typo. A 27-level scan found 3,475 references to 247 unique family
+members. The shader uses a 512x512 grayscale map, a fixed blue color, and a
+vertex-stage/runtime transition value that is not stored in the material.
+Blender therefore preserves the family identity without connecting a
+speculative static dissolve graph. Fire, pickup, upgrade, and all other effect
+families remain metadata until separately verified.
 
 ### Materials
 

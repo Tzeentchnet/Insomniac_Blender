@@ -13,6 +13,10 @@ from insomniac_asset_io.core.source import GameSource
 from insomniac_asset_io.games.resistance_2.formats import AssetKind
 from insomniac_asset_io.games.resistance_2.reader import Resistance2Reader
 from insomniac_asset_io.games.resistance_3.reader import (
+    DISSOLVE_EFFECT_FAMILY,
+    DISSOLVE_EFFECT_PROGRAM_LENGTH,
+    DISSOLVE_EFFECT_PROGRAM_TUID,
+    DISSOLVE_EFFECT_TEXTURE_PATH,
     FROZEN_EFFECT_FAMILY,
     FROZEN_EFFECT_PROGRAM_TUID,
     FROZEN_EFFECT_TEXTURE_PATH,
@@ -160,6 +164,80 @@ def _frozen_shader(
                 index * 0x10,
             )
     data[0x1B0:0x1BB] = b"\x01\x07\x13" * 3 + b"\x01\x07"
+    return bytes(data[:cursor])
+
+
+def _dissolve_shader(
+    *,
+    lookup_name: str = "fixture_shader_dissolve",
+    valid_descriptors: bool = True,
+) -> bytes:
+    data = bytearray(0x3400)
+    struct.pack_into(">4sHHI", data, 0, b"IGHW", 1, 1, 6)
+    sections = (
+        (0x5000, 0x90, 1, 0x80),
+        (0x5D00, 0x110, 1, 0x40),
+        (0x33001, 0x150, 1, DISSOLVE_EFFECT_PROGRAM_LENGTH),
+        (0x33002, 0x2F80, 1, 0x40),
+        (0x33003, 0x2FC0, 1, 0x0F),
+    )
+    for index, section in enumerate(sections):
+        struct.pack_into(">IIII", data, 0x20 + index * 0x10, *section)
+
+    cursor = 0x3000
+
+    def add_string(value: str) -> int:
+        nonlocal cursor
+        encoded = value.encode("utf-8") + b"\0"
+        offset = cursor
+        data[offset : offset + len(encoded)] = encoded
+        cursor += len(encoded)
+        return offset
+
+    lookup_path = add_string(f"fixture/{lookup_name}/{lookup_name}")
+    texture_paths = tuple(
+        add_string(
+            DISSOLVE_EFFECT_TEXTURE_PATH
+            if index == 4
+            else f"fixture/r3_texture_{index}"
+        )
+        for index in range(6)
+    )
+    struct.pack_into(
+        ">IIII",
+        data,
+        0x70,
+        0x11300,
+        0x3000,
+        1,
+        cursor - 0x3000,
+    )
+
+    struct.pack_into(">6i", data, 0x90, 0, 1, 2, 3, 4, -1)
+    struct.pack_into(">2I", data, 0xA8, 0, 0)
+    struct.pack_into(">I", data, 0xB0, 0x1C04_1328)
+    struct.pack_into(">20f3f", data, 0xB4, *(1.0,) * 20, 0.0, 1.0, 0.0)
+    struct.pack_into(">Q", data, 0xD8, DISSOLVE_EFFECT_PROGRAM_TUID)
+
+    struct.pack_into(">QII", data, 0x110, SHADER_TUID, lookup_path, 0)
+    struct.pack_into(">6I", data, 0x120, *TEXTURE_IDS)
+    struct.pack_into(">6I", data, 0x138, *texture_paths)
+    data[0x150:0x2F80] = b"\xa5" * DISSOLVE_EFFECT_PROGRAM_LENGTH
+    if valid_descriptors:
+        chunk_lengths = (0x450, 0xE60, 0xDA0, 0xD70)
+        chunk_offsets = (0, 0x480, 0x1300, 0x20C0)
+        for index, (length, offset) in enumerate(
+            zip(chunk_lengths, chunk_offsets, strict=True)
+        ):
+            struct.pack_into(
+                ">QII",
+                data,
+                0x2F80 + index * 0x10,
+                DISSOLVE_EFFECT_PROGRAM_TUID + index,
+                length,
+                offset,
+            )
+    data[0x2FC0:0x2FCF] = b"\x01\x09\x13\x00" * 3 + b"\x01\x09\x13"
     return bytes(data[:cursor])
 
 
@@ -383,6 +461,58 @@ class Resistance3Tests(unittest.TestCase):
 
     def test_rejects_invalid_frozen_program_descriptors(self):
         shader_data = _frozen_shader(valid_descriptors=False)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "assetlookup.dat").write_bytes(
+                _assetlookup(len(shader_data))
+            )
+            (root / "shaders.dat").write_bytes(shader_data)
+
+            with GameSource.open(root) as source:
+                shader = Resistance3Reader(source).read_shader(SHADER_TUID)
+
+        self.assertIsNone(shader.effect_family)
+
+    def test_classifies_verified_gradient_dissolve_effect_family(self):
+        shader_data = _dissolve_shader()
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "assetlookup.dat").write_bytes(
+                _assetlookup(len(shader_data))
+            )
+            (root / "shaders.dat").write_bytes(shader_data)
+
+            with GameSource.open(root) as source:
+                shader = Resistance3Reader(source).read_shader(SHADER_TUID)
+
+        self.assertEqual(
+            shader.material_program_tuid,
+            DISSOLVE_EFFECT_PROGRAM_TUID,
+        )
+        self.assertEqual(shader.effect_family, DISSOLVE_EFFECT_FAMILY)
+        self.assertEqual(
+            shader.extra_texture_lookup_paths[0],
+            DISSOLVE_EFFECT_TEXTURE_PATH,
+        )
+
+    def test_accepts_authored_dissovle_typo(self):
+        shader_data = _dissolve_shader(
+            lookup_name="em_herbert_head_downres_dissovle",
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "assetlookup.dat").write_bytes(
+                _assetlookup(len(shader_data))
+            )
+            (root / "shaders.dat").write_bytes(shader_data)
+
+            with GameSource.open(root) as source:
+                shader = Resistance3Reader(source).read_shader(SHADER_TUID)
+
+        self.assertEqual(shader.effect_family, DISSOLVE_EFFECT_FAMILY)
+
+    def test_rejects_invalid_dissolve_program_descriptors(self):
+        shader_data = _dissolve_shader(valid_descriptors=False)
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             (root / "assetlookup.dat").write_bytes(

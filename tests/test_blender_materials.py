@@ -36,6 +36,9 @@ if bpy is not None:
         Zone,
     )
     from insomniac_asset_io.games.resistance_3.reader import (
+        DISSOLVE_EFFECT_FAMILY,
+        DISSOLVE_EFFECT_PROGRAM_TUID,
+        DISSOLVE_EFFECT_TEXTURE_PATH,
         FROZEN_EFFECT_FAMILY,
         FROZEN_EFFECT_PROGRAM_TUID,
         FROZEN_EFFECT_TEXTURE_PATH,
@@ -1443,6 +1446,50 @@ class BlenderMaterialTests(unittest.TestCase):
         )
         self.assertNotIn(
             (0x400, FROZEN_EFFECT_TEXTURE_PATH),
+            reader.texture_reads,
+        )
+
+    def test_r3_dissolve_family_remains_runtime_metadata_only(self) -> None:
+        frozen, textures = self._frozen_fixture()
+        shader = replace(
+            frozen,
+            tuid=frozen.tuid + 1,
+            lookup_path="fixture/cap_boots_dissolve/cap_boots_dissolve",
+            extra_texture_lookup_paths=(
+                DISSOLVE_EFFECT_TEXTURE_PATH,
+                None,
+            ),
+            material_program_tuid=DISSOLVE_EFFECT_PROGRAM_TUID,
+            material_word=0x1C04_1328,
+            effect_family=DISSOLVE_EFFECT_FAMILY,
+        )
+        reader = _MaterialReader("RESISTANCE_3", shader, textures)
+        material = _MaterialFactory(reader, True, []).material(shader.tuid)
+        nodes = material.node_tree.nodes
+
+        self.assertEqual(
+            material["insomniac_effect_family"],
+            DISSOLVE_EFFECT_FAMILY,
+        )
+        self.assertEqual(
+            material["insomniac_material_program_tuid"],
+            f"0x{DISSOLVE_EFFECT_PROGRAM_TUID:016X}",
+        )
+        self.assertNotIn("insomniac_frozen_overlay", material)
+        self.assertFalse(
+            any(node.name.startswith("Frozen_") for node in nodes)
+        )
+        self.assertTrue(
+            self._has_link(
+                material,
+                nodes["Diffuse_00000100"],
+                nodes["Principled BSDF"],
+                "Base Color",
+                from_socket="Color",
+            )
+        )
+        self.assertNotIn(
+            (0x400, DISSOLVE_EFFECT_TEXTURE_PATH),
             reader.texture_reads,
         )
 

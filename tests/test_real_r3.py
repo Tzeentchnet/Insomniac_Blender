@@ -11,6 +11,9 @@ from insomniac_asset_io.core.source import GameSource
 from insomniac_asset_io.games.resistance_2.animations import _bind_trs
 from insomniac_asset_io.games.resistance_2.formats import AssetKind
 from insomniac_asset_io.games.resistance_3.reader import (
+    DISSOLVE_EFFECT_FAMILY,
+    DISSOLVE_EFFECT_PROGRAM_TUID,
+    DISSOLVE_EFFECT_TEXTURE_PATH,
     FROZEN_EFFECT_FAMILY,
     FROZEN_EFFECT_PROGRAM_TUID,
     FROZEN_EFFECT_TEXTURE_PATH,
@@ -147,7 +150,7 @@ class RealResistance3Tests(unittest.TestCase):
 
 
 @unittest.skipUnless(FROZEN_SOURCE, "R3_FROZEN_SOURCE is not set")
-class RealResistance3FrozenTests(unittest.TestCase):
+class RealResistance3EffectTests(unittest.TestCase):
     def test_classifies_new_york_terraformer_frozen_family(self):
         with GameSource.open(Path(FROZEN_SOURCE)) as source:
             reader = Resistance3Reader(source)
@@ -200,6 +203,64 @@ class RealResistance3FrozenTests(unittest.TestCase):
                 self.assertIsNone(
                     reader.read_shader(shader_tuid).effect_family
                 )
+
+    def test_classifies_new_york_terraformer_dissolve_family(self):
+        with GameSource.open(Path(FROZEN_SOURCE)) as source:
+            reader = Resistance3Reader(source)
+            shaders = tuple(
+                reader.read_shader(pointer.tuid)
+                for pointer in reader.asset_pointers(AssetKind.SHADER)
+            )
+
+            dissolve = tuple(
+                shader
+                for shader in shaders
+                if shader.effect_family == DISSOLVE_EFFECT_FAMILY
+            )
+            self.assertEqual(len(dissolve), 44)
+            self.assertEqual(
+                {shader.material_program_tuid for shader in dissolve},
+                {DISSOLVE_EFFECT_PROGRAM_TUID},
+            )
+            self.assertTrue(
+                all(shader.is_texture_slot_bound(4) for shader in dissolve)
+            )
+            self.assertEqual(
+                {
+                    path.replace("\\", "/").casefold()
+                    for shader in dissolve
+                    for path in shader.extra_texture_lookup_paths[:1]
+                },
+                {DISSOLVE_EFFECT_TEXTURE_PATH},
+            )
+
+            representative = reader.read_shader(0x036B_71E4_E3C6_5EF6)
+            texture = reader.read_texture(
+                representative.extra_texture_ids[0],
+                lookup_path=representative.extra_texture_lookup_paths[0],
+            )
+            self.assertEqual(texture.info.tuid, 0x1227_8F4B_908A_4115)
+            self.assertEqual(texture.info.format_code, 0x05)
+            self.assertEqual(texture.rgba.shape, (512, 512, 4))
+            self.assertTrue(np.all(texture.rgba[..., 3] == 255))
+            self.assertTrue(
+                np.array_equal(
+                    texture.rgba[..., 0],
+                    texture.rgba[..., 1],
+                )
+            )
+            self.assertTrue(
+                np.array_equal(
+                    texture.rgba[..., 1],
+                    texture.rgba[..., 2],
+                )
+            )
+
+            self.assertIsNone(
+                reader.read_shader(
+                    0xFC71_4DBD_E3FD_89DD
+                ).effect_family
+            )
 
 
 @unittest.skipUnless(FOLIAGE_SOURCE, "R3_FOLIAGE_SOURCE is not set")

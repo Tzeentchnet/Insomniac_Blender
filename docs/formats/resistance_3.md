@@ -320,8 +320,8 @@ The fifth slot is actively bound by 967 of the 4,579 unique shaders on the
 USA disc. Common paths identify shader-family effects such as
 `gradientdissolve`, `fire_customa`, `ig_frozen_customa`, pickup sheen, and
 weapon-upgrade overlays. The sixth slot is bound by only four shaders. These
-are not universal PBR channels, so only independently identified families are
-connected.
+are not universal PBR channels, so they receive semantics only after
+independent family analysis.
 
 Shader material section `0x5000` remains `0x80` bytes but shifts its control
 word and parameter values:
@@ -378,6 +378,46 @@ Texture path alone is not a family discriminator. The molten Hulk program
 embedded program and additional molten color/emission math. Conversely,
 `cap_hair_planes_frozen` uses the frozen program identity with `fire_customa`.
 Both cases are excluded from frozen composition.
+
+### Gradient-dissolve family
+
+The gradient-dissolve program identity is `0x13C601140542FB72`. A complete
+27-level USA-disc scan classified 3,475 references to 247 unique shaders in 26
+levels. The family requires all of the following:
+
+- a shader basename ending in `_dissolve`, or the authored
+  `em_herbert_head_downres_dissovle` spelling;
+- control byte `material_unknown_0` equal to `0x13`;
+- an active fifth slot whose path is exactly `ssharit/gradientdissolve`;
+- material-program TUID `0x13C601140542FB72`;
+- a `0x2E30`-byte `0x33001` program section;
+- four bounded, non-overlapping `0x33002` descriptors with consecutive TUIDs
+  `0x13C601140542FB72` through `0x13C601140542FB75` that cover the program;
+- a `0x0F`-byte `0x33003` selector section.
+
+The `0x33002` header again reports count `1`; its `0x40`-byte section actually
+contains four `0x10`-byte records. Three program variants occur across the
+corpus, with `0x33001` SHA-256 values:
+
+- `39d84740b1a671f17fcad6bd5d2943972ed97fe51ea3bacdc146078ed5dfdba8`;
+- `57be81638271f417c7cc8db4481a9819581303230ee9119e5a13b6b348146c4f`;
+- `77c073faca8456d5b85e83442eb713fd8414416306c2f7172bfdd9bd0858bc68`.
+
+Across the three decoded texture fixtures, four level-local IDs resolve to the
+same source texture TUID `0x12278F4B908A4115`: a 512x512 BC1, opaque grayscale
+map whose RGB channels are identical. Decompiled specialized fragments sample
+it either from the normalized reconstructed surface-normal XY or from a
+vertex-provided secondary varying. They shape that sample into the surface
+response, include a fixed `(0.2, 0.25, 1.0)` blue color, and scale the response
+with a value derived from vertex-stage input.
+
+That controlling transition value is not serialized in material section
+`0x5000`, and the observed effect-map sequence does not establish a static
+alpha threshold that Blender can reproduce faithfully. The reader therefore
+classifies the family and preserves its program and effect metadata, but the
+Blender bridge intentionally leaves the gradient texture disconnected.
+Sixty-seven retail references have a `_dissolve` name without the verified
+program, bound slot, path, or embedded sections and are excluded.
 
 Some level-local textures have a zero-length entry in the high-mip pointer
 table while their texture TUID still owns a complete mip-zero payload in
