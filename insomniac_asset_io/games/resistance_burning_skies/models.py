@@ -14,7 +14,7 @@ MODEL_ROOT_TYPE = 0x1C
 MATERIAL_DEPENDENCY_TYPE = 0x04
 MODEL_MATERIAL_COUNT_OFFSET = 0x00
 MODEL_MATERIAL_RECORDS_POINTER_OFFSET = 0x04
-MODEL_BONE_COUNT_OFFSET = 0x0C
+MODEL_BONE_RECORD_COUNT_OFFSET = 0x10
 MODEL_BONE_RECORDS_POINTER_OFFSET = 0x14
 MODEL_BONE_RECORD_SIZE = 0x70
 MODEL_BONE_INVERSE_MATRIX_OFFSET = 0x00
@@ -27,6 +27,9 @@ MODEL_LOD_MESH_ENTRIES_POINTER_OFFSET = 0x04
 MODEL_MESH_ENTRY_SIZE = 0x90
 MODEL_MESH_GEOMETRY_OFFSET = 0x08
 MODEL_MESH_BONE_RANGE_OFFSET = 0x44
+MODEL_MESH_BONE_PALETTE_COUNT_OFFSET = 0x46
+MODEL_MESH_BONE_PALETTE_OFFSET = 0x70
+MODEL_MESH_BONE_PALETTE_CAPACITY = 32
 MODEL_GBUFFER_POINTER_OFFSET = 0x0C
 MODEL_PHYSICS_POINTER_OFFSET = 0x28
 MODEL_TRAUMA_RECORD_SIZE = 0x18
@@ -45,6 +48,7 @@ GBUFFER_STRIDES = {
     GBUFFER_FORMAT_RIGID: 36,
     GBUFFER_FORMAT_SKINNED: 44,
 }
+SKIN_WEIGHT_SUM_TOLERANCE = 0.001
 
 
 @dataclass(slots=True)
@@ -78,7 +82,9 @@ def _decode_skeleton(
     *,
     serialized_size: int,
 ) -> Skeleton | None:
-    bone_count = resource.u32(resource.physical_offset(MODEL_BONE_COUNT_OFFSET))
+    bone_count = resource.u32(
+        resource.physical_offset(MODEL_BONE_RECORD_COUNT_OFFSET)
+    )
     if not bone_count:
         return None
     if bone_count > MAX_BONES:
@@ -289,7 +295,7 @@ def _decode_gib_bone_indices(
         )
 
     bone_count = resource.u32(
-        resource.physical_offset(MODEL_BONE_COUNT_OFFSET)
+        resource.physical_offset(MODEL_BONE_RECORD_COUNT_OFFSET)
     )
     if bone_count > MAX_BONES:
         raise FormatError(
@@ -407,6 +413,103 @@ def _decode_lod_mesh_entries(
     return tuple(entries)
 
 
+def _decode_skin_influences(
+    resource: NsirsrcFile,
+    *,
+    entry_offset: int,
+    vertex_data_offset: int,
+    vertex_count: int,
+    stride: int,
+    model_bone_count: int,
+    mesh_index: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    if not model_bone_count:
+        raise FormatError(
+            f"{resource.label}: skinned mesh {mesh_index} has no model bones"
+        )
+
+    palette_count = resource.data[
+        entry_offset + MODEL_MESH_BONE_PALETTE_COUNT_OFFSET
+    ]
+    if not 0 < palette_count <= MODEL_MESH_BONE_PALETTE_CAPACITY:
+        raise FormatError(
+            f"{resource.label}: mesh {mesh_index} has invalid bone palette "
+            f"count {palette_count}"
+        )
+    palette = np.frombuffer(
+        resource.data,
+        dtype=np.uint8,
+        count=palette_count,
+        offset=entry_offset + MODEL_MESH_BONE_PALETTE_OFFSET,
+    )
+    if int(palette.max(initial=0)) >= model_bone_count:
+        raise FormatError(
+            f"{resource.label}: mesh {mesh_index} bone palette exceeds its "
+            f"{model_bone_count} model bones"
+        )
+
+    weights = np.ndarray(
+        (vertex_count, 4),
+        dtype="<f2",
+        buffer=resource.data,
+        offset=vertex_data_offset + 32,
+        strides=(stride, 2),
+    ).astype(np.float32)
+    local_indices = np.ndarray(
+        (vertex_count, 4),
+        dtype=np.uint8,
+        buffer=resource.data,
+        offset=vertex_data_offset + 40,
+        strides=(stride, 1),
+    )
+    if not np.all(np.isfinite(weights)):
+        raise FormatError(
+            f"{resource.label}: mesh {mesh_index} contains non-finite skin "
+            "weights"
+        )
+    if np.any(weights < 0.0):
+        raise FormatError(
+            f"{resource.label}: mesh {mesh_index} contains negative skin "
+            "weights"
+        )
+
+    weight_sums = weights.sum(axis=1)
+    if np.any(weight_sums <= 0.0):
+        raise FormatError(
+            f"{resource.label}: mesh {mesh_index} contains a zero-sum skin "
+            "vertex"
+        )
+    if np.any(np.abs(weight_sums - 1.0) > SKIN_WEIGHT_SUM_TOLERANCE):
+        raise FormatError(
+            f"{resource.label}: mesh {mesh_index} contains skin weights "
+            "outside the verified normalization tolerance"
+        )
+
+    active = weights > 0.0
+    if np.any(local_indices[active] >= palette_count):
+        raise FormatError(
+            f"{resource.label}: mesh {mesh_index} skin index exceeds its "
+            f"{palette_count}-bone palette"
+        )
+    bone_indices = np.zeros((vertex_count, 4), dtype=np.uint16)
+    bone_indices[active] = palette[local_indices[active]]
+
+    for slot in range(1, 4):
+        for previous_slot in range(slot):
+            duplicate = (
+                (weights[:, slot] > 0.0)
+                & (weights[:, previous_slot] > 0.0)
+                & (bone_indices[:, slot] == bone_indices[:, previous_slot])
+            )
+            if np.any(duplicate):
+                weights[duplicate, previous_slot] += weights[duplicate, slot]
+                weights[duplicate, slot] = 0.0
+                bone_indices[duplicate, slot] = 0
+
+    weights /= weight_sums[:, np.newaxis]
+    return bone_indices, weights
+
+
 def decode_smf(data: bytes, *, label: str) -> DecodedSmf:
     resource = NsirsrcFile(data, label=label)
     if resource.root_type != MODEL_ROOT_TYPE:
@@ -421,6 +524,13 @@ def decode_smf(data: bytes, *, label: str) -> DecodedSmf:
         serialized_size=serialized_size,
     )
     mesh_count = len(lod_mesh_entries)
+    model_bone_count = resource.u32(
+        resource.physical_offset(MODEL_BONE_RECORD_COUNT_OFFSET)
+    )
+    if model_bone_count > MAX_BONES:
+        raise FormatError(
+            f"{label}: bone count {model_bone_count} exceeds {MAX_BONES}"
+        )
     all_material_names = tuple(
         dependency.name
         for dependency in resource.dependencies()
@@ -628,19 +738,33 @@ def decode_smf(data: bytes, *, label: str) -> DecodedSmf:
         packed_bone_range = resource.u32(
             entry_offset + MODEL_MESH_BONE_RANGE_OFFSET
         )
-        mesh_bone_count = packed_bone_range >> 16
+        mesh_bone_count = (packed_bone_range >> 16) & 0xFF
         mesh_bone_start = packed_bone_range & 0xFFFF
         is_damage_permutation = (
             format_code == GBUFFER_FORMAT_RIGID
             and mesh_bone_count == 1
             and mesh_bone_start in gib_bone_indices
         )
+        bone_indices = None
+        bone_weights = None
+        if format_code == GBUFFER_FORMAT_SKINNED:
+            bone_indices, bone_weights = _decode_skin_influences(
+                resource,
+                entry_offset=entry_offset,
+                vertex_data_offset=vertex_data_offset,
+                vertex_count=vertex_count,
+                stride=stride,
+                model_bone_count=model_bone_count,
+                mesh_index=mesh_index,
+            )
         meshes.append(
             MeshGeometry(
                 shader_index=shader_index,
                 positions=positions,
                 uvs=uvs,
                 indices=indices,
+                bone_indices=bone_indices,
+                bone_weights=bone_weights,
                 segment_index=(
                     mesh_bone_start if is_damage_permutation else 0
                 ),

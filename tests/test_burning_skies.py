@@ -82,6 +82,12 @@ def _model_resource(
     material_indices: tuple[int, ...] = (0,),
     lod_material_indices: tuple[tuple[int, ...], ...] | None = None,
     bone_parents: tuple[int, ...] = (),
+    primary_bone_count: int | None = None,
+    skin_palette: tuple[int, ...] | None = None,
+    skin_weights: tuple[tuple[float, float, float, float], ...] | None = None,
+    skin_local_indices: tuple[tuple[int, int, int, int], ...] | None = None,
+    skin_range_lower: int = 0,
+    skin_flags: int = 0,
     gib_mesh_indices: tuple[int, ...] = (),
     gib_bone_index: int = 0,
 ) -> bytes:
@@ -108,6 +114,11 @@ def _model_resource(
         for lod_indices in lod_material_indices
         for index in lod_indices
     )
+    stride = 44 if skin_palette is not None else 36
+    vertex_count = 4
+    index_count = 6
+    index_offset = (vertex_count * stride + 0x0F) & ~0x0F
+    allocation_size = (index_offset + index_count * 2 + 0x0F) & ~0x0F
     entries_end = next_entry_offset
     summary_pointer = (entries_end + 0x0F) & ~0x0F
     descriptor_pointer = summary_pointer + 0x20
@@ -125,7 +136,9 @@ def _model_resource(
         if gib_mesh_indices
         else 0
     )
-    bone_records_pointer = 0x150
+    bone_records_pointer = (
+        max(reference_table_end, physics_end) + 0x0F
+    ) & ~0x0F
     bone_records_end = bone_records_pointer + len(bone_parents) * 0x70
     serialized_end = max(reference_table_end, bone_records_end, physics_end)
     stream_offset = (serialized_end + 0xFF) & ~0xFF
@@ -137,13 +150,17 @@ def _model_resource(
         DATA_BASE + offset + 0x10
         for offset in stream_offsets
     )
-    data = _resource(0x1C, buffer_origins[-1] + 0xA0, "TestCube")
+    data = _resource(
+        0x1C,
+        buffer_origins[-1] + allocation_size,
+        "TestCube",
+    )
     for lod_level, lod_stream_offset in enumerate(stream_offsets):
         _stream_descriptor(
             data,
             offset=0x100 + lod_level * 0x20,
             stream_offset=lod_stream_offset,
-            stream_size=0xB0,
+            stream_size=allocation_size + 0x10,
             scale=(lod_level + 1) / len(stream_offsets),
         )
     if len(material_names) > 2:
@@ -162,11 +179,13 @@ def _model_resource(
         len(bone_parents),
         gib_bone_index + 1 if gib_mesh_indices else 0,
     )
+    if primary_bone_count is None:
+        primary_bone_count = declared_bone_count
     struct.pack_into(
         "<II",
         data,
         DATA_BASE + 0x0C,
-        declared_bone_count,
+        primary_bone_count,
         declared_bone_count,
     )
     struct.pack_into(
@@ -246,6 +265,19 @@ def _model_resource(
                 DATA_BASE + entry_offset + 0x44,
                 (1 << 16) | gib_bone_index,
             )
+        if skin_palette is not None:
+            struct.pack_into(
+                "<I",
+                data,
+                DATA_BASE + entry_offset + 0x44,
+                skin_range_lower
+                | (len(skin_palette) << 16)
+                | (skin_flags << 24),
+            )
+            data[
+                DATA_BASE + entry_offset + 0x70 :
+                DATA_BASE + entry_offset + 0x70 + len(skin_palette)
+            ] = bytes(skin_palette)
     summary_offset = DATA_BASE + summary_pointer
     descriptor_offset = DATA_BASE + descriptor_pointer
     struct.pack_into(
@@ -253,10 +285,10 @@ def _model_resource(
         data,
         summary_offset,
         1,
-        0xA0,
-        6,
-        4,
-        0x15,
+        allocation_size,
+        index_count,
+        vertex_count,
+        0x17 if skin_palette is not None else 0x15,
         0,
         descriptor_pointer,
         0,
@@ -265,13 +297,13 @@ def _model_resource(
         "<8I",
         data,
         descriptor_offset,
-        0xA0,
-        0xA0,
-        4,
+        allocation_size,
+        allocation_size,
+        vertex_count,
         0,
         2,
-        6,
-        0x90,
+        index_count,
+        index_offset,
         0,
     )
     reference_count_offset = DATA_BASE + reference_count_pointer
@@ -321,9 +353,18 @@ def _model_resource(
         ((-1.0, 1.0, 0.0), (0.0, 1.0)),
         ((1.0, 1.0, 0.0), (1.0, 1.0)),
     )
+    if skin_weights is None:
+        skin_weights = ((1.0, 0.0, 0.0, 0.0),) * vertex_count
+    if skin_local_indices is None:
+        skin_local_indices = ((0, 0, 0, 0),) * vertex_count
+    if (
+        len(skin_weights) != vertex_count
+        or len(skin_local_indices) != vertex_count
+    ):
+        raise ValueError("Synthetic skin data must contain four vertices")
     for buffer_origin in buffer_origins:
         for index, (position, uv) in enumerate(vertices):
-            offset = buffer_origin + index * 36
+            offset = buffer_origin + index * stride
             struct.pack_into("<3f", data, offset, *position)
             struct.pack_into("<f", data, offset + 12, uv[0])
             struct.pack_into(
@@ -344,11 +385,20 @@ def _model_resource(
                 0.0,
                 1.0,
             )
-            struct.pack_into("<I", data, offset + 32, 0x80000000)
+            if skin_palette is None:
+                struct.pack_into("<I", data, offset + 32, 0x80000000)
+            else:
+                struct.pack_into("<4e", data, offset + 32, *skin_weights[index])
+                struct.pack_into(
+                    "<4B",
+                    data,
+                    offset + 40,
+                    *skin_local_indices[index],
+                )
         struct.pack_into(
             "<6H",
             data,
-            buffer_origin + 0x90,
+            buffer_origin + index_offset,
             0,
             1,
             2,
@@ -470,6 +520,161 @@ class BurningSkiesFormatTests(unittest.TestCase):
             np.array(((0.0, 0.0, 0.0), (0.0, 0.0, 1.0))),
             atol=1e-6,
         )
+
+    def test_uses_total_bone_record_count_for_skeleton(self):
+        model = decode_smf(
+            _model_resource(
+                renderable=False,
+                bone_parents=(-1, 0, 1, 2),
+                primary_bone_count=2,
+            ),
+            label="models/TestExtendedSkeleton.smf",
+        )
+
+        assert model.skeleton is not None
+        self.assertEqual(model.skeleton.bone_count, 4)
+        self.assertEqual(model.skeleton.bones[3].parent_index, 2)
+
+    def test_decodes_skinned_half_weights_and_local_bone_palette(self):
+        source_weights = (
+            (0.5, 0.25, 0.25, 0.0),
+            (0.33325, 0.33325, 0.33325, 0.0),
+            (1.0, 0.0, 0.0, 0.0),
+            (0.1, 0.2, 0.3, 0.4),
+        )
+        model = decode_smf(
+            _model_resource(
+                bone_parents=(-1, 0, 0, 0),
+                skin_palette=(3, 1, 1, 2),
+                skin_weights=source_weights,
+                skin_local_indices=(
+                    (0, 1, 2, 7),
+                    (0, 1, 3, 7),
+                    (2, 255, 255, 255),
+                    (0, 1, 2, 3),
+                ),
+                skin_range_lower=10,
+                skin_flags=9,
+            ),
+            label="models/TestSkinned.smf",
+        )
+
+        self.assertIsNone(model.skeleton)
+        mesh = model.meshes[0]
+        np.testing.assert_array_equal(
+            mesh.bone_indices,
+            np.array(
+                (
+                    (3, 1, 0, 0),
+                    (3, 1, 2, 0),
+                    (1, 0, 0, 0),
+                    (3, 1, 0, 2),
+                ),
+                dtype=np.uint16,
+            ),
+        )
+        expected_weights = np.asarray(
+            source_weights,
+            dtype=np.float16,
+        ).astype(np.float32)
+        expected_sums = expected_weights.sum(axis=1)
+        expected_weights[0, 1] += expected_weights[0, 2]
+        expected_weights[0, 2] = 0.0
+        expected_weights[3, 1] += expected_weights[3, 2]
+        expected_weights[3, 2] = 0.0
+        expected_weights /= expected_sums[:, np.newaxis]
+        np.testing.assert_allclose(
+            mesh.bone_weights,
+            expected_weights,
+            atol=1e-7,
+        )
+        np.testing.assert_allclose(
+            mesh.bone_weights.sum(axis=1),
+            np.ones(4, dtype=np.float32),
+            atol=1e-7,
+        )
+
+    def test_rejects_invalid_skinned_influences(self):
+        valid_weights = ((1.0, 0.0, 0.0, 0.0),) * 4
+        valid_indices = ((0, 0, 0, 0),) * 4
+        cases = (
+            (
+                "bone palette count",
+                {
+                    "skin_palette": (),
+                },
+            ),
+            (
+                "skin index exceeds",
+                {
+                    "skin_palette": (1, 2),
+                    "skin_local_indices": (
+                        (2, 0, 0, 0),
+                        *valid_indices[1:],
+                    ),
+                },
+            ),
+            (
+                "bone palette exceeds",
+                {
+                    "skin_palette": (4,),
+                },
+            ),
+            (
+                "normalization tolerance",
+                {
+                    "skin_palette": (1,),
+                    "skin_weights": (
+                        (0.5, 0.0, 0.0, 0.0),
+                        *valid_weights[1:],
+                    ),
+                },
+            ),
+            (
+                "negative skin weights",
+                {
+                    "skin_palette": (1,),
+                    "skin_weights": (
+                        (0.5, -0.1, 0.6, 0.0),
+                        *valid_weights[1:],
+                    ),
+                },
+            ),
+            (
+                "zero-sum skin vertex",
+                {
+                    "skin_palette": (1,),
+                    "skin_weights": (
+                        (0.0, 0.0, 0.0, 0.0),
+                        *valid_weights[1:],
+                    ),
+                },
+            ),
+            (
+                "non-finite skin weights",
+                {
+                    "skin_palette": (1,),
+                    "skin_weights": (
+                        (float("nan"), 0.0, 0.0, 0.0),
+                        *valid_weights[1:],
+                    ),
+                },
+            ),
+        )
+
+        for message, overrides in cases:
+            with self.subTest(message=message):
+                parameters = {
+                    "bone_parents": (-1, 0, 0, 0),
+                    "skin_weights": valid_weights,
+                    "skin_local_indices": valid_indices,
+                    **overrides,
+                }
+                with self.assertRaisesRegex(FormatError, message):
+                    decode_smf(
+                        _model_resource(**parameters),
+                        label="models/TestInvalidSkin.smf",
+                    )
 
     def test_uses_serialized_packet_material_map(self):
         model = decode_smf(

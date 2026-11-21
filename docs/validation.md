@@ -479,6 +479,27 @@ texture IDs, and the shared nine-mip 256x256 A8R8G8B8 source map. Blender
 validation preserves family/program metadata while leaving the draw-time
 upgrade map unloaded and the source base-color connection unchanged.
 
+## Burning Skies skin-weight validation
+
+The decrypted European `build.psa` regression scans all 821 SMFs through the
+production decoder. It requires exactly 240 skinned models, 1,219 skinned
+packets, and 955,468 skinned vertices. Every decoded influence array must be
+paired with model-wide `uint16` bone indices, contain four normalized
+`float32` slots per vertex, remain non-negative, and sum to one within
+`1e-7` after duplicate model-bone influences are coalesced. An exact
+`CH_BASE_ADrone` vertex fixture verifies both palette ownership and a
+three-influence normalized result.
+
+The independent corpus scan also checks the source representation before
+normalization: every active local byte fits the mesh-entry palette, every
+palette byte fits the root's total bone-record count, all half-floats are
+finite and non-negative, and every source row is within `0.001` of one.
+Portable malformed fixtures reject missing palettes, out-of-range local and
+model indices, non-finite or negative weights, zero-sum rows, and rows outside
+the verified tolerance. A separate skeleton fixture proves that root
+`+0x10`, rather than the sometimes-smaller primary count at `+0x0C`, owns the
+complete record array.
+
 Analyze one extracted cached archive, or every cached level archive in an ISO:
 
 ```powershell

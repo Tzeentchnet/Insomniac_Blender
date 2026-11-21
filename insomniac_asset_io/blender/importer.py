@@ -4345,7 +4345,10 @@ def _build_mesh(
     material_parts: list[np.ndarray] = []
     bone_index_parts: list[np.ndarray] = []
     bone_weight_parts: list[np.ndarray] = []
-    any_skin = any(item.bone_indices is not None for item in geometry_list)
+    any_skin = any(
+        item.bone_indices is not None or item.bone_weights is not None
+        for item in geometry_list
+    )
     any_secondary_uvs = any(
         item.secondary_uvs is not None for item in geometry_list
     )
@@ -4501,19 +4504,39 @@ def _build_mesh(
             np.full(len(triangles), material_index, dtype=np.int32)
         )
         if any_skin:
-            if geometry.bone_indices is None:
+            if (
+                geometry.bone_indices is None
+                or geometry.bone_weights is None
+            ):
+                if (
+                    geometry.bone_indices is not None
+                    or geometry.bone_weights is not None
+                ):
+                    raise ValueError(
+                        "Mesh skinning requires both bone indices and weights"
+                    )
                 bone_index_parts.append(
                     np.zeros((len(positions), 4), dtype=np.uint16)
                 )
                 bone_weight_parts.append(
-                    np.zeros((len(positions), 4), dtype=np.uint8)
+                    np.zeros((len(positions), 4), dtype=np.float32)
                 )
             else:
                 bone_index_parts.append(
                     np.asarray(geometry.bone_indices, dtype=np.uint16)
                 )
+                raw_weights = np.asarray(geometry.bone_weights)
+                if np.issubdtype(raw_weights.dtype, np.integer):
+                    normalized_weights = raw_weights.astype(np.float32) / float(
+                        np.iinfo(raw_weights.dtype).max
+                    )
+                else:
+                    normalized_weights = np.asarray(
+                        raw_weights,
+                        dtype=np.float32,
+                    )
                 bone_weight_parts.append(
-                    np.asarray(geometry.bone_weights, dtype=np.uint8)
+                    normalized_weights
                 )
         vertex_offset += len(positions)
 
@@ -4785,7 +4808,7 @@ def _assign_skin(
             selected = np.unique(vertices[weights == raw_weight])
             group.add(
                 selected.astype(int).tolist(),
-                float(raw_weight) / 255.0,
+                float(raw_weight),
                 "REPLACE",
             )
 

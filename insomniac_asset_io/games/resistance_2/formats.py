@@ -106,7 +106,7 @@ class MeshGeometry:
     shrub_height_weights: FloatArray | None = None
     shrub_runtime_remap: UInt16Array | None = None
     bone_indices: UInt16Array | None = None
-    bone_weights: UInt8Array | None = None
+    bone_weights: FloatArray | UInt8Array | None = None
     segment_index: int = 0
     is_damage_permutation: bool = False
     lod_level: int = 0

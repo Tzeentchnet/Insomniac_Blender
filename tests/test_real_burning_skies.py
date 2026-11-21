@@ -4,8 +4,11 @@ import os
 import unittest
 from pathlib import Path
 
+import numpy as np
+
 from insomniac_asset_io.core.source import GameSource
 from insomniac_asset_io.games.resistance_2.formats import AssetKind
+from insomniac_asset_io.games.resistance_burning_skies.models import decode_smf
 from insomniac_asset_io.games.resistance_burning_skies.reader import (
     BurningSkiesReader,
 )
@@ -277,6 +280,72 @@ class RealBurningSkiesTests(unittest.TestCase):
             self.assertEqual(model.skeleton.root_bone, 0)
             self.assertEqual(model.skeleton.bones[1].parent_index, 0)
             self.assertEqual(model.skeleton.bones[2].parent_index, 1)
+
+    def test_decodes_complete_skinned_gbuffer_corpus(self):
+        skinned_models = 0
+        skinned_packets = 0
+        skinned_vertices = 0
+
+        with GameSource.open(Path(REAL_SOURCE)) as source:
+            for path in source.paths:
+                if not path.casefold().endswith(".smf"):
+                    continue
+                model = decode_smf(source.read(path), label=path)
+
+                model_is_skinned = False
+                for mesh in model.meshes:
+                    self.assertEqual(
+                        mesh.bone_indices is None,
+                        mesh.bone_weights is None,
+                    )
+                    if mesh.bone_weights is None:
+                        continue
+                    model_is_skinned = True
+                    skinned_packets += 1
+                    skinned_vertices += len(mesh.positions)
+                    self.assertEqual(mesh.bone_indices.dtype, np.uint16)
+                    self.assertEqual(mesh.bone_weights.dtype, np.float32)
+                    self.assertEqual(
+                        mesh.bone_indices.shape,
+                        (len(mesh.positions), 4),
+                    )
+                    self.assertEqual(
+                        mesh.bone_weights.shape,
+                        (len(mesh.positions), 4),
+                    )
+                    self.assertTrue(np.all(mesh.bone_weights >= 0.0))
+                    np.testing.assert_allclose(
+                        mesh.bone_weights.sum(axis=1),
+                        1.0,
+                        atol=1e-7,
+                    )
+                skinned_models += model_is_skinned
+
+            adrone = decode_smf(
+                source.read("models/CH_BASE_ADrone.smf"),
+                label="models/CH_BASE_ADrone.smf",
+            )
+
+        self.assertEqual(skinned_models, 240)
+        self.assertEqual(skinned_packets, 1_219)
+        self.assertEqual(skinned_vertices, 955_468)
+        np.testing.assert_array_equal(
+            adrone.meshes[0].bone_indices[870],
+            np.array((30, 7, 12, 0), dtype=np.uint16),
+        )
+        np.testing.assert_allclose(
+            adrone.meshes[0].bone_weights[870],
+            np.array(
+                (
+                    0.6999740600585938,
+                    0.27525147795677185,
+                    0.024774465709924698,
+                    0.0,
+                ),
+                dtype=np.float32,
+            ),
+            atol=1e-7,
+        )
 
 
 if __name__ == "__main__":

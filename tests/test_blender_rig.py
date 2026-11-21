@@ -23,6 +23,8 @@ if bpy is not None:
     )
     from insomniac_asset_io.blender.importer import (
         AssetImportOptions,
+        _assign_skin,
+        _build_mesh,
         _create_actions,
         _create_armature,
         import_moby_animation,
@@ -33,6 +35,7 @@ if bpy is not None:
     from insomniac_asset_io.games.resistance_2.formats import (
         Bone,
         DecodedClip,
+        MeshGeometry,
         MobyAsset,
         Skeleton,
     )
@@ -55,6 +58,61 @@ class BlenderRigTests(unittest.TestCase):
             bpy.data.armatures.remove(armature)
         for collection in tuple(bpy.data.collections):
             bpy.data.collections.remove(collection)
+
+    def test_preserves_normalized_float_skin_weights(self) -> None:
+        weights = np.array(
+            (
+                (0.1, 0.9, 0.0, 0.0),
+                (0.25, 0.75, 0.0, 0.0),
+                (1.0, 0.0, 0.0, 0.0),
+            ),
+            dtype=np.float32,
+        )
+        geometry = MeshGeometry(
+            shader_index=0,
+            positions=np.array(
+                ((0.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 1.0, 0.0)),
+                dtype=np.float32,
+            ),
+            uvs=np.zeros((3, 2), dtype=np.float32),
+            indices=np.array((0, 1, 2), dtype=np.int32),
+            bone_indices=np.array(
+                ((0, 1, 0, 0), (0, 1, 0, 0), (0, 0, 0, 0)),
+                dtype=np.uint16,
+            ),
+            bone_weights=weights,
+        )
+        combined = _build_mesh("Float_Weights", (geometry,), [])
+        np.testing.assert_array_equal(combined.bone_weights, weights)
+
+        mesh_object = bpy.data.objects.new("Float_Weights", combined.mesh)
+        self._collection().objects.link(mesh_object)
+        bind = np.repeat(
+            np.identity(4, dtype=np.float32)[None],
+            2,
+            axis=0,
+        )
+        skeleton = Skeleton(
+            root_bone=0,
+            bones=(Bone(0, -1, 1, 0), Bone(0, 0, 0, 0)),
+            bind_local=bind.copy(),
+            bind_world=bind.copy(),
+            bind_world_inverse=bind.copy(),
+            scale_shift=0,
+            translation_shift=0,
+        )
+        _assign_skin(
+            mesh_object,
+            skeleton,
+            combined.bone_indices,
+            combined.bone_weights,
+        )
+
+        self.assertAlmostEqual(mesh_object.vertex_groups["bone_000"].weight(0), 0.1)
+        self.assertAlmostEqual(mesh_object.vertex_groups["bone_001"].weight(0), 0.9)
+        self.assertAlmostEqual(mesh_object.vertex_groups["bone_000"].weight(1), 0.25)
+        self.assertAlmostEqual(mesh_object.vertex_groups["bone_001"].weight(1), 0.75)
+        self.assertAlmostEqual(mesh_object.vertex_groups["bone_000"].weight(2), 1.0)
 
     def test_imports_one_animation_with_compatible_rig(self) -> None:
         bind = np.identity(4, dtype=np.float32)[None]

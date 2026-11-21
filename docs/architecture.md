@@ -328,6 +328,21 @@ runtime words remain intentionally uninterpreted, and
 `insomniac_foliage_runtime_billboarding` is false because import does not
 invent or bind a scene camera.
 
+## Burning Skies adapter
+
+The isolated Burning Skies reader maps little-endian NSIRSRC model packets
+into the shared `MeshGeometry` representation. Legacy PS3 geometry retains
+its unsigned 8-bit skin weights; Burning Skies geometry carries normalized
+`float32` weights decoded from four half-floats. The Blender bridge converts
+integer weights with the existing `value / 255` rule and passes normalized
+floating-point weights without quantizing them.
+
+Burning Skies skinned packets map their four local vertex indices through the
+owning mesh entry's byte palette into model-wide bone-record indices. Repeated
+palette entries are valid retail data, so equal model-bone influences are
+coalesced before each vertex is normalized. Renderable SMFs deliberately
+remain static until the separate armature-binding milestone is validated.
+
 ## Asset Browser cache
 
 The Asset Browser cache is generated locally from a user-provided ISO. A

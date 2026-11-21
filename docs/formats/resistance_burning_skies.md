@@ -54,6 +54,9 @@ The Model root contains these verified render fields:
 |---:|---|---|
 | `0x00` | `uint32` | Material dependency count |
 | `0x04` | pointer | Runtime material-pointer array |
+| `0x0C` | `uint32` | Primary bone count; may be smaller than the record count |
+| `0x10` | `uint32` | Total `0x70`-byte bone-record count |
+| `0x14` | pointer | Bone-record array |
 | `0x18` | `uint32` | LOD-record count |
 | `0x1C` | pointer | First `0x10`-byte LOD record |
 
@@ -93,22 +96,46 @@ For both formats, the verified leading attributes are:
 | 22 | `float16` | Stored negative texture V |
 | 24 | `float16[3]` | Tangent |
 | 30 | `float16` | Tangent handedness |
-| 32 | `uint32` | Packed trailing value |
 
 The parser restores source V as `1 + stored_v`; the shared Blender mesh bridge
 then performs its normal `1 - source_v` image-coordinate flip. The effective
 Blender coordinate is therefore `-stored_v`, matching the live axe atlas.
-Skinned positions are already in bind pose, so those packets can be imported
-as static geometry even though their bone indices, weights, and animation are
-not decoded.
+
+Rigid format `0x15` stores an opaque packed `uint32` at `+32`. Skinned format
+`0x17` instead ends with:
+
+| Offset | Type | Meaning |
+|---:|---|---|
+| 32 | `float16[4]` | Four non-negative skin weights |
+| 40 | `uint8[4]` | Four indices local to the mesh palette |
+
+For a skinned mesh entry, byte `+0x46` is the palette count and the corresponding
+local-to-model `uint8` palette begins at `+0x70`. The lower word at `+0x44` and
+the independent flags byte at `+0x47` are not part of palette indexing.
+Weights equal to zero make their paired local byte inactive; 895 inactive
+slots in the retail corpus retain a nonzero byte and are canonicalized to
+model bone zero during decoding. Active local indices are mapped through the
+palette. If a palette repeats a model bone, its weights are coalesced before
+the four-slot row is normalized to `float32`.
+
+The complete 821-SMF European corpus contains 240 skinned models, 1,219
+skinned packets, and 955,468 skinned vertices. Palette counts span 2 through
+20. Every active local index is in range and every mapped value is below the
+root's total bone-record count. Source half-float weights span 0 through 1;
+their row sums span `0.999176025390625` through `1.0001475811004639`, with all
+rows within the enforced `0.001` tolerance. The corpus uses one through four
+active influences per vertex. Sixteen palettes repeat one or more model bones,
+affecting 477 vertices and requiring the coalescing step above.
+
+Skinned positions are already in bind pose. The normalized influences are
+preserved in shared geometry, while renderable SMFs remain static until their
+armatures are connected by the next implementation milestone.
 
 The verified archive results are:
 
 - 798 SMFs decode through this direct packet graph;
-- 17 SMFs without render packets expose a valid bind skeleton and import as
-  armature-only assets;
-- six geometry-less resources expose neither render packets nor a recoverable
-  skeleton and fail with an explicit error; and
+- all 23 SMFs without render packets expose a valid bind skeleton and import
+  as armature-only assets; and
 - `models/GE_OB_LOD_TEST.smf` decodes into two full-detail packets and two
   optional lower-detail packets.
 
@@ -129,13 +156,15 @@ and nine default intact packets.
 
 ### Skeleton-only models
 
-The skeleton count is stored at root virtual `0x0C`, and root virtual `0x14`
-points to `0x70`-byte bone records. Each record starts with a transposed
-inverse-world bind matrix and stores its signed parent index at `+0x60`.
-Inverting those matrices reproduces every serialized local translation within
-floating-point tolerance. This path imports recoverable bind armatures such
-as the 37-bone `CH_PHYS_ADrone`; it does not fabricate surface or collision
-geometry that is absent from the resource.
+The total skeleton record count is stored at root virtual `0x10`, and root
+virtual `0x14` points to `0x70`-byte bone records. The primary count at
+`0x0C` can describe only a leading subset and cannot bound either records or
+skin palettes. Each record starts with a transposed inverse-world bind matrix
+and stores its signed parent index at `+0x60`. Inverting those matrices
+reproduces every serialized local translation within floating-point
+tolerance. This path imports recoverable bind armatures such as the 37-bone
+`CH_PHYS_ADrone`; it does not fabricate surface or collision geometry that is
+absent from the resource.
 
 ### Material packet assignment
 
@@ -238,8 +267,7 @@ white material.
 
 The experimental reader does not currently import:
 
-- skin weights or animation;
+- renderable-model armature bindings or animation;
 - collision geometry not represented by GBuffer packets;
-- six geometry-less SMFs without recoverable skeleton records;
 - level `.geo` resources;
 - cutscenes, effects, lighting, or audio resources.

@@ -141,7 +141,7 @@ Created from the feature-gap review of [README.md](README.md) and
 
 ## 8. Advance experimental Burning Skies support
 
-- [ ] Decode skin-weight ownership and influence normalization.
+- [x] Decode skin-weight ownership and influence normalization.
 - [ ] Import skinned SMFs as working armatures rather than static bind-pose
   geometry.
 - [ ] Investigate animation containers only after skinning is validated.

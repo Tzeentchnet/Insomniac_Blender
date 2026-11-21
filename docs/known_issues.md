@@ -62,10 +62,11 @@ audio remain outside the current level importer.
 
 ## Resistance: Burning Skies (experimental)
 
-Burning Skies render packets import as static bind-pose geometry; skin
-weights and animation are not decoded. Seventeen resources without render
-packets expose valid bind matrices and import as armature-only assets. Six
-geometry-less resources contain no recoverable skeleton.
+Burning Skies render packets still import as static bind-pose geometry.
+Skinned packets now preserve normalized model-bone influences, but renderable
+SMFs are not yet bound to their decoded armatures and animation is not
+decoded. All 23 resources without render packets expose valid bind matrices
+and import as armature-only assets.
 
 Vita PVRTC-II 4bpp textures are decoded, including hard-transition palettes
 and punch-through alpha. Burning Skies normal maps are direct tangent-space
