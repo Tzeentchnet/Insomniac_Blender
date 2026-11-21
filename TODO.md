@@ -3,6 +3,10 @@
 Created from the feature-gap review of [README.md](README.md) and
 [known issues](docs/known_issues.md).
 
+All currently scoped implementation and validation milestones are complete.
+The remaining unchecked entries are intentionally separate research projects
+or evidence-blocked work and are not represented as implemented features.
+
 ## Working principles
 
 - Validate format work against real game data from more than one asset or

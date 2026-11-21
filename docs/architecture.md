@@ -47,11 +47,11 @@ The sidebar selectors are backed by per-game metadata-only disc catalogs. The
 bundled USA catalogs record level IDs, source names, supported
 Moby/Tie/Shrub/Foliage identities, and verified shader identities, but no
 geometry or archive payloads. The R2 catalog additionally stores compact
-texture ownership metadata and payload digests, never texel data. A selected asset first resolves
-against its manual source override, then extracted owner levels, then the
-active game's configured ISO. Level selection follows the same cache-first
-resolution. A background catalog worker can replace a bundled catalog with a
-locally generated catalog for a different disc.
+texture ownership metadata and payload digests, never texel data. A selected
+asset first resolves against its manual source override, then extracted owner
+levels, then the active game's configured ISO. Level selection follows the
+same cache-first resolution. A background catalog worker can replace a
+bundled catalog with a locally generated catalog for a different disc.
 
 Catalog identity is adapter-driven. R2 and R3 retain globally meaningful
 TUIDs, while RFoM and Tools of Destruction include the owner level in each
@@ -224,7 +224,7 @@ nodes work in Eevee and Cycles. A default-off **Enhanced source materials**
 preference additionally applies safe source color factors; it does not change
 the scene render engine. No metalness channel is inferred. Packed green is
 connected only when the shader's specular flag is present; that flag is absent
-from the current R2 corpus.
+from both current whole-disc R2 and R3 corpora.
 
 Standard R2/R3 detail composition has an equally strict gate: an active detail
 slot, control bit `0x10`, texture-address bit `0x1000` for the RSX biased
@@ -414,8 +414,8 @@ A new adapter should:
 1. Define typed output structures or reuse common semantic structures.
 2. Detect its own source layout.
 3. Parse exact game layouts without weakening another adapter's validation.
-4. Return mesh, rig, animation, material, and placement data to the Blender
-   bridge.
+4. Return mesh, rig, animation, material, placement, and collision data to the
+   Blender bridge only where the evidence supports those semantics.
 5. Add format notes and test fixtures that contain no copyrighted assets.
 
 See [contributing](contributing.md).

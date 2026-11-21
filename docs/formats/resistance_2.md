@@ -907,12 +907,13 @@ Gameplay Euler values are composed in ZYX order.
 - Exact value-14 foliage material-vector semantics.
 - The runtime interpretation of Shrub position W and exact use of the
   preserved height weight and remap during vegetation deformation.
-- Packed normals/tangents for custom-normal import.
 - Packed green/specular behavior; the public `useSpecular` bit is absent from
   all 3,355 unique shaders in the current corpus.
-- Detail-map composition and exact use of vector 4.
-- Authored emission tint/strength and the remaining parameter-vector fields.
-- Lighting, level collision, VFX, cubemap, and sky import.
+- Authored emission tint/strength and parameter-vector meanings beyond the
+  verified vector-4-Z detail scale.
+- The runtime purpose of regional collision sections `0x8200` and `0x8300`;
+  neither is needed to recover the authored `0x2900` geometry.
+- Lighting, VFX, cubemap, and sky import.
 - Runtime-specific layered animation blending for every weapon overlay.
 
 ## References

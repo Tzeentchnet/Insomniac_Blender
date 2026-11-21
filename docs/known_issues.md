@@ -17,11 +17,12 @@ effects, typed markers, Moby groups, and named areas. Embedded effect and
 marker payload bodies remain opaque beyond their validated section and class
 identity; accidental numeric matches with local Moby class IDs are not treated
 as renderable assets.
-`ps3levelcoll.dat` world, Tie, and collision-only placed triangle geometry is
-imported. The rare placed family does not correlate with the proven render
-placement tables, so its packed source index is preserved without assigning
-an unverified gameplay asset identity. Directional lightmaps, lighting, VFX,
-cubemaps, audio payloads, and renderable effect payloads are not decoded.
+The default-off level-collision option imports `ps3levelcoll.dat` world, Tie,
+and collision-only placed triangle geometry. The rare placed family does not
+correlate with the proven render placement tables, so its packed source index
+is preserved without assigning an unverified gameplay asset identity.
+Directional lightmaps, lighting, VFX, cubemaps, audio payloads, and renderable
+effect payloads are not decoded.
 
 Shrub meshes and clustered placements are imported. Foliage branch geometry
 and sprite cards are imported from the first authored LOD. Runtime vegetation
@@ -47,18 +48,18 @@ level remain static linked meshes, as with R2/R3; import an individual Moby
 to edit its skeleton and Actions.
 
 Old Moby secondary-bangle semantics, damage permutations, authored lower
-LODs, and Moby collision are not yet independently verified. The separate
-non-IGHW `collision.dat` is imported for verified world and Tie triangle
-collision. Its packed low-24-bit value identifies a collision component, not
-a unique render-asset owner, so the importer preserves that value without
-guessing an asset identity for colocated Tie placements. No primitive
-prototype family has been observed in the tested TOD files. Foliage branch
-meshes, sprite cards, and placements are imported from the first authored
-LOD with masked, double-sided materials. Shrub meshes and clustered
-placements are imported from the embedded old-engine layout. Runtime
-vegetation wind, packed Shrub vertex metadata, Foliage custom normals, and
-camera-facing billboarding are not reproduced. Lighting, VFX, cubemaps, and
-audio remain outside the current level importer.
+LODs, and Moby collision are not yet independently verified. The default-off
+level-collision option imports the separate non-IGHW `collision.dat` for
+verified world and Tie triangle collision. Its packed low-24-bit value
+identifies a collision component, not a unique render-asset owner, so the
+importer preserves that value without guessing an asset identity for
+colocated Tie placements. No primitive prototype family has been observed in
+the tested TOD files. Foliage branch meshes, sprite cards, and placements are
+imported from the first authored LOD with masked, double-sided materials.
+Shrub meshes and clustered placements are imported from the embedded
+old-engine layout. Runtime vegetation wind, packed Shrub vertex metadata,
+Foliage custom normals, and camera-facing billboarding are not reproduced.
+Lighting, VFX, cubemaps, and audio remain outside the current level importer.
 
 ## Resistance: Burning Skies (experimental)
 
@@ -435,10 +436,13 @@ suffixes are also optional and default off.
 ### Blender platform coverage
 
 Package installation, registration, meshes, UVs, standard and enhanced
-materials, packed images, armatures, weights, Action slots, terrain,
-placements, save, and reopen were validated with Blender 5.2.2 LTS on
-Windows. Resistance 3 validation includes a textured animated Moby, 18
-Actions, a full campaign level, and the global texture bundle. A
-representative Resistance 2 advanced material also compiled in an isolated
-Cycles render without changing the imported scene's engine. Linux, macOS, and
-later Blender releases have not yet been exercised.
+materials, packed images, armatures, weights, Action slots, vegetation point
+attributes and custom normals, terrain, placements, collision Collections,
+save, and reopen were validated with Blender 5.2.2 LTS on Windows.
+Resistance 3 validation includes a textured animated Moby, 18 Actions, a full
+campaign level, and the global texture bundle. A representative Resistance 2
+advanced material also compiled in an isolated Cycles render without changing
+the imported scene's engine. Burning Skies validation covers skinned and
+armature-only model imports plus the evidence-only animation and native
+collision corpora. Linux, macOS, and later Blender releases have not yet been
+exercised.

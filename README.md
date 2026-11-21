@@ -9,8 +9,10 @@ shared Blender-facing interface.
 The extension supports **Resistance: Fall of Man**,
 **Ratchet & Clank Future: Tools of Destruction**, **Resistance 2**, and
 **Resistance 3** on PlayStation 3 through separate game readers and a shared
-Blender workflow. It also includes an explicitly experimental static-model
-reader for **Resistance: Burning Skies** on PlayStation Vita.
+Blender workflow. It also includes an explicitly experimental
+**Resistance: Burning Skies** adapter for PlayStation Vita that imports
+models, materials, and bind armatures while exposing evidence-only animation
+container and native-collision decoders.
 
 > [!NOTE]
 > **Glossary**
@@ -223,7 +225,10 @@ rig, and every decoded Action by default.
 For experimental Burning Skies imports, select **Resistance: Burning Skies
 (Experimental)**, choose a decrypted `build.psa` whose first four bytes are
 `PSAR`, and click **Inspect Source**. The model chooser is built directly from
-that archive. Burning Skies does not use the ISO, level, or Asset Browser
+that archive. Model imports create decoded geometry, BMX materials, and bind
+armatures where present. Raw animation tracks and native `.col` meshes remain
+inspection and validation features rather than Blender Actions or selectable
+level scenes. Burning Skies does not use the ISO, level, or Asset Browser
 cache workflow.
 
 The sidebar remembers the active game and a separate last-selected ISO,
@@ -241,13 +246,14 @@ for the Blender session when creating or opening another file, including with
 **File > New** (`Ctrl+N`). Transient progress and result messages reset with
 the file.
 
-The bundled USA catalogs contain 7,588 unique Resistance 2 assets and 10,482
-unique Resistance 3 assets, each across 27 disc levels. They include
-standalone Materials and supported Shrub and Foliage geometry as well as
-Mobys and Ties. The importer reuses an extracted owner level when available
-and otherwise extracts that level's cached/uncached and global archive pairs
-from the selected game's configured ISO on demand. A manually selected PSARC
-or ISO remains an optional source override.
+The bundled USA catalogs contain 36,321 level-scoped RFoM entries across 41
+levels, 15,629 level-scoped TOD entries across 20 levels, 7,588 unique R2
+assets across 27 levels, and 10,482 unique R3 assets across 27 levels. They
+include standalone Materials and supported Shrub and Foliage geometry as well
+as Mobys and Ties. The importer reuses an extracted owner level when available
+and otherwise extracts that level's required archives from the selected
+game's configured ISO on demand. A manually selected PSARC, ISO, or extracted
+source remains an optional override.
 
 Moby imports create the intact/base mesh, armature, weights, materials, and
 every decoded animset clip as a persistent Blender Action by default. The rig
@@ -479,7 +485,7 @@ insomniac_asset_io/
     ratchet_tod/           Tools of Destruction reader and catalog
     resistance_2/         Resistance 2 reader and bundled catalog
     resistance_3/         Resistance 3 reader and bundled catalog
-    resistance_burning_skies/  Experimental Vita reader
+    resistance_burning_skies/  Experimental Vita adapter and inspectors
   blender/                Operators, importer, and Asset Browser cache worker
 docs/                     Format, contributor, and validation documentation
 tests/                    Pure-Python unit and optional real-asset tests
@@ -489,7 +495,11 @@ tools/                    Packaging and smoke-test utilities
 ## Validation
 
 See [Validation](docs/validation.md) for test commands, smoke tests, and
-verified results.
+verified results. See [Architecture](docs/architecture.md) for adapter and
+Blender-bridge boundaries, [Known issues](docs/known_issues.md) for explicit
+limitations, [Contributing](docs/contributing.md) for evidence requirements,
+and the [feature roadmap](TODO.md) for completed and intentionally deferred
+work.
 
 ## Research and attribution
 

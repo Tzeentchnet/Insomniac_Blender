@@ -405,9 +405,9 @@ only when that channel contains nonzero texels, preserving authored colors
 such as the Chimeran Shuttle's orange and cyan glows. Its red channel is
 inverted into roughness when the shader enables gloss in either game. Packed
 green connects to Principled specular only when the corresponding shader flag
-is present; that flag is absent from the current R2 corpus. Additional
-material-vector emission tint and authored emission strength remain under
-research.
+is present; that flag is absent from both current whole-disc R2 and R3
+corpora. Additional material-vector emission tint and authored emission
+strength remain under research.
 
 Detail-map validation covers the full 27-level corpora. R2 has 903
 flag-enabled signed samplers and 33 unsigned slot-only records; R3 has 1,277
@@ -730,7 +730,7 @@ The current implementation was validated in Blender 5.2.2 LTS with:
   mesh datablocks, 83 materials, and 189 images, saved and reopened
   without warnings;
 - all 27 cached level archives on the tested disc: 17,497 shader references,
-  3,355 unique shader payloads, and no mismatched duplicate payloads.
+  3,355 unique shader payloads, and no mismatched duplicate payloads;
 - all 27 R3 cached level archives: 33,860 shader references, 4,579 unique
   shader payloads, exact normal-flag/binding agreement, and no mismatched
   duplicate payloads;
@@ -743,6 +743,9 @@ The current implementation was validated in Blender 5.2.2 LTS with:
 - all 27 R3 cached level archives: 3,475 strictly classified
   gradient-dissolve references representing 247 unique shaders in 26 levels,
   including the authored `_dissovle` typo and excluding 67 name-only records;
+- all 27 R3 cached level archives: 3,322 strictly classified on-fire
+  references representing 239 unique shaders and 755 flash-overlay references
+  representing 52 unique shaders, both across 26 levels;
 - all 27 R3 cached level archives: 1,118 strictly classified weapon-upgrade
   references representing 43 unique shaders in 26 levels, with no name-only
   or path-only outliers;
@@ -757,4 +760,17 @@ The current implementation was validated in Blender 5.2.2 LTS with:
   and its saved file reduced from 21,668,857 to 16,229,606 bytes;
 - real `mine_town_approach` preparation reduced from 29.88 to 9.37 seconds
   when the 1.68 GB global archives were already present in a verified sibling
-  level cache.
+  level cache;
+- whole-disc R2/R3 detail-map validation, exact retail fixtures, and four
+  saved, rendered, and reopened Blender material reviews;
+- complete R2/R3 Shrub metadata and Foliage authored-normal corpora, including
+  saved/reopened point attributes and custom split normals;
+- saved and reopened representative R2, R3, TOD, and RFoM collision scenes
+  with exact object, shared-mesh, face, Collection, metadata, and surface
+  attribute counts;
+- all 798 renderable Burning Skies SMFs and 23 skeleton-only SMFs, including
+  normalized palette-mapped skinning and working bind armatures;
+- the complete Burning Skies RIP/SPK corpus with 6,458 uniquely matched
+  animation streams and bounded inspection of 384,720 tracks; and
+- all 12 Burning Skies native COL resources, producing 550,696 bounded Havok
+  compressed-mesh triangles with preserved raw filter and user data.

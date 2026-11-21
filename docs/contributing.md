@@ -19,7 +19,8 @@ game. Add explicit dispatch when the bytes differ.
 3. Compare at least two unrelated assets and one edge case.
 4. Add a synthetic test that contains no game data.
 5. Run the optional real-data smoke test locally.
-6. Update the game's format document and known issues.
+6. Update the game's format document and every affected capability,
+   architecture, validation, roadmap, and known-issue summary.
 
 ## Parser requirements
 
@@ -38,6 +39,8 @@ game. Add explicit dispatch when the bytes differ.
 - Share mesh/image/material datablocks for repeated level instances.
 - Store source TUIDs as custom properties.
 - Keep actions persistent and record source FPS/loop/additive metadata.
+- Keep collision helpers non-rendering, preserve source grouping and face
+  metadata, and reuse prototype mesh datablocks.
 
 ## Adding a game
 
@@ -46,7 +49,7 @@ Create `insomniac_asset_io/games/<game>/` with:
 - typed semantic outputs;
 - source-layout detection;
 - archive/resource readers;
-- model/static/animation/material/level readers as evidence permits;
+- model/static/animation/material/level/collision readers as evidence permits;
 - tests;
 - `docs/formats/<game>.md`.
 
