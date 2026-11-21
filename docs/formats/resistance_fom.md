@@ -23,6 +23,7 @@ entries for the selected level:
 - `ps3levelmain.dat`
 - `ps3levelverts.dat`
 - `ps3leveltexs.dat`
+- `ps3levelcoll.dat`
 - `ps3gameplay.dat`
 
 This avoids copying the complete archive. Catalog generation extracts only
@@ -196,9 +197,98 @@ stride `0x40`. Position, ZYX Euler rotation, and Moby class ID are at `0x10`,
 The six additional gameplay groups are not imported because their record
 semantics are not yet corroborated.
 
+## Level collision
+
+`ps3levelcoll.dat` is a raw big-endian resource rather than an IGHW
+container. The selected-level extraction path includes it alongside the
+render and gameplay resources. Its geometry header is:
+
+| Offset | Type | Meaning |
+|---:|---|---|
+| `0x00` | `u32` | record-table offset, always `0x80` |
+| `0x04` | `u32` | exact record count |
+| `0x08` | `u32` | prototype-blob offset |
+| `0x0C` | `u32` | prototype-blob length |
+| `0x20` | `f32` | positive broad-phase quantization value |
+| `0x24` | `f32` | reciprocal broad-phase quantization value |
+| `0x30` | `u32` | exact prototype-blob end |
+| `0x38` | `u32` | format marker `0x75` |
+| `0x3C` | `u32` | later runtime spatial-structure offset |
+
+The 41 USA retail levels use broad-phase values from `8.0` through `24.0`;
+their paired value is always the reciprocal. Geometry does not require the
+post-prototype spatial structures.
+
+Records have stride `0x80`:
+
+| Offset | Type | Meaning |
+|---:|---|---|
+| `0x00`, `0x10`, `0x20` | padded `vec3` | stored linear-transform rows |
+| `0x30` | `vec4` | translation, with W equal to `1.0` |
+| `0x40` | `vec4` | bounding-sphere center and radius |
+| `0x50` | `vec3` | AABB minimum |
+| `0x60` | `vec3` | AABB maximum |
+| `0x70` | packed `u32` | family, source index, and component index |
+| `0x74` | `u32` | prototype-relative offset |
+| `0x78` | `u16` | collision-group value |
+| `0x7A` | `u16` | exact aligned prototype extent |
+| `0x7C` | `u32` | zero/reserved |
+
+The packed word uses its top four bits for the family, the next 16 bits for
+a source index, and the low 12 bits for a component index:
+
+- family `0`: world collision. The packed word and transform are identity;
+- family `2`: Tie/static-prop collision. In level20, every non-sentinel
+  source index selects the exact `0x9300` Tie placement whose transformed
+  basis and translation appear in the collision record;
+- family `3`: collision-only placed geometry. Its transform and geometry are
+  complete, but no external render or gameplay owner is proven.
+
+Some retail family-2 and family-3 records use source index `0xFFFF`; the
+decoder retains that sentinel rather than inventing an owner. Stored `3x3`
+bases are transposed into placement matrices. Prototype positions and record
+translations are converted from yards with `0.9144`.
+
+All 90,766 referenced retail prototypes use one marker-1 triangle layout:
+
+| Offset | Type | Meaning |
+|---:|---|---|
+| `0x00` | `u16` | vertex count, at most 512 |
+| `0x02` | `u16` | signed-base offset, always `0x50` |
+| `0x04` | `u16` | quantization marker, always `1` |
+| `0x06` | `u16` | source face count |
+| `0x08` | `u16` | aligned face-data offset |
+| `0x0A` | `u16` | sentinel `0xFFFF` |
+| `0x0C` | `u16` | aligned geometry-data length |
+| `0x50` | `i32[3]` | signed base position |
+| `0x60` | repeated `u16[3]` | array-of-structures XYZ deltas |
+
+Each coordinate is `(base + delta) * 0.9144 / 1024`. Face words use:
+
+- A: `(word >> 18) & 0x1FF`
+- B: `(word >> 9) & 0x1FF`
+- C: `word & 0x1FF`
+- surface: `word >> 27`
+
+The larger prototype extent includes trailing runtime acceleration data.
+Repeated-index, exactly zero-area, and duplicate triangles are removed before
+face-domain metadata reaches Blender.
+
+Across all 41 retail files, the decoder validates 446,785 records: 47,191
+world, 398,805 Tie, and 789 collision-only placed instances. They reference
+90,766 shared meshes with 8,783,640 vertices and 12,837,454 source faces.
+After removing 1,695 degenerate and 73,452 duplicate faces, 12,762,307 faces
+remain. Observed surface IDs are `0`, `1`, `2`, `4`, `5`, `6`, `7`, `16`,
+`17`, and `20`.
+
+Level20 contains 13,291 instances and 2,491 meshes: 995 world meshes, 1,491
+Tie meshes, and five collision-only placed meshes. The retained geometry has
+252,515 vertices and 363,870 faces.
+
 ## Current limitations
 
-- `ps3levelcoll.dat` collision is not decoded.
+- The family-3 `ps3levelcoll.dat` source table has not been correlated with a
+  proven gameplay owner.
 - Directional lightmap textures in section `0x5500` are not imported.
 - Lighting, VFX, cubemaps, and the non-primary gameplay groups are not
   decoded.

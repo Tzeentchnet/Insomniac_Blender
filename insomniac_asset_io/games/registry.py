@@ -288,6 +288,7 @@ GAME_ADAPTERS = {
             "ps3levelmain.dat",
             "ps3levelverts.dat",
             "ps3leveltexs.dat",
+            "ps3levelcoll.dat",
             "ps3gameplay.dat",
         ),
         global_archives=(),

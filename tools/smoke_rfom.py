@@ -10,6 +10,7 @@ if str(ROOT) not in sys.path:
 
 
 def main() -> int:
+    from insomniac_asset_io.core.collision import validate_collision_scene
     from insomniac_asset_io.core.source import GameSource
     from insomniac_asset_io.games.resistance_2.formats import AssetKind
     from insomniac_asset_io.games.resistance_fom.reader import (
@@ -86,6 +87,15 @@ def main() -> int:
         print(
             f"Gameplay regions={len(regions)} moby_instances="
             f"{sum(len(region.moby_instances) for region in regions)}"
+        )
+        collision = reader.read_level_collision()
+        validate_collision_scene(
+            collision,
+            label="RFoM level collision",
+        )
+        print(
+            f"Level collision: instances={len(collision.instances)} "
+            f"meshes={len(collision.meshes)}"
         )
     return 0
 

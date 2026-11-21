@@ -13,8 +13,11 @@ numeric names are used.
 
 The primary gameplay Moby group is imported. Six additional gameplay groups
 have unverified record semantics and are skipped rather than guessed.
-`ps3levelcoll.dat`, directional lightmaps, lighting, VFX, cubemaps, and audio
-are not decoded.
+`ps3levelcoll.dat` world, Tie, and collision-only placed triangle geometry is
+imported. The rare placed family does not correlate with the proven render
+placement tables, so its packed source index is preserved without assigning
+an unverified gameplay asset identity. Directional lightmaps, lighting, VFX,
+cubemaps, and audio are not decoded.
 
 Shrub meshes and clustered placements are imported. Foliage branch geometry
 and sprite cards are imported from the first authored LOD. Runtime vegetation

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
+from insomniac_asset_io.core.collision import validate_collision_scene
 from insomniac_asset_io.core.source import GameSource
 from insomniac_asset_io.games.registry import get_game_adapter
 from insomniac_asset_io.games.resistance_2.formats import AssetKind
@@ -81,6 +82,32 @@ class RealResistanceFomTests(unittest.TestCase):
             gameplay = reader.read_gameplay_regions()[0]
             self.assertEqual(gameplay.name, "default")
             self.assertEqual(len(gameplay.moby_instances), 533)
+
+            collision = reader.read_level_collision()
+            validate_collision_scene(
+                collision,
+                label="RFoM level20 collision",
+            )
+            self.assertEqual(len(collision.instances), 13291)
+            self.assertEqual(len(collision.meshes), 2491)
+            self.assertEqual(
+                sum(len(mesh.positions) for mesh in collision.meshes),
+                252515,
+            )
+            self.assertEqual(
+                sum(len(mesh.indices) for mesh in collision.meshes),
+                363870,
+            )
+            self.assertEqual(
+                {
+                    kind: sum(
+                        mesh.source_kind == kind
+                        for mesh in collision.meshes
+                    )
+                    for kind in ("TERRAIN", "TIE", "PLACED")
+                },
+                {"TERRAIN": 995, "TIE": 1491, "PLACED": 5},
+            )
 
 
 if __name__ == "__main__":

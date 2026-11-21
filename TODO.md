@@ -104,13 +104,13 @@ Created from the feature-gap review of [README.md](README.md) and
 
 - [x] Investigate and implement the R2/R3 level-collision layout first.
 - [x] Decode TOD's separate non-IGHW `collision.dat` format.
-- [ ] Decode RFoM's `ps3levelcoll.dat` format.
+- [x] Decode RFoM's `ps3levelcoll.dat` format.
 
 ### Validation
 
 - [x] Add bounds, index, transform, and malformed-record tests.
 - [ ] Verify representative terrain, static-prop, and gameplay collision.
-- [ ] Validate saved-file persistence and export-oriented mesh integrity.
+- [x] Validate saved-file persistence and export-oriented mesh integrity.
 
 ## 6. Decode RFoM secondary gameplay groups
 

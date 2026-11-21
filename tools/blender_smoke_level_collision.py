@@ -27,14 +27,18 @@ from insomniac_asset_io.games.resistance_2.level_collision import (
 )
 from insomniac_asset_io.games.resistance_2.reader import Resistance2Reader
 from insomniac_asset_io.games.resistance_3.reader import Resistance3Reader
+from insomniac_asset_io.games.resistance_fom.level_collision import (
+    decode_level_collision_resource as decode_rfom_level_collision_resource,
+)
+from insomniac_asset_io.games.resistance_fom.reader import ResistanceFomReader
 
 
 def _arguments() -> argparse.Namespace:
     arguments = sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else []
     parser = argparse.ArgumentParser(
-        description="Import R2/R3/TOD level collision in Blender"
+        description="Import PS3 level collision in Blender"
     )
-    parser.add_argument("game", choices=("r2", "r3", "tod"))
+    parser.add_argument("game", choices=("r2", "r3", "tod", "rfom"))
     parser.add_argument("source", type=Path)
     parser.add_argument(
         "--resource-suffix",
@@ -103,6 +107,7 @@ def main() -> int:
         "r2": Resistance2Reader,
         "r3": Resistance3Reader,
         "tod": RatchetTodReader,
+        "rfom": ResistanceFomReader,
     }[args.game]
     register()
 
@@ -123,6 +128,12 @@ def main() -> int:
             resource_path = candidates[0]
             if args.game == "tod":
                 scene = decode_tod_level_collision_resource(
+                    source.read(resource_path),
+                    resource_path=resource_path,
+                    warnings=source_reader.warnings,
+                )
+            elif args.game == "rfom":
+                scene = decode_rfom_level_collision_resource(
                     source.read(resource_path),
                     resource_path=resource_path,
                     warnings=source_reader.warnings,

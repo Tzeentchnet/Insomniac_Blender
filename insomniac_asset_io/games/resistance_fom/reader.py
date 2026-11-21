@@ -8,6 +8,7 @@ from pathlib import PurePosixPath
 import numpy as np
 
 from ...core.binary import IghwFile
+from ...core.collision import CollisionScene as LevelCollisionScene
 from ...core.errors import FormatError, MissingResourceError
 from ...core.source import GameSource
 from ..ratchet_tod.reader import RatchetTodReader
@@ -28,6 +29,7 @@ from ..resistance_2.formats import (
 )
 from ..resistance_2.reader import MAX_BONES, MAX_MESHES, _matrix_from_zyx
 from ..resistance_2.textures import texture_mip_size
+from .level_collision import decode_level_collision_resource
 
 LOGGER = logging.getLogger(__name__)
 
@@ -952,6 +954,14 @@ class ResistanceFomReader(RatchetTodReader):
                 path=self.textures_path,
             )
         return locations
+
+    def read_level_collision(self) -> LevelCollisionScene:
+        path = self._find_level_resource("ps3levelcoll.dat")
+        return decode_level_collision_resource(
+            self.source.read(path),
+            resource_path=path,
+            warnings=self.warnings,
+        )
 
     def read_zones(self) -> list[Zone]:
         tie_instances: list[PlacedInstance] = []

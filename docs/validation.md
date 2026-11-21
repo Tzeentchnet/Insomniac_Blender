@@ -27,6 +27,10 @@ degenerate/duplicate faces, and all-degenerate no-op prototypes.
 `0x80`-byte records, marker-1 triangle prototypes, yard-scaled transforms,
 surface words, malformed ranges, and no-op prototypes so the older format is
 not tested through R2/R3 assumptions.
+`test_level_collision_rfom.py` covers RFoM's separate marker-1 AoS vertex
+profile, world/Tie/collision-only placed families, packed source/component
+indices, header scales, extraction configuration, malformed records, and
+no-op handling.
 
 `test_blender_optional_geometry.py` imports two collision instances that
 share one prototype, verifies source-group Collections and face-domain
@@ -97,8 +101,9 @@ face-domain surface attributes. The Metropolis real-data regression validates
 15,150 instances, 1,565 meshes, 93,733 vertices, and 129,382 retained faces.
 
 The RFoM smoke test reports resource counts and decodes one Moby, skeleton,
-animset, diffuse texture, Tie, zone, shrub and foliage placement counts, and
-gameplay region without writing game data to the repository.
+animset, diffuse texture, Tie, zone, shrub and foliage placement counts,
+gameplay region, and the complete level-collision scene without writing game
+data to the repository.
 
 The portable `test_foliage.py` fixture separately exercises the R2 and R3
 `0xA000` card buffers, their distinct `0xA200` descriptors, and their
@@ -186,8 +191,9 @@ Remove-Item Env:RFOM_ISO_PATH
 
 This checks the exact `BCUS98107`/`01.00` identity, the 41-level inventory,
 an animated 76-bone Moby, material and texture decoding, a Tie, region
-terrain, 4,247 Tie placements, and 533 primary gameplay Moby placements.
-Each source-specific test is skipped when its environment variable is absent.
+terrain, 4,247 Tie placements, 533 primary gameplay Moby placements, and the
+13,291-instance/2,491-mesh level20 collision scene. Each source-specific test
+is skipped when its environment variable is absent.
 
 Validate RFoM imports with Blender 5.2:
 
@@ -205,10 +211,23 @@ Validate RFoM imports with Blender 5.2:
   --source "E:\tests\InsomniacAssetIO\resistance_fom\level20" `
   --output "E:\tests\InsomniacAssetIO\resistance_fom\level.blend" `
   --kind level --materials
+
+& "D:\Blender Foundation\Blender 5.2\blender.exe" --background `
+  --factory-startup --python-exit-code 1 `
+  --python tools\blender_smoke_level_collision.py -- rfom `
+  "E:\tests\InsomniacAssetIO\resistance_fom\level20" `
+  --output "E:\tests\InsomniacAssetIO\collision_review\rfom_collision.blend"
 ```
 
 For level imports, the Blender smoke test compares every decoded shrub and
-foliage placement with the corresponding imported Blender object count.
+foliage placement with the corresponding imported Blender object count. The
+collision-only review saves, reopens, and revalidates all 13,291 wire objects,
+2,491 shared meshes, instance metadata, and face-domain surface attributes.
+
+The full USA collision corpus contains 41 `ps3levelcoll.dat` files with
+446,785 records, 90,766 shared prototypes, 8,783,640 vertices, and
+12,762,307 retained faces. Every file validates through the game-neutral
+scene contract without warnings.
 
 Run the environment-gated Tools of Destruction regressions against an
 extracted Metropolis archive trio and the decrypted ISO:

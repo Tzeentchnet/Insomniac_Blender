@@ -45,7 +45,8 @@ both fields from `PARAM.SFO`.
 | Shrub and foliage level geometry | Supported as linked static meshes and placements; foliage includes branch and sprite geometry |
 | Primary gameplay Moby placement | Supported as linked static mesh instances |
 | Retail names | Deterministic `Moby_XXXX`, `Tie_XXXXXXXX`, and `Material_XXXX` names |
-| Collision, lightmaps, lighting, VFX, cubemaps, and secondary gameplay groups | Not yet implemented |
+| Level collision | Optional world, Tie, and collision-only placed triangle meshes from `ps3levelcoll.dat`; disabled by default |
+| Lightmaps, lighting, VFX, cubemaps, and secondary gameplay groups | Not yet implemented |
 
 See [Resistance: Fall of Man formats](docs/formats/resistance_fom.md) and
 [known issues](docs/known_issues.md) for the verified layouts and remaining

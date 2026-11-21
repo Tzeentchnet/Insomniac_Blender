@@ -134,7 +134,8 @@ misreported as an asset identity.
 `ResistanceFomReader` shares typed geometry, skeleton, animation, texture,
 and Blender-facing outputs with the other PS3 readers but owns its V1 record
 layouts. The selected level directory contains `ps3levelmain.dat`,
-`ps3levelverts.dat`, raw `ps3leveltexs.dat`, and `ps3gameplay.dat`.
+`ps3levelverts.dat`, raw `ps3leveltexs.dat`, `ps3levelcoll.dat`, and
+`ps3gameplay.dat`.
 
 Mobys use class IDs from their `0xC0` headers and `0x20`-byte primitive
 records. Their geometry and texture pixels share the raw texel file. Ties and
@@ -146,6 +147,15 @@ RFoM inline animations use a dedicated profile without the Tools of
 Destruction 8-bit delta shift or pair-frame reduction. The adapter exposes
 only the corroborated primary gameplay Moby group; unknown secondary groups
 remain unparsed.
+
+RFoM collision uses the same raw header/record family as TOD but a distinct
+prototype profile. Its vertices are array-of-structures `u16` triples after
+a signed base at `0x50`, rather than TOD's grouped SIMD-oriented streams.
+The backend validates world, Tie, and collision-only placed families,
+preserves their 16-bit source and 12-bit component indices, converts yards
+to meters, and emits the shared collision scene. The collision-only placed
+family remains separate because its external gameplay owner has not been
+proven.
 
 ## R2/R3 level collision
 
