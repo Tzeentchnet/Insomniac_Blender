@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 
 from insomniac_asset_io.core.binary import IghwFile
+from insomniac_asset_io.core.errors import FormatError
 from insomniac_asset_io.core.source import GameSource
 from insomniac_asset_io.games.resistance_2.formats import AssetKind
 from insomniac_asset_io.games.resistance_2.reader import Resistance2Reader
@@ -97,12 +98,13 @@ def _collision_mesh() -> IghwFile:
 
 
 def _terrain_zone() -> IghwFile:
-    data = bytearray(0x1A0)
-    struct.pack_into(">4sHHI", data, 0, b"IGHW", 1, 1, 4)
+    data = bytearray(0x1C0)
+    struct.pack_into(">4sHHI", data, 0, b"IGHW", 1, 1, 5)
     struct.pack_into(">IIII", data, 0x20, 0x6000, 0x80, 1, 0x48)
     struct.pack_into(">IIII", data, 0x30, 0x6100, 0xD0, 1, 0x06)
     struct.pack_into(">IIII", data, 0x40, 0x6200, 0x100, 1, 0x80)
     struct.pack_into(">IIII", data, 0x50, 0x5400, 0x180, 1, 0x20)
+    struct.pack_into(">IIII", data, 0x60, 0x5410, 0x1A0, 1, 0x20)
     purposes = (-4096, 8193, 32767)
     secondary_uvs = ((0.0, 0.25), (0.5, 0.75), (1.0, 1.0))
     for index, position in enumerate(
@@ -120,6 +122,8 @@ def _terrain_zone() -> IghwFile:
     struct.pack_into(">3f", data, 0x170, 2_560.0, 5_120.0, 7_680.0)
     struct.pack_into(">IHB", data, 0x180, 0, 1, 0x86)
     struct.pack_into(">HH", data, 0x198, 4, 4)
+    struct.pack_into(">IHB", data, 0x1A0, 8, 1, 0x86)
+    struct.pack_into(">HH", data, 0x1B8, 4, 4)
     return IghwFile(data, label="Resistance 3 terrain fixture")
 
 
@@ -296,7 +300,10 @@ class Resistance3Tests(unittest.TestCase):
     def test_reads_zone_lightmap_from_matching_lighting_asset(self):
         parsed = _terrain_zone()
         zone_data = bytes(parsed.data)
-        texels = struct.pack("<HHI", 0xF800, 0x001F, 0)
+        texels = (
+            struct.pack("<HHI", 0xF800, 0x001F, 0)
+            + struct.pack("<HHI", 0x07E0, 0x001F, 0)
+        )
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             (root / "assetlookup.dat").write_bytes(
@@ -310,10 +317,35 @@ class Resistance3Tests(unittest.TestCase):
 
         self.assertEqual(zone.tuid, TERRAIN_ZONE_TUID)
         self.assertEqual(set(zone.lightmaps), {0})
+        self.assertEqual(set(zone.directional_lightmaps), {0})
         lightmap = zone.lightmaps[0]
+        directional = zone.directional_lightmaps[0]
         self.assertEqual(lightmap.info.tuid, TERRAIN_ZONE_TUID)
         self.assertEqual(lightmap.info.format_code, 0x86)
         self.assertEqual(lightmap.rgba.shape, (4, 4, 4))
+        self.assertEqual(directional.info.offset, 8)
+        self.assertEqual(directional.info.format_code, 0x86)
+        self.assertEqual(directional.rgba.shape, (4, 4, 4))
+        self.assertFalse(np.array_equal(lightmap.rgba, directional.rgba))
+
+    def test_rejects_unpaired_directional_lightmap_table(self):
+        zone_data = bytearray(_terrain_zone().data)
+        struct.pack_into(">I", zone_data, 8, 4)
+        texels = struct.pack("<HHI", 0xF800, 0x001F, 0)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "assetlookup.dat").write_bytes(
+                _terrain_assetlookup(len(zone_data), len(texels))
+            )
+            (root / "zones.dat").write_bytes(zone_data)
+            (root / "lighting.dat").write_bytes(texels)
+
+            with GameSource.open(root) as source:
+                with self.assertRaisesRegex(
+                    FormatError,
+                    "parallel 0x5400 and 0x5410",
+                ):
+                    Resistance3Reader(source).read_zones()
 
     def test_uses_v3_tie_shader_group_byte(self):
         data = bytearray(0x80)

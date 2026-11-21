@@ -220,10 +220,25 @@ class RealResistance3FoliageTests(unittest.TestCase):
                 for instance in zone.tie_instances
                 if instance.name == "ceg_lowpoly_grass_field_2_85"
             )
+            target_checkpoint = next(
+                instance
+                for zone in zones
+                for instance in zone.tie_instances
+                if instance.name == "TRACK_CHECKPOINT_7"
+            )
             target_lightmap = reader.read_zone_lightmap(
                 target_grass.lightmap_zone_tuid,
                 target_grass.lightmap_index,
             )
+            target_directional = reader.read_zone_directional_lightmap(
+                target_checkpoint.lightmap_zone_tuid,
+                target_checkpoint.lightmap_index,
+            )
+            for zone in zones:
+                self.assertEqual(
+                    set(reader.zone_lightmap_infos(zone.tuid)),
+                    set(reader.zone_directional_lightmap_infos(zone.tuid)),
+                )
 
         self.assertEqual(
             [mesh.shader_index for mesh in grass.meshes],
@@ -255,6 +270,10 @@ class RealResistance3FoliageTests(unittest.TestCase):
         )
         self.assertEqual(target_lightmap.rgba.shape, (256, 256, 4))
         self.assertLess(int(target_lightmap.rgba[..., :3].min()), 70)
+        self.assertEqual(target_checkpoint.lightmap_index, 120)
+        self.assertEqual(target_directional.rgba.shape, (128, 128, 4))
+        self.assertEqual(int(target_directional.rgba[..., 2].max()), 255)
+        self.assertLess(int(target_directional.rgba[..., 0].max()), 110)
         self.assertEqual(
             sum(
                 instance.lightmap_index is not None
@@ -334,9 +353,17 @@ class RealResistance3FoliageTests(unittest.TestCase):
             {109},
         )
         self.assertEqual(set(terrain_zone.lightmaps), {109})
+        self.assertEqual(set(terrain_zone.directional_lightmaps), {109})
         self.assertEqual(
             terrain_zone.lightmaps[109].rgba.shape,
             (1_024, 1_024, 4),
+        )
+        self.assertEqual(
+            terrain_zone.directional_lightmaps[109].rgba.shape,
+            (256, 256, 4),
+        )
+        self.assertTrue(
+            np.all(terrain_zone.directional_lightmaps[109].rgba == 255)
         )
         np.testing.assert_allclose(
             terrain_secondary_uvs.min(axis=0),

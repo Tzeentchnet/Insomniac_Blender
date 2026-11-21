@@ -35,6 +35,7 @@ class Resistance3Reader(Resistance2Reader):
     terrain_position_offset = 0x70
     terrain_vertex_lighting = True
     terrain_lightmaps = True
+    zone_directional_lightmaps = True
     tie_vertex_lighting = True
     tie_secondary_uvs = True
     tie_instance_lightmaps = True

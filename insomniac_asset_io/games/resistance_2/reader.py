@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 from functools import cached_property
 from pathlib import Path, PurePosixPath
@@ -74,6 +75,7 @@ SECT_UFRAG_VERTICES = 0x6000
 SECT_UFRAG_INDICES = 0x6100
 SECT_UFRAGS = 0x6200
 SECT_ZONE_LIGHTMAPS = 0x5400
+SECT_ZONE_DIRECTIONAL_LIGHTMAPS = 0x5410
 SECT_UFRAG_SHADER_TABLE = 0x71A0
 SECT_TIE_TUID_TABLE = 0x7200
 SECT_TIE_INSTANCES = 0x7240
@@ -154,6 +156,7 @@ class Resistance2Reader:
     terrain_position_offset = 0x60
     terrain_vertex_lighting = False
     terrain_lightmaps = False
+    zone_directional_lightmaps = False
     tie_vertex_lighting = False
     tie_secondary_uvs = False
     tie_instance_lightmaps = False
@@ -178,6 +181,10 @@ class Resistance2Reader:
         self._texture_path_index: dict[str, tuple[int, ...]] | None = None
         self._sibling_texture_index: dict[int, tuple[Path, ...]] | None = None
         self._zone_lightmap_info_cache: dict[
+            int,
+            dict[int, TextureInfo],
+        ] = {}
+        self._zone_directional_lightmap_info_cache: dict[
             int,
             dict[int, TextureInfo],
         ] = {}
@@ -1921,7 +1928,25 @@ class Resistance2Reader:
         shader_tuids = self._read_shader_table(ighw, SECT_UFRAG_SHADER_TABLE)
         terrain = self._parse_terrain(ighw)
         lightmap_infos = self._cache_zone_lightmap_infos(ighw, tuid)
+        directional_lightmap_infos = (
+            self._cache_zone_directional_lightmap_infos(ighw, tuid)
+        )
+        if (
+            self.zone_directional_lightmaps
+            and lightmap_infos.keys() != directional_lightmap_infos.keys()
+        ):
+            raise FormatError(
+                f"{ighw.label}: parallel 0x{SECT_ZONE_LIGHTMAPS:X} and "
+                f"0x{SECT_ZONE_DIRECTIONAL_LIGHTMAPS:X} descriptor tables "
+                f"contain {len(lightmap_infos)} and "
+                f"{len(directional_lightmap_infos)} entries"
+            )
         lightmaps = self._parse_zone_lightmaps(ighw, tuid, terrain)
+        directional_lightmaps = self._parse_zone_directional_lightmaps(
+            ighw,
+            tuid,
+            terrain,
+        )
         instances: list[PlacedInstance] = []
         instance_section = ighw.section(SECT_TIE_INSTANCES)
         if instance_section is not None and instance_section.count:
@@ -1977,40 +2002,41 @@ class Resistance2Reader:
             terrain_meshes=terrain,
             shader_tuids=shader_tuids,
             lightmaps=lightmaps,
+            directional_lightmaps=directional_lightmaps,
             shrub_instances=shrub_instances,
             foliage_instances=foliage_instances,
         )
 
-    def _cache_zone_lightmap_infos(
+    def _cache_zone_lighting_infos(
         self,
         ighw: IghwFile,
         zone_tuid: int,
+        *,
+        section_id: int,
+        label: str,
+        cache: dict[int, dict[int, TextureInfo]],
     ) -> dict[int, TextureInfo]:
-        cached = self._zone_lightmap_info_cache.get(zone_tuid)
+        cached = cache.get(zone_tuid)
         if cached is not None:
             return cached
-        if not (self.terrain_lightmaps or self.tie_instance_lightmaps):
-            infos: dict[int, TextureInfo] = {}
-            self._zone_lightmap_info_cache[zone_tuid] = infos
-            return infos
-        descriptors = ighw.section(SECT_ZONE_LIGHTMAPS)
+        descriptors = ighw.section(section_id)
         if descriptors is None:
             infos: dict[int, TextureInfo] = {}
-            self._zone_lightmap_info_cache[zone_tuid] = infos
+            cache[zone_tuid] = infos
             return infos
         if descriptors.length != 0x20:
             raise FormatError(
-                f"{ighw.label}: lightmap descriptor stride is "
+                f"{ighw.label}: {label} descriptor stride is "
                 f"{descriptors.length:#x}; expected 0x20"
             )
         infos = {}
-        for lightmap_index in range(descriptors.count):
-            base = descriptors.offset + lightmap_index * descriptors.length
+        for index in range(descriptors.count):
+            base = descriptors.offset + index * descriptors.length
             width = ighw.u16(base + 0x18)
             height = ighw.u16(base + 0x1A)
             format_code = ighw.u8(base + 6)
-            infos[lightmap_index] = TextureInfo(
-                id=lightmap_index,
+            infos[index] = TextureInfo(
+                id=index,
                 tuid=zone_tuid,
                 format_code=format_code,
                 mip_count=ighw.u16(base + 4),
@@ -2019,8 +2045,42 @@ class Resistance2Reader:
                 offset=ighw.u32(base),
                 length=texture_mip_size(width, height, format_code),
             )
-        self._zone_lightmap_info_cache[zone_tuid] = infos
+        cache[zone_tuid] = infos
         return infos
+
+    def _cache_zone_lightmap_infos(
+        self,
+        ighw: IghwFile,
+        zone_tuid: int,
+    ) -> dict[int, TextureInfo]:
+        if not (self.terrain_lightmaps or self.tie_instance_lightmaps):
+            infos: dict[int, TextureInfo] = {}
+            self._zone_lightmap_info_cache[zone_tuid] = infos
+            return infos
+        return self._cache_zone_lighting_infos(
+            ighw,
+            zone_tuid,
+            section_id=SECT_ZONE_LIGHTMAPS,
+            label="lightmap",
+            cache=self._zone_lightmap_info_cache,
+        )
+
+    def _cache_zone_directional_lightmap_infos(
+        self,
+        ighw: IghwFile,
+        zone_tuid: int,
+    ) -> dict[int, TextureInfo]:
+        if not self.zone_directional_lightmaps:
+            infos: dict[int, TextureInfo] = {}
+            self._zone_directional_lightmap_info_cache[zone_tuid] = infos
+            return infos
+        return self._cache_zone_lighting_infos(
+            ighw,
+            zone_tuid,
+            section_id=SECT_ZONE_DIRECTIONAL_LIGHTMAPS,
+            label="directional lightmap",
+            cache=self._zone_directional_lightmap_info_cache,
+        )
 
     def zone_lightmap_infos(
         self,
@@ -2035,21 +2095,36 @@ class Resistance2Reader:
             zone_tuid,
         )
 
-    def read_zone_lightmap(
+    def zone_directional_lightmap_infos(
         self,
         zone_tuid: int,
-        lightmap_index: int,
+    ) -> dict[int, TextureInfo]:
+        cached = self._zone_directional_lightmap_info_cache.get(zone_tuid)
+        if cached is not None:
+            return cached
+        data = self._asset_bytes(AssetKind.ZONE, zone_tuid)
+        return self._cache_zone_directional_lightmap_infos(
+            IghwFile(data, label=f"zone 0x{zone_tuid:016X}"),
+            zone_tuid,
+        )
+
+    def _read_zone_lighting_texture(
+        self,
+        zone_tuid: int,
+        index: int,
+        infos: dict[int, TextureInfo],
+        *,
+        label: str,
     ) -> DecodedTexture:
-        info = self.zone_lightmap_infos(zone_tuid).get(lightmap_index)
+        info = infos.get(index)
         if info is None:
             raise MissingResourceError(
-                f"Zone 0x{zone_tuid:016X} has no lightmap "
-                f"{lightmap_index}"
+                f"Zone 0x{zone_tuid:016X} has no {label} {index}"
             )
         lighting = self._pointer(AssetKind.LIGHTING, zone_tuid)
         if info.offset + info.length > lighting.length:
             raise FormatError(
-                f"Zone 0x{zone_tuid:016X} lightmap {lightmap_index} range "
+                f"Zone 0x{zone_tuid:016X} {label} {index} range "
                 f"{info.offset:#x}..{info.offset + info.length:#x} exceeds "
                 f"the matching lighting asset's {lighting.length:#x} bytes"
             )
@@ -2061,6 +2136,67 @@ class Resistance2Reader:
         )
         return decode_texture(info, raw)
 
+    def read_zone_lightmap(
+        self,
+        zone_tuid: int,
+        lightmap_index: int,
+    ) -> DecodedTexture:
+        return self._read_zone_lighting_texture(
+            zone_tuid,
+            lightmap_index,
+            self.zone_lightmap_infos(zone_tuid),
+            label="lightmap",
+        )
+
+    def read_zone_directional_lightmap(
+        self,
+        zone_tuid: int,
+        lightmap_index: int,
+    ) -> DecodedTexture:
+        return self._read_zone_lighting_texture(
+            zone_tuid,
+            lightmap_index,
+            self.zone_directional_lightmap_infos(zone_tuid),
+            label="directional lightmap",
+        )
+
+    def _parse_zone_lighting_textures(
+        self,
+        zone_tuid: int,
+        terrain: list[TerrainMesh],
+        infos: dict[int, TextureInfo],
+        texture_reader: Callable[[int, int], DecodedTexture],
+        *,
+        label: str,
+        section_id: int,
+    ) -> dict[int, DecodedTexture]:
+        indices = sorted(
+            {
+                mesh.lightmap_index
+                for mesh in terrain
+                if mesh.lightmap_index is not None
+            }
+        )
+        if not indices:
+            return {}
+        if not infos:
+            raise FormatError(
+                f"Zone 0x{zone_tuid:016X}: terrain references {label} data "
+                f"but section 0x{section_id:X} is absent"
+            )
+        textures: dict[int, DecodedTexture] = {}
+        for index in indices:
+            if index not in infos:
+                raise FormatError(
+                    f"Zone 0x{zone_tuid:016X}: terrain {label} index "
+                    f"{index} exceeds the {len(infos)}-entry table"
+                )
+            textures[index] = texture_reader(
+                zone_tuid,
+                index,
+            )
+        return textures
+
     def _parse_zone_lightmaps(
         self,
         ighw: IghwFile,
@@ -2069,33 +2205,31 @@ class Resistance2Reader:
     ) -> dict[int, DecodedTexture]:
         if not self.terrain_lightmaps:
             return {}
-        lightmap_indices = sorted(
-            {
-                mesh.lightmap_index
-                for mesh in terrain
-                if mesh.lightmap_index is not None
-            }
+        return self._parse_zone_lighting_textures(
+            zone_tuid,
+            terrain,
+            self._cache_zone_lightmap_infos(ighw, zone_tuid),
+            self.read_zone_lightmap,
+            label="lightmap",
+            section_id=SECT_ZONE_LIGHTMAPS,
         )
-        if not lightmap_indices:
+
+    def _parse_zone_directional_lightmaps(
+        self,
+        ighw: IghwFile,
+        zone_tuid: int,
+        terrain: list[TerrainMesh],
+    ) -> dict[int, DecodedTexture]:
+        if not self.zone_directional_lightmaps:
             return {}
-        infos = self._cache_zone_lightmap_infos(ighw, zone_tuid)
-        if not infos:
-            raise FormatError(
-                f"{ighw.label}: terrain references lightmaps but section "
-                f"0x{SECT_ZONE_LIGHTMAPS:X} is absent"
-            )
-        lightmaps: dict[int, DecodedTexture] = {}
-        for lightmap_index in lightmap_indices:
-            if lightmap_index not in infos:
-                raise FormatError(
-                    f"{ighw.label}: terrain lightmap index {lightmap_index} "
-                    f"exceeds the {len(infos)}-entry table"
-                )
-            lightmaps[lightmap_index] = self.read_zone_lightmap(
-                zone_tuid,
-                lightmap_index,
-            )
-        return lightmaps
+        return self._parse_zone_lighting_textures(
+            zone_tuid,
+            terrain,
+            self._cache_zone_directional_lightmap_infos(ighw, zone_tuid),
+            self.read_zone_directional_lightmap,
+            label="directional lightmap",
+            section_id=SECT_ZONE_DIRECTIONAL_LIGHTMAPS,
+        )
 
     def _parse_foliage_instances(
         self,

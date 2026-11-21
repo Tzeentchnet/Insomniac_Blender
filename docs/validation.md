@@ -48,6 +48,9 @@ grass instance's 256x256 BC3 lightmap from zone `0x58E8829DE249D884`. For all
 complete 0-to-1 UV1 range, packed vertex-light values, lightmap index 109, and
 the decoded
 1024x1024 BC3 lightmap read from the matching `lighting.dat` asset.
+Every zone's `0x5400` and `0x5410` descriptor identities must match. The
+regression also decodes `TRACK_CHECKPOINT_7`'s nontrivial 128x128 BC1
+directional map and terrain map 109's neutral 256x256 directional pair.
 It also verifies that `JEEP_REINFORCEMENT_6` resolves to the Warden Jeep
 Moby, whose `0x03FFFFFF` class draw mask enables all 35 source meshes and
 16,978 raw triangles.
@@ -65,9 +68,15 @@ terrain-light data:
 ```
 
 This checks point-domain vertex-light attributes, `LightmapUV`, packed sRGB
-zone-lightmap images, the packed 4096x2116 Tie atlas, all per-object atlas
-transforms, and both terrain and Tie material-graph multiplication after the
-complete scene is built.
+zone-lightmap images, Non-Color directional images, paired 4096x2116 Tie
+atlases, all per-object atlas transforms, and the radiosity-normal-map basis
+graphs for both terrain and Ties. The tool saves and reopens the file, then
+revalidates packed images and node graphs.
+
+For visual comparison, retain a pre-composition scene and the validated
+result as `mine_traversal_train_before.blend` and
+`mine_traversal_train_after.blend` under a disposable `E:\Tests` review
+directory.
 
 Run the Capelli R3 Game Head material and facial-animation regression against
 an extracted owner level:

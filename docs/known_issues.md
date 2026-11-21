@@ -179,15 +179,17 @@ idle base for an exact in-game result.
 Resistance 3's game-specific foliage sprite cards and placements are
 imported, but runtime wind, custom normals, and camera-facing billboarding
 are not reproduced. UFrag terrain imports its packed per-vertex light,
-secondary UV, and used `0x5400` baked zone lightmaps from the matching
-`lighting.dat` asset. R3 Ties likewise import packed vertex light, optional
-UV2, and per-instance `0x5400` lighting. Tie maps use a level-wide atlas
-downsampled by four in each dimension to preserve mesh sharing and avoid
-thousands of Blender images and materials. The parallel `0x5410` shadow/directional texture and dynamic scene lighting
-are not composed. Shrub meshes and placements use the shared R2 layout and
-are imported, but their packed vertex metadata is not decoded. Level
-collision, VFX, and cubemaps are not imported. Terrain, Tie placement, and
-gameplay Moby placement are supported.
+secondary UV, and paired `0x5400` baked/`0x5410` directional zone lightmaps
+from the matching `lighting.dat` asset. R3 Ties likewise import packed vertex
+light, optional UV2, and per-instance paired lighting. Tie maps use two
+equal-layout level-wide atlases downsampled by four in each dimension to
+preserve mesh sharing and avoid thousands of Blender images and materials.
+The directional atlas is composed with the verified radiosity-normal-map
+basis; it is not treated as RGB color. Dynamic scene lighting remains a
+separate unsupported feature. Shrub meshes and placements use the shared R2
+layout and are imported, but their packed vertex metadata is not decoded.
+Level collision, VFX, and cubemaps are not imported. Terrain, Tie placement,
+and gameplay Moby placement are supported.
 
 ## Resistance 2
 

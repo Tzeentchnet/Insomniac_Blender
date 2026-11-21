@@ -128,10 +128,10 @@ both fields from `PARAM.SFO`.
 | Diffuse, reconstructed normal, packed red-gloss response, albedo-colored packed-blue emission, and the Goliath wet-leg overlay | Supported in the default material mode |
 | Detail and additional shader references | Bound detail images are preserved as unconnected Non-Color nodes; R3 effect slots remain metadata-only because runtime composition is not yet proven |
 | DXT and common uncompressed textures | Supported, including global texture bundles |
-| Zone Tie placement and terrain (`UFrag`) | Supported, including R3's Tie material selector, Tie/UFrag vertex lighting and UV2/UV1, UFrag zone maps, and compact-atlas per-instance Tie lightmaps |
+| Zone Tie placement and terrain (`UFrag`) | Supported, including R3's Tie material selector, Tie/UFrag vertex lighting and UV2/UV1, paired baked/directional zone maps, and compact-atlas per-instance Tie lighting |
 | Gameplay Moby placement | Supported as linked static mesh instances |
 | Shrub and foliage geometry and placement | Supported through the verified shared Shrub and V3 foliage layouts |
-| Remaining lighting, level collision, VFX, and cubemaps | Dynamic lighting and the parallel shadow/directional map are not yet composed; baked UFrag and Tie lightmaps are supported |
+| Remaining lighting, level collision, VFX, and cubemaps | Baked R3 radiosity-normal-map lighting is composed; dynamic scene lighting, collision, VFX, and cubemaps remain unsupported |
 
 See [Resistance 3 formats](docs/formats/resistance_3.md) for the verified
 layout differences from Resistance 2 and

@@ -164,15 +164,50 @@ asset and do not address `textures.dat`. They are relative to the
 same-TUID `0x1DB00` lighting asset in `lighting.dat`. Only lightmaps used by
 terrain or placed Ties are decoded.
 
-The imported terrain material multiplies base albedo, per-vertex light, and
-the sRGB zone lightmap. The parallel `0x5410` texture remains an uncomposed
-shadow/directional-light resource until its shader equation is independently
-verified.
+Section `0x5410` is a one-to-one table with the same `0x20`-byte descriptor
+layout and indices. Across all 18 `mine_traversal_train` zones, every
+`0x5400` entry has exactly one `0x5410` owner. The paired texture uses the
+same UV set but may be one, two, or four times smaller in either dimension;
+some small Tie maps instead have a larger directional texture. The tested
+textures are BC1 and range from 4x4 through 512x512.
+
+`0x5410` is not an RGB color multiplier. It packs the three monochrome
+radiosity-normal-map basis coefficients into RGB. This is the single-texture
+optimization documented for
+[*Resistance: Fall of Man*](http://wiki.polycount.com/wiki/Radiosity_normal_map):
+colored texels record different directional responses, while equal RGB
+values are the neutral-normal response and white is neutral. Blender reads
+the texture as Non-Color data and evaluates the squared/clamped
+[radiosity-normal-map basis](https://cdn.cloudflare.steamstatic.com/apps/valve/2006/SIGGRAPH06_Course_ShadingInValvesSourceEngine_Slides.pdf)
+
+```text
+b0 = ( sqrt(2/3),          0, sqrt(1/3))
+b1 = (-sqrt(1/6),  sqrt(1/2), sqrt(1/3))
+b2 = (-sqrt(1/6), -sqrt(1/2), sqrt(1/3))
+
+wi = max(dot(tangent_normal, bi), 0)^2
+directional = map.r * w0 + map.g * w1 + map.b * w2
+```
+
+The imported material multiplies base albedo, packed per-vertex light, the
+sRGB `0x5400` map, and this scalar directional response. For materials with a
+normal map, the reconstructed tangent normal drives the basis weights;
+otherwise `(0, 0, 1)` produces the coefficient average. Terrain retains
+individual paired images. Ties pack both maps into equal-layout compact
+atlases so their existing per-object UV transforms and shared mesh/material
+datablocks remain valid. Directional coefficients are block-averaged in
+linear data space when the Tie atlas is reduced; smaller integral 4x4
+sentinel maps are repeated to the paired tile size without interpolation.
 
 In `mine_traversal_train`, zone `0xEF2A7A01E249D922` has 972 UFrags. Every
 one references lightmap 109, a 1024x1024 BC3 image at relative lighting
-offset `0x9BE380`. Its UV1 range is exactly 0 through 1. Across the level,
-terrain uses 34 zone-scoped lightmaps and 51 shader/lightmap material pairs.
+offset `0x9BE380`, paired with a neutral-white 256x256 BC1 directional map.
+Its UV1 range is exactly 0 through 1. Across the level, terrain uses 34
+zone-scoped pairs and 51 shader/lightmap material pairs. The
+`TRACK_CHECKPOINT_7` Tie uses baked map 120 and a nontrivial 128x128
+directional map whose independent RGB channels exercise the basis blend.
+The independent `haven_town_center` check found exact pairing for all 11,094
+descriptors across 32 zones, including 31 terrain-used pairs.
 
 ## Animation profile
 
@@ -462,5 +497,4 @@ to one of those six TUIDs.
 Runtime wind, custom normals, and camera-facing billboarding are not
 reproduced.
 
-Dynamic scene lighting, the parallel zone shadow/directional-light texture,
-level collision, VFX, and cubemaps are not imported.
+Dynamic scene lighting, level collision, VFX, and cubemaps are not imported.

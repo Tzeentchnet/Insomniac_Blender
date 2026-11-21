@@ -123,6 +123,98 @@ def _validate_surface_materials() -> tuple[int, int, int]:
     return normal_count, gloss_count, unsupported_normal_count
 
 
+def _validate_directional_lightmaps(
+    expected_terrain: int,
+    expected_ties: int,
+) -> tuple[int, int]:
+    terrain_count = 0
+    tie_count = 0
+    if expected_terrain:
+        terrain_images = [
+            image
+            for image in bpy.data.images
+            if image.get("insomniac_texture_role")
+            == "directional_lightmap"
+        ]
+        terrain_count = len(terrain_images)
+        if terrain_count < expected_terrain:
+            raise RuntimeError(
+                f"Expected at least {expected_terrain} terrain directional "
+                f"lightmaps, found {terrain_count}"
+            )
+        if any(
+            image.colorspace_settings.name != "Non-Color"
+            or image.packed_file is None
+            for image in terrain_images
+        ):
+            raise RuntimeError(
+                "R3 terrain directional lightmaps are not packed Non-Color "
+                "images"
+            )
+        terrain_materials = [
+            material
+            for material in bpy.data.materials
+            if material.get("insomniac_terrain_material")
+            and material.get("insomniac_lightmap_index") is not None
+        ]
+        if not terrain_materials or any(
+            material.node_tree.nodes.get(
+                "R3_Terrain_Directional_Multiply"
+            )
+            is None
+            or material.node_tree.nodes.get("R3_Terrain_RNM_Factor") is None
+            for material in terrain_materials
+        ):
+            raise RuntimeError(
+                "R3 terrain materials do not compose directional lightmaps"
+            )
+    if expected_ties:
+        tie_atlases = [
+            image
+            for image in bpy.data.images
+            if image.get("insomniac_texture_role")
+            == "tie_directional_lightmap_atlas"
+        ]
+        if len(tie_atlases) != 1:
+            raise RuntimeError(
+                "Expected one directional Tie lightmap atlas, found "
+                f"{len(tie_atlases)}"
+            )
+        tie_count = int(
+            tie_atlases[0].get("insomniac_lightmap_count", 0)
+        )
+        if tie_count < expected_ties:
+            raise RuntimeError(
+                f"Expected at least {expected_ties} directional Tie "
+                f"lightmaps, found {tie_count}"
+            )
+        if (
+            tie_atlases[0].colorspace_settings.name != "Non-Color"
+            or tie_atlases[0].packed_file is None
+        ):
+            raise RuntimeError(
+                "R3 directional Tie atlas is not a packed Non-Color image"
+            )
+        tie_materials = [
+            material
+            for material in bpy.data.materials
+            if material.get("insomniac_vertex_lit_kind") == "TIE"
+            and material.get("insomniac_tie_lightmap_material")
+        ]
+        if not tie_materials or any(
+            material.node_tree.nodes.get(
+                "R3_TIE_Directional_Lightmap_Atlas"
+            )
+            is None
+            or material.node_tree.nodes.get("R3_TIE_RNM_Factor") is None
+            for material in tie_materials
+        ):
+            raise RuntimeError(
+                "R3 Tie materials do not compose the directional atlas"
+            )
+    return terrain_count, tie_count
+
+
 def _hex_id(value: str) -> str:
     return value.removeprefix("0x").upper()
 
@@ -387,7 +479,9 @@ def main() -> int:
     disabled_emission_count = 0
     luminance_alpha_count = 0
     terrain_lightmap_count = 0
+    terrain_directional_lightmap_count = 0
     tie_lightmap_count = 0
+    tie_directional_lightmap_count = 0
     if args.expect_normal_materials or args.expect_gloss_materials:
         (
             normal_count,
@@ -488,9 +582,24 @@ def main() -> int:
             raise RuntimeError(
                 "R3 Tie materials do not sample the compact lightmap atlas"
             )
+    (
+        terrain_directional_lightmap_count,
+        tie_directional_lightmap_count,
+    ) = _validate_directional_lightmaps(
+        args.expect_terrain_lightmaps,
+        args.expect_tie_lightmaps,
+    )
     if args.output is not None:
         args.output.parent.mkdir(parents=True, exist_ok=True)
-        bpy.ops.wm.save_as_mainfile(filepath=str(args.output.resolve()))
+        output = str(args.output.resolve())
+        if bpy.ops.wm.save_as_mainfile(filepath=output) != {"FINISHED"}:
+            raise RuntimeError(f"Could not save {output}")
+        if bpy.ops.wm.open_mainfile(filepath=output) != {"FINISHED"}:
+            raise RuntimeError(f"Could not reopen {output}")
+        _validate_directional_lightmaps(
+            args.expect_terrain_lightmaps,
+            args.expect_tie_lightmaps,
+        )
     print(
         "INSOMNIAC_R3_BLENDER_SMOKE="
         f"objects={result.objects},meshes={result.meshes},"
@@ -502,7 +611,9 @@ def main() -> int:
         f"disabled_emission={disabled_emission_count},"
         f"luminance_alpha={luminance_alpha_count},"
         f"terrain_lightmaps={terrain_lightmap_count},"
-        f"tie_lightmaps={tie_lightmap_count}"
+        f"terrain_directional={terrain_directional_lightmap_count},"
+        f"tie_lightmaps={tie_lightmap_count},"
+        f"tie_directional={tie_directional_lightmap_count}"
     )
     return 0
 

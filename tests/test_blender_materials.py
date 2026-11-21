@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -86,8 +87,10 @@ if bpy is not None:
                 if game_id == "RESISTANCE_3"
                 else frozenset()
             )
+            self.zone_directional_lightmaps = game_id == "RESISTANCE_3"
             self.shader = shader
             self.textures = textures
+            self.directional_lightmaps: dict[int, DecodedTexture] = {}
             self.texture_reads: list[tuple[int, str | None]] = []
             self.clear_texture_cache_calls = 0
 
@@ -105,6 +108,22 @@ if bpy is not None:
 
         def clear_texture_cache(self) -> None:
             self.clear_texture_cache_calls += 1
+
+        def zone_directional_lightmap_infos(
+            self,
+            _zone_tuid: int,
+        ) -> dict[int, TextureInfo]:
+            return {
+                index: texture.info
+                for index, texture in self.directional_lightmaps.items()
+            }
+
+        def read_zone_directional_lightmap(
+            self,
+            _zone_tuid: int,
+            lightmap_index: int,
+        ) -> DecodedTexture:
+            return self.directional_lightmaps[lightmap_index]
 
 
 @unittest.skipUnless(bpy is not None, "Blender Python is not available")
@@ -225,6 +244,12 @@ class BlenderMaterialTests(unittest.TestCase):
             format_code=0x88,
             value=192,
         )
+        directional = self._decoded_texture(
+            5,
+            tuid=zone_tuid,
+            format_code=0x86,
+            value=128,
+        )
         reader = _MaterialReader(
             "RESISTANCE_3",
             shader,
@@ -237,6 +262,7 @@ class BlenderMaterialTests(unittest.TestCase):
             zone_tuid,
             5,
             lightmap,
+            directional,
             vertex_colors=True,
         )
         cached = factory.terrain_material(
@@ -244,6 +270,7 @@ class BlenderMaterialTests(unittest.TestCase):
             zone_tuid,
             5,
             lightmap,
+            directional,
             vertex_colors=True,
         )
 
@@ -257,6 +284,10 @@ class BlenderMaterialTests(unittest.TestCase):
         vertex_multiply = nodes["R3_Terrain_Vertex_Color_Multiply"]
         lightmap_texture = nodes["R3_Terrain_Lightmap_0005"]
         lightmap_multiply = nodes["R3_Terrain_Lightmap_Multiply"]
+        directional_texture = nodes[
+            "R3_Terrain_Directional_Lightmap_0005"
+        ]
+        directional_multiply = nodes["R3_Terrain_Directional_Multiply"]
         self.assertEqual(vertex.layer_name, "InsomniacVertexColor")
         self.assertEqual(
             nodes["R3_Terrain_Lightmap_UV"].uv_map,
@@ -268,6 +299,10 @@ class BlenderMaterialTests(unittest.TestCase):
         )
         self.assertEqual(
             principled.inputs["Base Color"].links[0].from_node,
+            directional_multiply,
+        )
+        self.assertEqual(
+            directional_multiply.inputs[1].links[0].from_node,
             lightmap_multiply,
         )
         self.assertEqual(
@@ -286,6 +321,107 @@ class BlenderMaterialTests(unittest.TestCase):
             lightmap_texture.image["insomniac_zone_tuid"],
             f"0x{zone_tuid:016X}",
         )
+        self.assertEqual(
+            directional_texture.image.colorspace_settings.name,
+            "Non-Color",
+        )
+        self.assertEqual(
+            directional_texture.image["insomniac_texture_role"],
+            "directional_lightmap",
+        )
+        self.assertEqual(
+            directional_multiply.inputs[2].links[0].from_node,
+            nodes["R3_Terrain_RNM_Factor"],
+        )
+        self.assertEqual(
+            material["insomniac_directional_lightmap_model"],
+            "RADIOSITY_NORMAL_MAPPING",
+        )
+        for index, expected in enumerate(
+            (
+                (0.81649658, 0.0, 0.57735027),
+                (-0.40824829, 0.70710678, 0.57735027),
+                (-0.40824829, -0.70710678, 0.57735027),
+            )
+        ):
+            np.testing.assert_allclose(
+                nodes[f"R3_Terrain_RNM_Basis_{index}_Dot"]
+                .inputs[1]
+                .default_value[:3],
+                expected,
+            )
+
+    def test_r3_directional_material_survives_save_and_reopen(self) -> None:
+        shader_tuid = 0x1234
+        zone_tuid = 0x1020_3040_5060_7080
+        albedo_id = 0x200
+        shader = ShaderInfo(
+            shader_tuid,
+            albedo_id,
+            None,
+            None,
+            None,
+            material_word=0,
+        )
+        reader = _MaterialReader(
+            "RESISTANCE_3",
+            shader,
+            {albedo_id: self._decoded_texture(albedo_id)},
+        )
+        factory = _MaterialFactory(reader, True, [])
+        material = factory.terrain_material(
+            shader_tuid,
+            zone_tuid,
+            5,
+            self._decoded_texture(5, tuid=zone_tuid, value=192),
+            self._decoded_texture(5, tuid=zone_tuid, value=128),
+            vertex_colors=True,
+        )
+        material_name = material.name
+        material.use_fake_user = True
+
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "r3_directional.blend"
+            self.assertEqual(
+                bpy.ops.wm.save_as_mainfile(filepath=str(output)),
+                {"FINISHED"},
+            )
+            self.assertEqual(
+                bpy.ops.wm.open_mainfile(filepath=str(output)),
+                {"FINISHED"},
+            )
+
+        persisted = bpy.data.materials[material_name]
+        directional = persisted.node_tree.nodes[
+            "R3_Terrain_Directional_Lightmap_0005"
+        ]
+        self.assertTrue(directional.image.packed_file)
+        self.assertEqual(
+            directional.image.colorspace_settings.name,
+            "Non-Color",
+        )
+        self.assertIsNotNone(
+            persisted.node_tree.nodes.get("R3_Terrain_RNM_Factor")
+        )
+
+    def test_r3_directional_atlas_resizes_integral_sentinel_maps(self) -> None:
+        source = np.full((4, 4, 4), 251, dtype=np.uint8)
+
+        expanded = _MaterialFactory._resize_directional_lightmap(
+            source,
+            16,
+            16,
+        )
+        reduced = _MaterialFactory._resize_directional_lightmap(
+            expanded,
+            2,
+            2,
+        )
+
+        self.assertEqual(expanded.shape, (16, 16, 4))
+        self.assertEqual(reduced.shape, (2, 2, 4))
+        self.assertTrue(np.all(expanded == 251))
+        self.assertTrue(np.all(reduced == 251))
 
     def test_r3_tie_material_multiplies_vertex_lighting(self) -> None:
         shader_tuid = 0x1234
@@ -317,6 +453,12 @@ class BlenderMaterialTests(unittest.TestCase):
         }
         reader.read_zone_lightmap = (
             lambda _zone_tuid, _lightmap_index: lightmap
+        )
+        reader.directional_lightmaps[lightmap_index] = self._decoded_texture(
+            lightmap_index,
+            tuid=zone_tuid,
+            format_code=0x86,
+            value=128,
         )
         factory = _MaterialFactory(reader, True, [])
         factory.prepare_tie_lightmap_atlas(
@@ -365,6 +507,13 @@ class BlenderMaterialTests(unittest.TestCase):
         lightmap_multiply = nodes["R3_TIE_Lightmap_Multiply"]
         self.assertEqual(
             principled.inputs["Base Color"].links[0].from_node,
+            nodes["R3_TIE_Directional_Multiply"],
+        )
+        self.assertEqual(
+            nodes["R3_TIE_Directional_Multiply"]
+            .inputs[1]
+            .links[0]
+            .from_node,
             lightmap_multiply,
         )
         self.assertEqual(
@@ -377,6 +526,19 @@ class BlenderMaterialTests(unittest.TestCase):
         )
         atlas = nodes["R3_TIE_Lightmap_Atlas"]
         self.assertIs(atlas.image, factory.tie_lightmap_atlas)
+        directional_atlas = nodes["R3_TIE_Directional_Lightmap_Atlas"]
+        self.assertIs(
+            directional_atlas.image,
+            factory.tie_directional_lightmap_atlas,
+        )
+        self.assertEqual(
+            directional_atlas.image.colorspace_settings.name,
+            "Non-Color",
+        )
+        self.assertEqual(
+            directional_atlas.image["insomniac_lightmap_count"],
+            1,
+        )
         self.assertEqual(
             nodes["R3_TIE_Lightmap_Scale"].attribute_name,
             "insomniac_lightmap_uv_scale",

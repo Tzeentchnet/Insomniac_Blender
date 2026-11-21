@@ -50,6 +50,11 @@ _TIE_LIGHTMAP_ATLAS_WIDTHS = (4096, 8192)
 _TIE_LIGHTMAP_ATLAS_MAX_HEIGHT = 8192
 _TIE_LIGHTMAP_SCALE_ATTRIBUTE = "insomniac_lightmap_uv_scale"
 _TIE_LIGHTMAP_OFFSET_ATTRIBUTE = "insomniac_lightmap_uv_offset"
+_RNM_BASIS = (
+    (math.sqrt(2.0 / 3.0), 0.0, math.sqrt(1.0 / 3.0)),
+    (-math.sqrt(1.0 / 6.0), math.sqrt(1.0 / 2.0), math.sqrt(1.0 / 3.0)),
+    (-math.sqrt(1.0 / 6.0), -math.sqrt(1.0 / 2.0), math.sqrt(1.0 / 3.0)),
+)
 
 
 def _reader_game_id(reader: object | None) -> str:
@@ -201,6 +206,7 @@ class _MaterialFactory:
             bpy.types.Material,
         ] = {}
         self.tie_lightmap_atlas: bpy.types.Image | None = None
+        self.tie_directional_lightmap_atlas: bpy.types.Image | None = None
         self.tie_lightmap_transforms: dict[
             tuple[int, int],
             tuple[float, float, float, float],
@@ -257,8 +263,34 @@ class _MaterialFactory:
             self.warnings.append(message)
             return
 
+        directional_enabled = bool(
+            getattr(self.reader, "zone_directional_lightmaps", False)
+        )
+        directional_info_reader = getattr(
+            self.reader,
+            "zone_directional_lightmap_infos",
+            None,
+        )
+        directional_texture_reader = getattr(
+            self.reader,
+            "read_zone_directional_lightmap",
+            None,
+        )
+        if directional_enabled and (
+            not callable(directional_info_reader)
+            or not callable(directional_texture_reader)
+        ):
+            message = (
+                "Tie instances reference paired directional lightmaps, but "
+                "the reader does not expose their zone texture data"
+            )
+            LOGGER.warning(message)
+            self.warnings.append(message)
+            return
+
         records = []
         infos_by_zone: dict[int, dict[int, TextureInfo]] = {}
+        directional_infos_by_zone: dict[int, dict[int, TextureInfo]] = {}
         for zone_tuid, lightmap_index in sorted(references):
             infos = infos_by_zone.get(zone_tuid)
             if infos is None:
@@ -281,6 +313,35 @@ class _MaterialFactory:
                 1,
                 info.height // _TIE_LIGHTMAP_ATLAS_DOWNSAMPLE,
             )
+            if directional_enabled:
+                directional_infos = directional_infos_by_zone.get(zone_tuid)
+                if directional_infos is None:
+                    directional_infos = directional_info_reader(zone_tuid)
+                    directional_infos_by_zone[zone_tuid] = directional_infos
+                directional_info = directional_infos.get(lightmap_index)
+                if directional_info is None:
+                    message = (
+                        f"Zone 0x{zone_tuid:016X} has no paired directional "
+                        f"Tie lightmap {lightmap_index}"
+                    )
+                    LOGGER.warning(message)
+                    self.warnings.append(message)
+                    continue
+                can_reduce = (
+                    directional_info.width % width == 0
+                    and directional_info.height % height == 0
+                )
+                can_expand = (
+                    width % directional_info.width == 0
+                    and height % directional_info.height == 0
+                )
+                if not (can_reduce or can_expand):
+                    raise InsomniacError(
+                        f"Directional Tie lightmap "
+                        f"{directional_info.width}x{directional_info.height} "
+                        f"cannot be resized to paired atlas tile "
+                        f"{width}x{height}"
+                    )
             records.append(
                 ((zone_tuid, lightmap_index), info, width, height)
             )
@@ -295,22 +356,94 @@ class _MaterialFactory:
             .replace("\\", "_")
             .replace("/", "_")
         )
-        name = "_".join(
+        base_name = "_".join(
             part
             for part in (
                 _reader_asset_prefix(self.reader),
                 scope,
-                "Tie_Lightmap_Atlas",
             )
             if part
         )
+        name = f"{base_name}_Tie_Lightmap_Atlas"
+        image = self._create_tie_lightmap_atlas_image(
+            name=name,
+            scope=scope,
+            texture_role="tie_lightmap_atlas",
+            colorspace_role="lightmap",
+            label="Tie lightmap",
+            atlas_width=atlas_width,
+            atlas_height=atlas_height,
+            records=records,
+            placements=placements,
+            texture_reader=texture_reader,
+            resize=self._downsample_tie_lightmap,
+            is_data=False,
+        )
+        self.images[(0, "tie_lightmap_atlas", scope)] = image
+        self.tie_lightmap_atlas = image
+        if directional_enabled:
+            directional_name = (
+                f"{base_name}_Tie_Directional_Lightmap_Atlas"
+            )
+            directional_image = self._create_tie_lightmap_atlas_image(
+                name=directional_name,
+                scope=scope,
+                texture_role="tie_directional_lightmap_atlas",
+                colorspace_role="directional_lightmap",
+                label="Directional Tie lightmap",
+                atlas_width=atlas_width,
+                atlas_height=atlas_height,
+                records=records,
+                placements=placements,
+                texture_reader=directional_texture_reader,
+                resize=self._resize_directional_lightmap,
+                is_data=True,
+            )
+            self.images[
+                (0, "tie_directional_lightmap_atlas", scope)
+            ] = directional_image
+            self.tie_directional_lightmap_atlas = directional_image
+        self.tie_lightmap_transforms = {
+            reference: (
+                width / atlas_width,
+                height / atlas_height,
+                (packed_x + _TIE_LIGHTMAP_ATLAS_PADDING) / atlas_width,
+                (packed_y + _TIE_LIGHTMAP_ATLAS_PADDING) / atlas_height,
+            )
+            for reference, (
+                packed_x,
+                packed_y,
+                width,
+                height,
+            ) in placements.items()
+        }
+
+    def _create_tie_lightmap_atlas_image(
+        self,
+        *,
+        name: str,
+        scope: str,
+        texture_role: str,
+        colorspace_role: str,
+        label: str,
+        atlas_width: int,
+        atlas_height: int,
+        records: list[tuple[tuple[int, int], TextureInfo, int, int]],
+        placements: dict[
+            tuple[int, int],
+            tuple[int, int, int, int],
+        ],
+        texture_reader: Callable[[int, int], DecodedTexture],
+        resize: Callable[[np.ndarray, int, int], np.ndarray],
+        is_data: bool,
+    ) -> bpy.types.Image:
         image = next(
             (
                 candidate
                 for candidate in bpy.data.images
                 if candidate.name == name
                 and candidate.get("insomniac_texture_role")
-                == "tie_lightmap_atlas"
+                == texture_role
                 and candidate.size[0] == atlas_width
                 and candidate.size[1] == atlas_height
             ),
@@ -323,7 +456,7 @@ class _MaterialFactory:
                 height=atlas_height,
                 alpha=True,
                 float_buffer=False,
-                is_data=False,
+                is_data=is_data,
             )
             atlas = np.full(
                 (atlas_height, atlas_width, 4),
@@ -336,13 +469,13 @@ class _MaterialFactory:
                     texture = texture_reader(*key)
                 except InsomniacError as exc:
                     message = (
-                        f"Tie lightmap {key[1]} in zone "
+                        f"{label} {key[1]} in zone "
                         f"0x{key[0]:016X} skipped: {exc}"
                     )
                     LOGGER.warning(message)
                     self.warnings.append(message)
                     continue
-                reduced = self._downsample_tie_lightmap(
+                reduced = resize(
                     texture.rgba,
                     width,
                     height,
@@ -375,31 +508,15 @@ class _MaterialFactory:
             image.pixels.foreach_set(pixels)
             image.pack()
             image.update()
-        self._apply_colorspace(image, "lightmap")
-        image["insomniac_texture_role"] = "tie_lightmap_atlas"
+        self._apply_colorspace(image, colorspace_role)
+        image["insomniac_texture_role"] = texture_role
         image["insomniac_asset_scope"] = scope
         image["insomniac_lightmap_count"] = len(placements)
         image["insomniac_lightmap_downsample"] = (
             _TIE_LIGHTMAP_ATLAS_DOWNSAMPLE
         )
         image[_IMAGE_HAS_ALPHA_KEY] = False
-        key = (0, "tie_lightmap_atlas", scope)
-        self.images[key] = image
-        self.tie_lightmap_atlas = image
-        self.tie_lightmap_transforms = {
-            reference: (
-                width / atlas_width,
-                height / atlas_height,
-                (packed_x + _TIE_LIGHTMAP_ATLAS_PADDING) / atlas_width,
-                (packed_y + _TIE_LIGHTMAP_ATLAS_PADDING) / atlas_height,
-            )
-            for reference, (
-                packed_x,
-                packed_y,
-                width,
-                height,
-            ) in placements.items()
-        }
+        return image
 
     @staticmethod
     def _pack_tie_lightmap_atlas(
@@ -488,6 +605,37 @@ class _MaterialFactory:
             axis=2,
         )
         return np.rint(reduced * 255.0).astype(np.uint8)
+
+    @staticmethod
+    def _resize_directional_lightmap(
+        rgba: np.ndarray,
+        width: int,
+        height: int,
+    ) -> np.ndarray:
+        source_height, source_width = rgba.shape[:2]
+        if source_width == width and source_height == height:
+            return rgba
+        if source_width % width == 0 and source_height % height == 0:
+            block_width = source_width // width
+            block_height = source_height // height
+            reduced = rgba.astype(np.float32).reshape(
+                height,
+                block_height,
+                width,
+                block_width,
+                4,
+            ).mean(axis=(1, 3), dtype=np.float32)
+            return np.rint(reduced).astype(np.uint8)
+        if width % source_width == 0 and height % source_height == 0:
+            return np.repeat(
+                np.repeat(rgba, height // source_height, axis=0),
+                width // source_width,
+                axis=1,
+            )
+        raise InsomniacError(
+            f"Directional Tie lightmap {source_width}x{source_height} "
+            f"cannot be resized to {width}x{height} with integral blocks"
+        )
 
     def material(self, shader_tuid: int) -> bpy.types.Material:
         cached = self.materials.get(shader_tuid)
@@ -583,11 +731,16 @@ class _MaterialFactory:
         zone_tuid: int,
         lightmap_index: int | None,
         lightmap: DecodedTexture | None,
+        directional_lightmap: DecodedTexture | None = None,
         *,
         vertex_colors: bool,
     ) -> bpy.types.Material:
         base_material = self.material(shader_tuid)
-        if not self.enabled or (not vertex_colors and lightmap is None):
+        if not self.enabled or (
+            not vertex_colors
+            and lightmap is None
+            and directional_lightmap is None
+        ):
             return base_material
         key = (zone_tuid, shader_tuid, lightmap_index)
         cached = self.terrain_materials.get(key)
@@ -621,17 +774,22 @@ class _MaterialFactory:
                     prefix="R3_Terrain",
                     node_label="R3",
                 )
+            lightmap_uv: bpy.types.NodeSocket | None = None
+            if (
+                lightmap is not None or directional_lightmap is not None
+            ) and lightmap_index is not None:
+                uv_map = material.node_tree.nodes.new("ShaderNodeUVMap")
+                uv_map.name = "R3_Terrain_Lightmap_UV"
+                uv_map.label = "R3 lightmap UV1"
+                uv_map.uv_map = "LightmapUV"
+                uv_map.location = (-600.0, -100.0)
+                lightmap_uv = uv_map.outputs["UV"]
             if lightmap is not None and lightmap_index is not None:
                 image = self.terrain_lightmap_image(
                     zone_tuid,
                     lightmap_index,
                     lightmap,
                 )
-                uv_map = material.node_tree.nodes.new("ShaderNodeUVMap")
-                uv_map.name = "R3_Terrain_Lightmap_UV"
-                uv_map.label = "R3 lightmap UV1"
-                uv_map.uv_map = "LightmapUV"
-                uv_map.location = (-600.0, -100.0)
                 texture = material.node_tree.nodes.new("ShaderNodeTexImage")
                 texture.name = (
                     f"R3_Terrain_Lightmap_{lightmap_index:04X}"
@@ -641,7 +799,7 @@ class _MaterialFactory:
                 texture.extension = "EXTEND"
                 texture.location = (-350.0, -100.0)
                 material.node_tree.links.new(
-                    uv_map.outputs["UV"],
+                    lightmap_uv,
                     texture.inputs["Vector"],
                 )
                 multiply = material.node_tree.nodes.new("ShaderNodeMixRGB")
@@ -660,6 +818,44 @@ class _MaterialFactory:
                 )
                 color_output = multiply.outputs["Color"]
                 material["insomniac_lightmap_image"] = image.name
+            if (
+                directional_lightmap is not None
+                and lightmap_index is not None
+            ):
+                directional_image = (
+                    self.terrain_directional_lightmap_image(
+                        zone_tuid,
+                        lightmap_index,
+                        directional_lightmap,
+                    )
+                )
+                directional_texture = material.node_tree.nodes.new(
+                    "ShaderNodeTexImage"
+                )
+                directional_texture.name = (
+                    f"R3_Terrain_Directional_Lightmap_"
+                    f"{lightmap_index:04X}"
+                )
+                directional_texture.label = (
+                    "R3 radiosity-normal-map coefficients"
+                )
+                directional_texture.image = directional_image
+                directional_texture.extension = "EXTEND"
+                directional_texture.location = (-350.0, -275.0)
+                material.node_tree.links.new(
+                    lightmap_uv,
+                    directional_texture.inputs["Vector"],
+                )
+                color_output = self._multiply_directional_lightmap(
+                    material,
+                    principled,
+                    color_output,
+                    directional_texture.outputs["Color"],
+                    prefix="R3_Terrain",
+                )
+                material["insomniac_directional_lightmap_image"] = (
+                    directional_image.name
+                )
             material.node_tree.links.new(
                 color_output,
                 color_socket,
@@ -816,7 +1012,174 @@ class _MaterialFactory:
             multiply.inputs[2],
         )
         material["insomniac_lightmap_image"] = self.tie_lightmap_atlas.name
+        color_output = multiply.outputs["Color"]
+        if self.tie_directional_lightmap_atlas is None:
+            return color_output
+        directional_texture = material.node_tree.nodes.new(
+            "ShaderNodeTexImage"
+        )
+        directional_texture.name = "R3_TIE_Directional_Lightmap_Atlas"
+        directional_texture.label = (
+            "R3 compact radiosity-normal-map coefficient atlas"
+        )
+        directional_texture.image = self.tie_directional_lightmap_atlas
+        directional_texture.extension = "EXTEND"
+        directional_texture.location = (350.0, -275.0)
+        material.node_tree.links.new(
+            offset_uv.outputs["Vector"],
+            directional_texture.inputs["Vector"],
+        )
+        material["insomniac_directional_lightmap_image"] = (
+            self.tie_directional_lightmap_atlas.name
+        )
+        return self._multiply_directional_lightmap(
+            material,
+            material.node_tree.nodes["Principled BSDF"],
+            color_output,
+            directional_texture.outputs["Color"],
+            prefix="R3_TIE",
+        )
+
+    def _multiply_directional_lightmap(
+        self,
+        material: bpy.types.Material,
+        principled: bpy.types.Node,
+        color_output: bpy.types.NodeSocket,
+        directional_output: bpy.types.NodeSocket,
+        *,
+        prefix: str,
+    ) -> bpy.types.NodeSocket:
+        tangent_normal = self._tangent_normal_output(
+            material,
+            principled,
+            prefix=prefix,
+        )
+        separate = material.node_tree.nodes.new("ShaderNodeSeparateColor")
+        separate.name = f"{prefix}_RNM_Coefficients"
+        separate.label = "R3 directional basis coefficients"
+        separate.mode = "RGB"
+        material.node_tree.links.new(
+            directional_output,
+            separate.inputs["Color"],
+        )
+
+        weighted: list[bpy.types.NodeSocket] = []
+        for index, (basis, channel) in enumerate(
+            zip(_RNM_BASIS, ("Red", "Green", "Blue"))
+        ):
+            dot = material.node_tree.nodes.new("ShaderNodeVectorMath")
+            dot.name = f"{prefix}_RNM_Basis_{index}_Dot"
+            dot.operation = "DOT_PRODUCT"
+            dot.inputs[1].default_value = basis
+            material.node_tree.links.new(tangent_normal, dot.inputs[0])
+            clamp = material.node_tree.nodes.new("ShaderNodeMath")
+            clamp.name = f"{prefix}_RNM_Basis_{index}_Clamp"
+            clamp.operation = "MAXIMUM"
+            clamp.inputs[1].default_value = 0.0
+            material.node_tree.links.new(
+                dot.outputs["Value"],
+                clamp.inputs[0],
+            )
+            square = material.node_tree.nodes.new("ShaderNodeMath")
+            square.name = f"{prefix}_RNM_Basis_{index}_Square"
+            square.operation = "MULTIPLY"
+            material.node_tree.links.new(
+                clamp.outputs["Value"],
+                square.inputs[0],
+            )
+            material.node_tree.links.new(
+                clamp.outputs["Value"],
+                square.inputs[1],
+            )
+            weight = material.node_tree.nodes.new("ShaderNodeMath")
+            weight.name = f"{prefix}_RNM_Basis_{index}_Weight"
+            weight.operation = "MULTIPLY"
+            material.node_tree.links.new(
+                separate.outputs[channel],
+                weight.inputs[0],
+            )
+            material.node_tree.links.new(
+                square.outputs["Value"],
+                weight.inputs[1],
+            )
+            weighted.append(weight.outputs["Value"])
+
+        add_first = material.node_tree.nodes.new("ShaderNodeMath")
+        add_first.name = f"{prefix}_RNM_Add_01"
+        add_first.operation = "ADD"
+        material.node_tree.links.new(weighted[0], add_first.inputs[0])
+        material.node_tree.links.new(weighted[1], add_first.inputs[1])
+        factor = material.node_tree.nodes.new("ShaderNodeMath")
+        factor.name = f"{prefix}_RNM_Factor"
+        factor.label = "R3 radiosity-normal-map factor"
+        factor.operation = "ADD"
+        material.node_tree.links.new(
+            add_first.outputs["Value"],
+            factor.inputs[0],
+        )
+        material.node_tree.links.new(weighted[2], factor.inputs[1])
+
+        multiply = material.node_tree.nodes.new("ShaderNodeMixRGB")
+        multiply.name = f"{prefix}_Directional_Multiply"
+        multiply.label = "R3 baked light x directional response"
+        multiply.blend_type = "MULTIPLY"
+        multiply.inputs[0].default_value = 1.0
+        material.node_tree.links.new(color_output, multiply.inputs[1])
+        material.node_tree.links.new(
+            factor.outputs["Value"],
+            multiply.inputs[2],
+        )
+        material["insomniac_directional_lightmap"] = True
+        material["insomniac_directional_lightmap_model"] = (
+            "RADIOSITY_NORMAL_MAPPING"
+        )
         return multiply.outputs["Color"]
+
+    @staticmethod
+    def _tangent_normal_output(
+        material: bpy.types.Material,
+        principled: bpy.types.Node,
+        *,
+        prefix: str,
+    ) -> bpy.types.NodeSocket:
+        normal_input = principled.inputs["Normal"]
+        encoded_normal: bpy.types.NodeSocket | None = None
+        if normal_input.is_linked:
+            normal_node = normal_input.links[0].from_node
+            color_input = normal_node.inputs.get("Color")
+            if (
+                normal_node.bl_idname == "ShaderNodeNormalMap"
+                and color_input is not None
+                and color_input.is_linked
+            ):
+                encoded_normal = color_input.links[0].from_socket
+        if encoded_normal is None:
+            flat = material.node_tree.nodes.new("ShaderNodeCombineXYZ")
+            flat.name = f"{prefix}_RNM_Flat_Normal"
+            flat.inputs["Z"].default_value = 1.0
+            return flat.outputs["Vector"]
+
+        scale = material.node_tree.nodes.new("ShaderNodeVectorMath")
+        scale.name = f"{prefix}_RNM_Normal_Scale"
+        scale.operation = "MULTIPLY"
+        scale.inputs[1].default_value = (2.0, 2.0, 2.0)
+        material.node_tree.links.new(encoded_normal, scale.inputs[0])
+        bias = material.node_tree.nodes.new("ShaderNodeVectorMath")
+        bias.name = f"{prefix}_RNM_Normal_Bias"
+        bias.operation = "ADD"
+        bias.inputs[1].default_value = (-1.0, -1.0, -1.0)
+        material.node_tree.links.new(
+            scale.outputs["Vector"],
+            bias.inputs[0],
+        )
+        normalize = material.node_tree.nodes.new("ShaderNodeVectorMath")
+        normalize.name = f"{prefix}_RNM_Normal"
+        normalize.operation = "NORMALIZE"
+        material.node_tree.links.new(
+            bias.outputs["Vector"],
+            normalize.inputs[0],
+        )
+        return normalize.outputs["Vector"]
 
     def apply_tie_lightmap_transform(
         self,
@@ -1838,8 +2201,42 @@ class _MaterialFactory:
         lightmap_index: int,
         texture: DecodedTexture,
     ) -> bpy.types.Image:
+        return self._terrain_lighting_image(
+            zone_tuid,
+            lightmap_index,
+            texture,
+            role="lightmap",
+            name_component="Lightmap",
+            is_data=False,
+        )
+
+    def terrain_directional_lightmap_image(
+        self,
+        zone_tuid: int,
+        lightmap_index: int,
+        texture: DecodedTexture,
+    ) -> bpy.types.Image:
+        return self._terrain_lighting_image(
+            zone_tuid,
+            lightmap_index,
+            texture,
+            role="directional_lightmap",
+            name_component="Directional_Lightmap",
+            is_data=True,
+        )
+
+    def _terrain_lighting_image(
+        self,
+        zone_tuid: int,
+        lightmap_index: int,
+        texture: DecodedTexture,
+        *,
+        role: str,
+        name_component: str,
+        is_data: bool,
+    ) -> bpy.types.Image:
         lookup_key = f"zone:{zone_tuid:016X}"
-        key = (lightmap_index, "lightmap", lookup_key)
+        key = (lightmap_index, role, lookup_key)
         cached = self.images.get(key)
         if cached is not None:
             return cached
@@ -1851,7 +2248,7 @@ class _MaterialFactory:
                 scope,
                 "Zone",
                 f"{zone_tuid:016X}",
-                "Lightmap",
+                name_component,
                 f"{lightmap_index:04X}",
             )
             if part
@@ -1868,7 +2265,7 @@ class _MaterialFactory:
                 height=texture.info.height,
                 alpha=True,
                 float_buffer=False,
-                is_data=False,
+                is_data=is_data,
             )
             pixels = np.multiply(
                 np.flipud(texture.rgba),
@@ -1878,7 +2275,7 @@ class _MaterialFactory:
             image.pixels.foreach_set(pixels)
             image.pack()
             image.update()
-        self._apply_colorspace(image, "lightmap")
+        self._apply_colorspace(image, role)
         image["insomniac_texture_tuid"] = f"0x{texture.info.tuid:016X}"
         image["insomniac_requested_texture_id"] = (
             f"0x{lightmap_index:08X}"
@@ -1890,7 +2287,7 @@ class _MaterialFactory:
         image["insomniac_texture_format"] = (
             f"0x{texture.info.format_code:02X}"
         )
-        image["insomniac_texture_role"] = "lightmap"
+        image["insomniac_texture_role"] = role
         image["insomniac_texture_lookup_path"] = ""
         image["insomniac_texture_lookup_key"] = lookup_key
         image["insomniac_asset_scope"] = scope
@@ -2953,6 +3350,11 @@ def import_level(
                     if terrain.lightmap_index is not None
                     else None
                 )
+                directional_lightmap = (
+                    zone.directional_lightmaps.get(terrain.lightmap_index)
+                    if terrain.lightmap_index is not None
+                    else None
+                )
                 if use_material_variants:
                     variant_key = (
                         shader_index,
@@ -2969,6 +3371,7 @@ def import_level(
                                 zone.tuid,
                                 terrain.lightmap_index,
                                 lightmap,
+                                directional_lightmap,
                                 vertex_colors=has_vertex_colors,
                             )
                         )

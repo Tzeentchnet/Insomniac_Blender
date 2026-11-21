@@ -305,6 +305,9 @@ class Zone:
     terrain_meshes: list[TerrainMesh]
     shader_tuids: tuple[int, ...]
     lightmaps: dict[int, DecodedTexture] = field(default_factory=dict)
+    directional_lightmaps: dict[int, DecodedTexture] = field(
+        default_factory=dict
+    )
     shrub_instances: list[PlacedInstance] = field(default_factory=list)
     foliage_instances: list[PlacedInstance] = field(default_factory=list)
     unsupported_shrub_instances: int = 0

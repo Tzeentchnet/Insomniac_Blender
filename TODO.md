@@ -65,17 +65,17 @@ Created from the feature-gap review of [README.md](README.md) and
 
 ## 3. Compose R3 directional and shadow maps
 
-- [ ] Correlate `0x5410` resources with their `0x5400` baked-lightmap owners.
-- [ ] Determine channel semantics and UV relationships.
-- [ ] Establish whether the map modifies baked light, vertex light, direct
+- [x] Correlate `0x5410` resources with their `0x5400` baked-lightmap owners.
+- [x] Determine channel semantics and UV relationships.
+- [x] Establish whether the map modifies baked light, vertex light, direct
   light, or a separate term.
-- [ ] Compare candidate compositions against known in-game terrain and Tie
+- [x] Compare candidate compositions against known in-game terrain and Tie
   references.
-- [ ] Implement only the verified composition, without speculative fallback.
-- [ ] Cover terrain and compact-atlas Tie paths independently.
-- [ ] Add material-node and Blender persistence regressions.
-- [ ] Produce before/after visual-review scenes.
-- [ ] Treat dynamic scene lights as a separate follow-up feature.
+- [x] Implement only the verified composition, without speculative fallback.
+- [x] Cover terrain and compact-atlas Tie paths independently.
+- [x] Add material-node and Blender persistence regressions.
+- [x] Produce before/after visual-review scenes.
+- [x] Treat dynamic scene lights as a separate follow-up feature.
 
 ## 4. Resolve R2 cross-level texture dependencies automatically
 
