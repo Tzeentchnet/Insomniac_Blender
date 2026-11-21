@@ -109,7 +109,7 @@ Created from the feature-gap review of [README.md](README.md) and
 ### Validation
 
 - [x] Add bounds, index, transform, and malformed-record tests.
-- [ ] Verify representative terrain, static-prop, and gameplay collision.
+- [x] Verify representative terrain, static-prop, and gameplay collision.
 - [x] Validate saved-file persistence and export-oriented mesh integrity.
 
 ## 6. Decode RFoM secondary gameplay groups

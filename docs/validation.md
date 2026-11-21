@@ -70,19 +70,21 @@ and face-attribute persistence with:
   --python tools\blender_smoke_level_collision.py -- r2 `
   "C:\path\to\r2\level_cached.psarc" `
   --resource-suffix "/default/collision.dat" `
-  --output "E:\Tests\collision_review\r2_collision.blend"
+  --output "E:\Tests\InsomniacAssetIO\collision_review\r2_chicxulub_default_collision.blend"
 
 & "D:\Blender Foundation\Blender 5.2\blender.exe" --background `
   --factory-startup --python-exit-code 1 `
   --python tools\blender_smoke_level_collision.py -- r3 `
   "C:\path\to\r3\level_cached.psarc" `
   --resource-suffix "/a_start/collision.dat" `
-  --output "E:\Tests\collision_review\r3_collision.blend"
+  --output "E:\Tests\InsomniacAssetIO\collision_review\r3_mine_a_start_collision.blend"
 ```
 
-The retained review files contain 2,201 R2 instances using 558 meshes and
-7,261 R3 instances using 550 meshes. Both were reopened in Blender 5.2 with
-exact object, shared-mesh, metadata, and face-domain surface-attribute counts.
+The retained R2 review file contains 2,201 instances using 558 shared meshes
+with 107,759 faces: 131 Terrain objects and 2,070 Static Props. The R3 review
+contains 7,261 instances using 550 shared meshes with 19,361 faces: 63 Terrain
+objects and 7,198 Static Props. Both were reopened in Blender 5.2 with exact
+object, shared-mesh, metadata, and face-domain surface-attribute counts.
 
 Run the equivalent TOD collision-only review against the raw non-IGHW
 resource with:
@@ -92,11 +94,12 @@ resource with:
   --factory-startup --python-exit-code 1 `
   --python tools\blender_smoke_level_collision.py -- tod `
   "C:\path\to\tod\level_cached.psarc" `
-  --output "E:\Tests\collision_review\tod_collision.blend"
+  --output "E:\Tests\InsomniacAssetIO\collision_review\tod_kerchu_city_collision.blend"
 ```
 
 The retained Kerchu City review file reopens with exactly 9,704 collision
-instances, 1,054 shared meshes, non-rendering wire settings, metadata, and
+instances, 1,054 shared meshes, and 92,103 faces: 688 Terrain objects and
+9,016 Static Props. It retains non-rendering wire settings, metadata, and
 face-domain surface attributes. The Metropolis real-data regression validates
 15,150 instances, 1,565 meshes, 93,733 vertices, and 129,382 retained faces.
 
@@ -265,7 +268,7 @@ Validate RFoM imports with Blender 5.2:
   --factory-startup --python-exit-code 1 `
   --python tools\blender_smoke_level_collision.py -- rfom `
   "E:\tests\InsomniacAssetIO\resistance_fom\level20" `
-  --output "E:\tests\InsomniacAssetIO\collision_review\rfom_collision.blend"
+  --output "E:\Tests\InsomniacAssetIO\collision_review\rfom_level20_collision.blend"
 ```
 
 For level imports, the Blender smoke test compares every decoded shrub,
@@ -276,7 +279,18 @@ empties, 43 effect empties, 1,123 typed marker empties, 65 Moby-group empties,
 and 93 named-area empties. All 1,813 secondary objects remain in-front,
 non-rendering context, and none are routed to a Moby mesh. The collision-only
 review saves, reopens, and revalidates all 13,291 wire objects, 2,491 shared
-meshes, instance metadata, and face-domain surface attributes.
+meshes, 363,870 faces, instance metadata, and face-domain surface attributes.
+Its Collections contain 995 Terrain objects, 12,235 Static Props, and 61
+Placed Collision objects.
+
+Separate Blender 5.2.2 review renders confirm that the RFoM terrain forms a
+continuous level surface and the static-prop collision forms coherent
+building and prop hulls. The 61 placed gameplay-collision instances use five
+shared prototypes with instance counts of 47, 6, 6, 1, and 1. Prototype
+close-ups show bounded rounded, rectangular, and paired planar collision
+patches rather than exploded or corrupt geometry. The overview and close-up
+renders are retained under
+`E:\Tests\InsomniacAssetIO\collision_review\verification`.
 
 The full USA collision corpus contains 41 `ps3levelcoll.dat` files with
 446,785 records, 90,766 shared prototypes, 8,783,640 vertices, and
