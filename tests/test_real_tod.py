@@ -8,6 +8,7 @@ from pathlib import Path
 
 import numpy as np
 
+from insomniac_asset_io.core.collision import validate_collision_scene
 from insomniac_asset_io.core.iso import list_game_levels
 from insomniac_asset_io.core.source import GameSource
 from insomniac_asset_io.games.ratchet_tod.reader import RatchetTodReader
@@ -102,6 +103,27 @@ class RealRatchetTodIsoTests(unittest.TestCase):
                     ],
                 )
 
+                collision = reader.read_level_collision()
+                validate_collision_scene(
+                    collision,
+                    label="Kerchu City collision",
+                )
+                self.assertEqual(len(collision.instances), 9704)
+                self.assertEqual(len(collision.meshes), 1054)
+                self.assertEqual(
+                    Counter(
+                        instance.metadata["flags"]
+                        for instance in collision.instances
+                    ),
+                    {0x20: 9016, 0x00: 688},
+                )
+                self.assertEqual(
+                    Counter(
+                        mesh.source_kind for mesh in collision.meshes
+                    ),
+                    {"TERRAIN": 688, "TIE": 366},
+                )
+
 
 @unittest.skipUnless(REAL_SOURCE, "TOD_LEVEL_SOURCE is not set")
 class RealRatchetTodTests(unittest.TestCase):
@@ -170,6 +192,33 @@ class RealRatchetTodTests(unittest.TestCase):
             gameplay = reader.read_gameplay_regions()[0]
             self.assertEqual(gameplay.name, "art")
             self.assertTrue(gameplay.moby_instances)
+
+            collision = reader.read_level_collision()
+            validate_collision_scene(
+                collision,
+                label="Metropolis collision",
+            )
+            self.assertEqual(len(collision.instances), 15150)
+            self.assertEqual(len(collision.meshes), 1565)
+            self.assertEqual(
+                sum(len(mesh.positions) for mesh in collision.meshes),
+                93733,
+            )
+            self.assertEqual(
+                sum(len(mesh.indices) for mesh in collision.meshes),
+                129382,
+            )
+            self.assertEqual(
+                Counter(
+                    instance.metadata["flags"]
+                    for instance in collision.instances
+                ),
+                {0x20: 14709, 0x00: 441},
+            )
+            self.assertEqual(
+                Counter(mesh.source_kind for mesh in collision.meshes),
+                {"TIE": 1124, "TERRAIN": 441},
+            )
 
 
 if __name__ == "__main__":

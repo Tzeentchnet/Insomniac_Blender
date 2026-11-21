@@ -8,6 +8,7 @@ from pathlib import PurePosixPath
 import numpy as np
 
 from ...core.binary import IghwFile, Section
+from ...core.collision import CollisionScene as LevelCollisionScene
 from ...core.errors import FormatError, MissingResourceError
 from ...core.source import GameSource
 from ..resistance_2.animations import (
@@ -37,6 +38,7 @@ from ..resistance_2.reader import (
     _matrix_from_zyx,
 )
 from ..resistance_2.textures import decode_texture, texture_mip_size
+from .level_collision import decode_level_collision_resource
 
 LOGGER = logging.getLogger(__name__)
 
@@ -1083,6 +1085,14 @@ class RatchetTodReader(Resistance2Reader):
 
     def clear_texture_cache(self) -> None:
         self._texture_cache.clear()
+
+    def read_level_collision(self) -> LevelCollisionScene:
+        path = self._find_level_resource("collision.dat")
+        return decode_level_collision_resource(
+            self.source.read(path),
+            resource_path=path,
+            warnings=self.warnings,
+        )
 
     def read_zones(self) -> list[Zone]:
         tie_instances: list[PlacedInstance] = []

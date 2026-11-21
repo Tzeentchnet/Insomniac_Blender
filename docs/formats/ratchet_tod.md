@@ -256,7 +256,89 @@ TOD has one logical zone per level.
   ZYX Euler rotation, uniform scale, and local Moby index are at
   `0x18`, `0x24`, `0x30`, and `0x3C`.
 
-The current adapter does not decode the separate non-IGHW `collision.dat`
-layout or unverified secondary-bangle/LOD semantics. Runtime foliage wind,
-Shrub wind and packed vertex metadata, Foliage custom normals, and
-camera-facing billboard behavior are not reproduced.
+## Level collision
+
+`collision.dat` is a separate raw big-endian resource, not an IGHW
+container. Its verified geometry header is:
+
+| Offset | Type | Meaning |
+|---:|---|---|
+| `0x00` | `u32` | record-table offset, observed `0x80` |
+| `0x04` | `u32` | exact record count |
+| `0x08` | `u32` | prototype-blob offset |
+| `0x0C` | `u32` | prototype-blob length |
+| `0x20` | `f32` | broad-phase quantization value, observed `40.0` |
+| `0x24` | `f32` | reciprocal quantization value, observed `0.025` |
+| `0x30` | `u32` | exact prototype-blob end |
+| `0x38` | `u32` | observed `0x47` |
+| `0x3C` | `u32` | later runtime spatial-structure offset |
+
+The record table is contiguous:
+`recordOffset + recordCount * 0x80 == prototypeOffset`. The runtime
+structures after the prototype blob are not required to recover authored
+geometry and remain unclassified.
+
+Each record has stride `0x80`:
+
+| Offset | Type | Meaning |
+|---:|---|---|
+| `0x00`, `0x10`, `0x20` | padded `vec3` | stored linear-transform rows |
+| `0x30` | `vec4` | translation, with W equal to `1.0` |
+| `0x40` | `vec4` | bounding-sphere center and radius |
+| `0x50` | `vec3` | AABB minimum |
+| `0x60` | `vec3` | AABB maximum |
+| `0x70` | `u8 + u24` | family flags and collision-component index |
+| `0x74` | `u32` | prototype-relative offset |
+| `0x78` | `u16` | collision-group value |
+| `0x7A` | `u16` | exact aligned prototype extent |
+| `0x7C` | `u32` | zero/reserved |
+
+The stored `3x3` basis is transposed into the placement matrix. Prototype
+positions and translations are authored in yards and are multiplied by
+`0.9144`. Flag `0x00` denotes identity-transformed world collision and has a
+zero component index. Flag `0x20` denotes Tie collision. Every tested
+flag-`0x20` transform matches a `main.dat:0x9240` Tie placement after unit
+conversion. The low 24 bits reset across Tie collision families and identify
+the component within that family; they are not a Tie asset or placement
+index.
+
+All 2,630 referenced prototypes in the tested Metropolis and Kerchu City
+files use marker `1` quantized triangles:
+
+| Offset | Type | Meaning |
+|---:|---|---|
+| `0x00` | `u16` | vertex count |
+| `0x02` | `u16` | signed-base offset, observed `0x60` |
+| `0x04` | `u16` | quantization marker, observed `1` |
+| `0x06` | `u16` | source face count |
+| `0x08` | `u16` | face-data offset |
+| `0x0C` | `u16` | aligned geometry-data length |
+| `0x60` | `i32[3]` | signed base position |
+| `0x70` | grouped `u16` | eight X, eight Y, and eight Z deltas per group |
+
+Each local coordinate is `(base + delta) * 0.9144 / 1024`. Face words use
+the same compact fields as later PS3 collision:
+
+- A: `(word >> 18) & 0x1FF`
+- B: `(word >> 9) & 0x1FF`
+- C: `word & 0x1FF`
+- surface: `word >> 27`
+
+The aligned geometry-data length ends after the face words; the larger
+record extent includes trailing runtime acceleration data. Repeated-index,
+geometrically zero-area, and duplicate triangles are removed before Blender
+face attributes are assigned. All-degenerate prototypes are treated as
+explicit no-op source data and reported once per resource.
+
+Metropolis contains 15,247 source records and 1,572 prototypes. After seven
+no-op prototypes remove 97 references, it imports 15,150 instances using
+1,565 shared meshes. Kerchu City contains 9,913 source records and 1,058
+prototypes; four no-op prototypes remove 209 references, leaving 9,704
+instances and 1,054 meshes. Together the imported prototypes contain 157,142
+vertices and 221,485 retained faces. The decoder discards 1,436 degenerate
+and 1,573 duplicate source faces.
+
+The current adapter does not decode unverified secondary-bangle/LOD
+semantics or Moby collision. Runtime foliage wind, Shrub wind and packed
+vertex metadata, Foliage custom normals, and camera-facing billboard
+behavior are not reproduced.

@@ -72,7 +72,8 @@ fields from `PARAM.SFO` before extraction.
 | Shrub and foliage level geometry | Supported as linked static meshes and placements; foliage includes first-LOD branch and sprite-card geometry |
 | Gameplay Moby placement | Supported as linked static mesh instances |
 | Retail names | Deterministic `Moby_XXXX`, `Tie_XXXXXXXX`, and `Shrub_XXXXXXXX` names; retail debug names are absent |
-| Moby/level collision, lighting, VFX, and cubemaps | Not yet implemented |
+| Level collision | Optional world and Tie triangle collision from the separate raw `collision.dat`; disabled by default |
+| Moby collision, lighting, VFX, and cubemaps | Not yet implemented |
 
 See [Tools of Destruction formats](docs/formats/ratchet_tod.md) and
 [known issues](docs/known_issues.md) for the verified old-engine layouts and

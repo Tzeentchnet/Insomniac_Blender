@@ -23,6 +23,10 @@ bounded synthetic `0x2900` resources for world terrain, shared Tie
 prototypes, triangle surfaces, boxes, spheres, capsules, and cylinders. It
 also covers malformed table relationships, AABBs, transforms, face indices,
 degenerate/duplicate faces, and all-degenerate no-op prototypes.
+`test_level_collision_tod.py` independently builds the raw TOD header,
+`0x80`-byte records, marker-1 triangle prototypes, yard-scaled transforms,
+surface words, malformed ranges, and no-op prototypes so the older format is
+not tested through R2/R3 assumptions.
 
 `test_blender_optional_geometry.py` imports two collision instances that
 share one prototype, verifies source-group Collections and face-domain
@@ -40,6 +44,10 @@ python -m unittest `
 $env:R3_LEVEL_SOURCE = "C:\path\to\r3\level_cached.psarc"
 python -m unittest `
   tests.test_real_r3.RealResistance3Tests.test_decodes_level_collision -v
+
+$env:TOD_LEVEL_SOURCE = "C:\path\to\tod\level_cached.psarc"
+python -m unittest `
+  tests.test_real_tod.RealRatchetTodTests.test_decodes_representative_metropolis_chains -v
 ```
 
 The current local retail corpus covers 58 regional files from representative
@@ -71,6 +79,22 @@ and face-attribute persistence with:
 The retained review files contain 2,201 R2 instances using 558 meshes and
 7,261 R3 instances using 550 meshes. Both were reopened in Blender 5.2 with
 exact object, shared-mesh, metadata, and face-domain surface-attribute counts.
+
+Run the equivalent TOD collision-only review against the raw non-IGHW
+resource with:
+
+```powershell
+& "D:\Blender Foundation\Blender 5.2\blender.exe" --background `
+  --factory-startup --python-exit-code 1 `
+  --python tools\blender_smoke_level_collision.py -- tod `
+  "C:\path\to\tod\level_cached.psarc" `
+  --output "E:\Tests\collision_review\tod_collision.blend"
+```
+
+The retained Kerchu City review file reopens with exactly 9,704 collision
+instances, 1,054 shared meshes, non-rendering wire settings, metadata, and
+face-domain surface attributes. The Metropolis real-data regression validates
+15,150 instances, 1,565 meshes, 93,733 vertices, and 129,382 retained faces.
 
 The RFoM smoke test reports resource counts and decodes one Moby, skeleton,
 animset, diffuse texture, Tie, zone, shrub and foliage placement counts, and
@@ -199,11 +223,13 @@ Remove-Item Env:TOD_ISO_PATH
 
 This checks the representative compressed and pair-frame animations, a shader
 texture, a Tie, UFrag terrain, Tie placements, both Metropolis foliage assets,
-all 757 foliage placements, gameplay Moby placements, the exact
+all 757 foliage placements, gameplay Moby placements, raw level collision,
+the exact
 `BCUS98127`/`02.00` disc identity, and the 20-level disc inventory. The
 ISO-gated Kerchu City regression additionally checks all 15 Shrub meshes,
 4,387 vertices, 5,998 triangles, masked/opaque/blended material routing, and
-all 11,857 finite clustered placements with exact per-class counts. Each
+all 11,857 finite clustered placements with exact per-class counts, plus
+9,704 retained collision instances using 1,054 shared prototypes. Each
 source-specific test is skipped when its corresponding environment variable
 is not set.
 

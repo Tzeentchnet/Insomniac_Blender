@@ -103,7 +103,7 @@ Created from the feature-gap review of [README.md](README.md) and
 ### Game backends
 
 - [x] Investigate and implement the R2/R3 level-collision layout first.
-- [ ] Decode TOD's separate non-IGHW `collision.dat` format.
+- [x] Decode TOD's separate non-IGHW `collision.dat` format.
 - [ ] Decode RFoM's `ps3levelcoll.dat` format.
 
 ### Validation

@@ -40,10 +40,14 @@ level remain static linked meshes, as with R2/R3; import an individual Moby
 to edit its skeleton and Actions.
 
 Old Moby secondary-bangle semantics, damage permutations, authored lower
-LODs, and Moby collision are not yet independently verified. `collision.dat`
-also uses a separate non-IGHW level layout and is not imported. Foliage
-branch meshes, sprite cards, and placements are imported from the first
-authored LOD with masked, double-sided materials. Shrub meshes and clustered
+LODs, and Moby collision are not yet independently verified. The separate
+non-IGHW `collision.dat` is imported for verified world and Tie triangle
+collision. Its packed low-24-bit value identifies a collision component, not
+a unique render-asset owner, so the importer preserves that value without
+guessing an asset identity for colocated Tie placements. No primitive
+prototype family has been observed in the tested TOD files. Foliage branch
+meshes, sprite cards, and placements are imported from the first authored
+LOD with masked, double-sided materials. Shrub meshes and clustered
 placements are imported from the embedded old-engine layout. Runtime
 vegetation wind, packed Shrub vertex metadata, Foliage custom normals, and
 camera-facing billboarding are not reproduced. Lighting, VFX, cubemaps, and

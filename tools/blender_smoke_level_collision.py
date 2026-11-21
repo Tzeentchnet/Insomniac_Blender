@@ -18,6 +18,10 @@ from insomniac_asset_io.blender.importer import (
 from insomniac_asset_io.core.binary import IghwFile
 from insomniac_asset_io.core.collision import validate_collision_scene
 from insomniac_asset_io.core.source import GameSource
+from insomniac_asset_io.games.ratchet_tod.level_collision import (
+    decode_level_collision_resource as decode_tod_level_collision_resource,
+)
+from insomniac_asset_io.games.ratchet_tod.reader import RatchetTodReader
 from insomniac_asset_io.games.resistance_2.level_collision import (
     decode_level_collision_resource,
 )
@@ -28,9 +32,9 @@ from insomniac_asset_io.games.resistance_3.reader import Resistance3Reader
 def _arguments() -> argparse.Namespace:
     arguments = sys.argv[sys.argv.index("--") + 1 :] if "--" in sys.argv else []
     parser = argparse.ArgumentParser(
-        description="Import R2/R3 level collision in Blender"
+        description="Import R2/R3/TOD level collision in Blender"
     )
-    parser.add_argument("game", choices=("r2", "r3"))
+    parser.add_argument("game", choices=("r2", "r3", "tod"))
     parser.add_argument("source", type=Path)
     parser.add_argument(
         "--resource-suffix",
@@ -95,7 +99,11 @@ def _validate_blend(
 
 def main() -> int:
     args = _arguments()
-    reader_type = Resistance2Reader if args.game == "r2" else Resistance3Reader
+    reader_type = {
+        "r2": Resistance2Reader,
+        "r3": Resistance3Reader,
+        "tod": RatchetTodReader,
+    }[args.game]
     register()
 
     with GameSource.open(args.source) as source:
@@ -113,14 +121,21 @@ def main() -> int:
                     f"{args.resource_suffix!r}, found {len(candidates)}"
                 )
             resource_path = candidates[0]
-            scene = decode_level_collision_resource(
-                IghwFile(source.read(resource_path), label=resource_path),
-                resource_path=resource_path,
-                quantization_markers=(
-                    source_reader.collision_quantization_markers
-                ),
-                warnings=source_reader.warnings,
-            )
+            if args.game == "tod":
+                scene = decode_tod_level_collision_resource(
+                    source.read(resource_path),
+                    resource_path=resource_path,
+                    warnings=source_reader.warnings,
+                )
+            else:
+                scene = decode_level_collision_resource(
+                    IghwFile(source.read(resource_path), label=resource_path),
+                    resource_path=resource_path,
+                    quantization_markers=(
+                        source_reader.collision_quantization_markers
+                    ),
+                    warnings=source_reader.warnings,
+                )
             resource_prefix = str(Path(resource_path).parent).replace("\\", "/")
         else:
             scene = source_reader.read_level_collision()

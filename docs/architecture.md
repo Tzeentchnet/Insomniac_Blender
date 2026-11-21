@@ -119,6 +119,16 @@ clustered Shrub placements are decoded from `main.dat` plus the level
 vertex/index sections; `gameplay.dat` provides one `art` region of placed
 Mobys.
 
+TOD's separate big-endian `collision.dat` is a raw, non-IGHW resource. Its
+header points to one exact `0x80`-byte record table and a shared prototype
+blob. The dedicated backend validates those ranges, decodes marker-1
+quantized triangle prototypes, converts local positions and translations
+from yards to meters, and emits the same game-neutral collision scene used
+by R2/R3. Flag-0 records are world collision; flag-`0x20` records carry
+transforms that match `main.dat:0x9240` Tie placements. The low 24 packed
+bits are retained as a per-Tie collision-component index rather than
+misreported as an asset identity.
+
 ## Resistance: Fall of Man adapter
 
 `ResistanceFomReader` shares typed geometry, skeleton, animation, texture,
