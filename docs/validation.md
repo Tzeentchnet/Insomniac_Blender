@@ -518,6 +518,37 @@ error of `5.85e-8`, and the expected `0.17499352` X displacement when bone 30
 moved by `0.25`. The accompanying PNG confirms a coherent undeformed retail
 model.
 
+## Burning Skies animation-container validation
+
+Run the portable bounded-container, metadata, descriptor, raw-track, and
+malformed-input regressions:
+
+```powershell
+python -m unittest tests.test_burning_skies
+```
+
+Run the exact mapping fixture and complete decrypted European archive scan:
+
+```powershell
+$env:BURNING_SKIES_ARCHIVE = "C:\path\to\decrypted\build.psa"
+python -m unittest `
+  tests.test_real_burning_skies.RealBurningSkiesTests.test_maps_ellie_animation_metadata_to_stream_payload `
+  tests.test_real_burning_skies.RealBurningSkiesTests.test_validates_complete_animation_container_corpus
+```
+
+The corpus regression requires 18 RIPs with 24,237 packed NSIRSRC resources,
+59 SPKs with 75,746 entries, and a unique stream match for all 6,458
+animation metadata resources. It parses 6,433 timed 48 Hz clips and 25
+zero-rate placeholders, totaling 384,720 tracks and 11,423,760 keys. The raw
+kind counts must remain 361,733 for kind 0, 22,888 for kind 1, and 99 for
+kind 2, with a maximum bone index of 120.
+
+The exact `Ellie_CampAlert` fixture requires a unique stream, 48 Hz timing,
+duration 51, 66 tracks, 690 keys, raw-kind counts of 65 and one, and a
+maximum bone index of 120 against the 121-bone `CH_BASE_Ellie` skeleton. This
+validates container and timing structure only; it intentionally does not
+assert decoded transforms, general model ownership, or Blender Actions.
+
 Analyze one extracted cached archive, or every cached level archive in an ISO:
 
 ```powershell

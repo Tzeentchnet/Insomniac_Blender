@@ -65,8 +65,17 @@ audio remain outside the current level importer.
 Burning Skies render packets import with their full bind skeleton, armature
 modifier, and model-bone vertex groups. Rigid packets bind entirely to their
 single palette bone; skinned packets preserve normalized, coalesced
-influences. Animation is not decoded. All 23 resources without render packets
-expose valid bind matrices and import as armature-only assets.
+influences. All 23 resources without render packets expose valid bind
+matrices and import as armature-only assets.
+
+RIP metadata and SPK payload containers are bounded, and all 6,458 retail
+animation metadata resources resolve uniquely to their raw streams by name,
+stream class, and both payload sizes. Timing, bone indices, key times, and the
+three raw track kinds are inspected, but packed transform semantics are not
+decoded. Quaternion order and scaling, translation reference space, the
+fourth packed value, coordinate conversion, looping, additive behavior, and
+general model ownership remain unproven. The reader therefore exposes no
+Burning Skies animation clips or Blender Actions.
 
 Vita PVRTC-II 4bpp textures are decoded, including hard-transition palettes
 and punch-through alpha. Burning Skies normal maps are direct tangent-space

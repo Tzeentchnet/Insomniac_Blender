@@ -43,8 +43,9 @@ Internal virtual pointers resolve to `serialized_data_base + pointer`.
 The parser bounds-checks every pointer, table, vertex range, index range, and
 texture range before reading it.
 
-Known root types are `0x1C` for Model, `0x09` for Material, and `0x0A` or
-`0x0E` for the observed texture variants.
+Known root types are `0x1C` for Model, `0x09` for Material, `0x0A` or
+`0x0E` for the observed texture variants, `0x05` for animation sets, and
+`0x08` for animation clip metadata.
 
 ## SMF models
 
@@ -273,11 +274,126 @@ runtime object is textured. The archive's otherwise-unreferenced
 asset-specific runtime material override rather than emitting the default
 white material.
 
+## RIP metadata bundles
+
+The archive's `.rip` files are `RESOURCEINFOPCK` version 1 metadata bundles.
+Their outer `uint32` at `+0x00` points to an inner base, normally `0x10`.
+The inner header has this verified layout:
+
+| Inner offset | Type | Meaning |
+|---:|---|---|
+| `0x00` | 16 bytes | `RESOURCEINFOPCK\0` |
+| `0x10` | `uint32` | Version, currently `1` |
+| `0x18` | pointer | Resource-table root |
+
+Pointers in the inner structure are relative to the inner base. The root
+stores the resource count at `+0x00`, the resource-offset table pointer at
+`+0x04`, and the end of the packed resource region at `+0x08`. Resource
+offsets are strictly ordered. Consecutive offsets, or the final region end,
+bound each complete `NSIRSRC` resource without scanning for magic bytes.
+
+The tested archive contains 18 RIP files with 24,237 packed resources. The
+reader bounds the inner header, root, offset table, every resource range, and
+each nested `NSIRSRC` before exposing it.
+
+## SPK payload bundles
+
+Sibling `.spk` files are `SPK\0` version 2 stream bundles. Their outer
+`uint32` also points to an inner base, normally `0x10`. The inner header
+stores the version at `+0x04` and a root pointer at `+0x0C`. The verified
+root fields are:
+
+| Root offset | Type | Meaning |
+|---:|---|---|
+| `0x00` | `uint32` | Resource-entry count |
+| `0x0C` | pointer | Resource table |
+| `0x1C` | pointer | Name table |
+
+The name table stores its count and record-table pointer. One leading word is
+followed by fixed `0x0C`-byte records containing the null-terminated string
+length, string pointer, and name hash. Resource records begin eight bytes
+after the resource-table pointer and use a `0x54`-byte stride. Each retail
+record reports one stream descriptor with a name index, stream class, and
+bounded primary and secondary payload pointers and sizes.
+
+Duplicate names are valid within and across SPKs, so lookup preserves every
+matching entry rather than assuming global name uniqueness. The tested
+archive contains 59 SPKs, 75,746 resource entries, and 40,290 globally
+distinct names.
+
+## Animation metadata and raw tracks
+
+Root type `0x05` is an animation set. Its type-`0x02` dependencies enumerate
+the set's clip names, but do not identify a model or skeleton owner. Root type
+`0x08` is clip metadata. Its packed-stream descriptor begins at resource
+offset `0x8C`:
+
+| Descriptor offset | Type | Meaning |
+|---:|---|---|
+| `0x00` | `float32` | Scale, exactly `1.0` |
+| `0x04` | `uint32` | Primary size |
+| `0x08` | `uint32` | Primary offset, exactly zero |
+| `0x0C` | `uint32` | Reserved, zero |
+| `0x10` | `uint32` | Secondary size |
+| `0x14` | `uint32` | Secondary offset, equal to primary size |
+| `0x18` | `uint32` | Reserved, zero |
+| `0x1C` | `uint32` | Reserved, zero |
+
+All 6,458 root-`0x08` resources map uniquely to one sibling SPK entry when
+matched by exact resource name, stream class `0x00020000`, primary size, and
+secondary size. Name-only matching is insufficient because duplicate SPK
+names are valid.
+
+The normal primary animation stream has a `0x30`-byte header:
+
+| Offset | Type | Meaning |
+|---:|---|---|
+| `0x00` | `uint32` | Track count |
+| `0x04` | `uint32` | Frame rate |
+| `0x08..0x14` | 4 x `uint32` | Reserved, zero |
+| `0x18` | `uint32` | Auxiliary/event count |
+| `0x1C` | `uint32` | Auxiliary/event offset |
+| `0x20` | `uint32` | Reserved, zero |
+| `0x24` | `float32` | Duration in authored frame units |
+| `0x28..0x2F` | 2 x `uint32` | `0xDDDDDDDD` fill |
+
+Track records begin at `0x30` and have a `0x10`-byte stride. Each record
+stores a bone index, raw kind (`0`, `1`, or `2`), key count, and key-data
+offset. Each `0x0C`-byte key stores a `float32` time followed by four signed
+16-bit values. The inspector bounds every table and key range, requires
+finite nondecreasing times, and verifies that each track begins at zero and
+ends at the clip duration. It retains the auxiliary/event location but does
+not decode that table; the secondary payload also remains opaque.
+
+The complete retail scan found:
+
+- 6,433 timed clips, all at 48 frames per second;
+- 25 zero-rate, zero-track resources, comprising 23 empty 40-byte
+  placeholders and two event-only resources;
+- 384,720 tracks and 11,423,760 keys;
+- 361,733 raw-kind-0 tracks, 22,888 raw-kind-1 tracks, and 99 raw-kind-2
+  tracks;
+- bone indices through 120 and durations from zero through 3,754 authored
+  frames.
+
+Raw kind 0 is rotation-like, kind 1 is strongly associated with positional
+motion, and kind 2 is scale-like, but those observations are not sufficient
+for transform decoding. Quaternion component order and track-specific scale,
+the fourth signed value in kinds 1 and 2, translation reference space,
+coordinate conversion, looping, additive behavior, and broad model ownership
+remain unproven. `Ellie_CampAlert` reaches bone 120 and exactly fits the
+121-bone `CH_BASE_Ellie` skeleton, but names alone do not establish a general
+ownership rule.
+
+For that reason the raw inspector does not create shared decoded clips, the
+Burning Skies reader does not expose animations, and Blender Actions are not
+created.
+
 ## Unsupported resource families
 
 The experimental reader does not currently import:
 
-- animation;
+- decoded animation transforms or Blender Actions;
 - collision geometry not represented by GBuffer packets;
 - level `.geo` resources;
 - cutscenes, effects, lighting, or audio resources.

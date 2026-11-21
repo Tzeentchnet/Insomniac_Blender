@@ -2,12 +2,25 @@ from __future__ import annotations
 
 import os
 import unittest
-from pathlib import Path
+from collections import Counter
+from pathlib import Path, PurePosixPath
 
 import numpy as np
 
 from insomniac_asset_io.core.source import GameSource
 from insomniac_asset_io.games.resistance_2.formats import AssetKind
+from insomniac_asset_io.games.resistance_burning_skies.animations import (
+    ANIMATION_FRAME_RATE,
+    ANIMATION_STREAM_CLASS,
+    PackedTrackKind,
+    animation_set_clip_names,
+    inspect_packed_animation,
+    packed_animation_descriptor,
+)
+from insomniac_asset_io.games.resistance_burning_skies.containers import (
+    ResourceInfoPack,
+    StreamPack,
+)
 from insomniac_asset_io.games.resistance_burning_skies.models import decode_smf
 from insomniac_asset_io.games.resistance_burning_skies.reader import (
     BurningSkiesReader,
@@ -21,6 +34,193 @@ REAL_SOURCE = os.environ.get("BURNING_SKIES_ARCHIVE")
     "BURNING_SKIES_ARCHIVE is not set",
 )
 class RealBurningSkiesTests(unittest.TestCase):
+    def test_maps_ellie_animation_metadata_to_stream_payload(self):
+        with GameSource.open(Path(REAL_SOURCE)) as source:
+            resource_pack = ResourceInfoPack(
+                source.read("levels/Bayonne.rip"),
+                label="levels/Bayonne.rip",
+            )
+            root_counts: Counter[int] = Counter()
+            ellie_set = None
+            camp_alert = None
+            for resource in resource_pack.iter_resources():
+                root_counts[resource.root_type] += 1
+                if resource.resource_name == "Ellie":
+                    ellie_set = resource
+                elif resource.resource_name == "Ellie_CampAlert":
+                    camp_alert = resource
+
+            self.assertEqual(resource_pack.resource_count, 2_724)
+            self.assertEqual(root_counts[0x05], 26)
+            self.assertEqual(root_counts[0x08], 690)
+            self.assertIsNotNone(ellie_set)
+            self.assertIsNotNone(camp_alert)
+            assert ellie_set is not None
+            assert camp_alert is not None
+            clip_names = animation_set_clip_names(ellie_set)
+            self.assertEqual(len(clip_names), 64)
+            self.assertEqual(clip_names[0], "Ellie_CampAlert")
+            self.assertEqual(clip_names[-1], "Ellie_Walk_Start")
+
+            descriptor = packed_animation_descriptor(camp_alert)
+            stream_pack = StreamPack(
+                source.read("levels/Bayonne_global.spk"),
+                label="levels/Bayonne_global.spk",
+            )
+            matches = [
+                entry
+                for entry in stream_pack.entries_named(
+                    camp_alert.resource_name
+                )
+                if entry.stream_class == ANIMATION_STREAM_CLASS
+                and entry.primary_size == descriptor.primary_size
+                and entry.secondary_size == descriptor.secondary_size
+            ]
+            self.assertEqual(len(matches), 1)
+            entry = matches[0]
+            self.assertEqual(entry.name_hash, 0x0178DEBF)
+            self.assertEqual(entry.primary_size, 0x24A8)
+            self.assertEqual(entry.secondary_size, 0x280)
+            clip = inspect_packed_animation(
+                stream_pack.primary_data(entry),
+                label=entry.name,
+            )
+            ellie = decode_smf(
+                source.read("models/CH_BASE_Ellie.smf"),
+                label="models/CH_BASE_Ellie.smf",
+            )
+
+        self.assertEqual(clip.frame_rate, ANIMATION_FRAME_RATE)
+        self.assertEqual(clip.duration, 51.0)
+        self.assertEqual(len(clip.tracks), 66)
+        self.assertEqual(sum(track.key_count for track in clip.tracks), 690)
+        self.assertEqual(
+            Counter(track.kind for track in clip.tracks),
+            Counter(
+                {
+                    PackedTrackKind.RAW_0: 65,
+                    PackedTrackKind.RAW_1: 1,
+                }
+            ),
+        )
+        self.assertEqual(max(track.bone_index for track in clip.tracks), 120)
+        self.assertIsNotNone(ellie.skeleton)
+        assert ellie.skeleton is not None
+        self.assertEqual(ellie.skeleton.bone_count, 121)
+
+    def test_validates_complete_animation_container_corpus(self):
+        packed_resource_count = 0
+        animation_count = 0
+        stream_resource_count = 0
+        track_count = 0
+        key_count = 0
+        max_bone_index = 0
+        frame_rates: Counter[int] = Counter()
+        track_kinds: Counter[PackedTrackKind] = Counter()
+        parsed_stream_packs: set[str] = set()
+
+        with GameSource.open(Path(REAL_SOURCE)) as source:
+            rip_paths = sorted(
+                path for path in source.paths if path.casefold().endswith(".rip")
+            )
+            spk_paths = sorted(
+                path for path in source.paths if path.casefold().endswith(".spk")
+            )
+            for rip_path in rip_paths:
+                rip_posix = PurePosixPath(rip_path)
+                related_stream_packs = [
+                    path
+                    for path in spk_paths
+                    if PurePosixPath(path).parent == rip_posix.parent
+                    and (
+                        PurePosixPath(path).stem == rip_posix.stem
+                        or PurePosixPath(path).stem.startswith(
+                            f"{rip_posix.stem}_"
+                        )
+                    )
+                ]
+                resource_pack = ResourceInfoPack(
+                    source.read(rip_path),
+                    label=rip_path,
+                )
+                packed_resource_count += resource_pack.resource_count
+                expected: dict[tuple[str, int, int], None] = {}
+                for resource in resource_pack.iter_resources():
+                    if resource.root_type != 0x08:
+                        continue
+                    descriptor = packed_animation_descriptor(resource)
+                    identity = (
+                        resource.resource_name,
+                        descriptor.primary_size,
+                        descriptor.secondary_size,
+                    )
+                    self.assertNotIn(identity, expected)
+                    expected[identity] = None
+                animation_count += len(expected)
+
+                matched: Counter[tuple[str, int, int]] = Counter()
+                for spk_path in related_stream_packs:
+                    self.assertNotIn(spk_path, parsed_stream_packs)
+                    parsed_stream_packs.add(spk_path)
+                    stream_pack = StreamPack(
+                        source.read(spk_path),
+                        label=spk_path,
+                    )
+                    stream_resource_count += len(stream_pack.entries)
+                    for entry in stream_pack.entries:
+                        identity = (
+                            entry.name,
+                            entry.primary_size,
+                            entry.secondary_size,
+                        )
+                        if (
+                            entry.stream_class != ANIMATION_STREAM_CLASS
+                            or identity not in expected
+                        ):
+                            continue
+                        matched[identity] += 1
+                        clip = inspect_packed_animation(
+                            stream_pack.primary_data(entry),
+                            label=f"{spk_path}:{entry.name}",
+                        )
+                        frame_rates[clip.frame_rate] += 1
+                        track_count += len(clip.tracks)
+                        for track in clip.tracks:
+                            track_kinds[track.kind] += 1
+                            key_count += track.key_count
+                            max_bone_index = max(
+                                max_bone_index,
+                                track.bone_index,
+                            )
+                self.assertEqual(
+                    matched,
+                    Counter({identity: 1 for identity in expected}),
+                )
+
+        self.assertEqual(len(rip_paths), 18)
+        self.assertEqual(len(spk_paths), 59)
+        self.assertEqual(parsed_stream_packs, set(spk_paths))
+        self.assertEqual(packed_resource_count, 24_237)
+        self.assertEqual(stream_resource_count, 75_746)
+        self.assertEqual(animation_count, 6_458)
+        self.assertEqual(
+            frame_rates,
+            Counter({ANIMATION_FRAME_RATE: 6_433, 0: 25}),
+        )
+        self.assertEqual(track_count, 384_720)
+        self.assertEqual(key_count, 11_423_760)
+        self.assertEqual(max_bone_index, 120)
+        self.assertEqual(
+            track_kinds,
+            Counter(
+                {
+                    PackedTrackKind.RAW_0: 361_733,
+                    PackedTrackKind.RAW_1: 22_888,
+                    PackedTrackKind.RAW_2: 99,
+                }
+            ),
+        )
+
     def test_decodes_known_model_material_and_texture(self):
         with GameSource.open(Path(REAL_SOURCE)) as source:
             reader = BurningSkiesReader(source)

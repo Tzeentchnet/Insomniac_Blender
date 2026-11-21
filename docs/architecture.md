@@ -346,6 +346,20 @@ the complete root `+0x10` bone-record array for every model, allowing the
 shared importer to create the armature, parent the mesh, add its modifier, and
 assign the decoded groups without a Burning Skies-specific Blender path.
 
+RIP and SPK animation-container inspection remains a separate evidence layer.
+The bounded container parser exposes complete nested NSIRSRC metadata
+resources and preserves duplicate SPK names with their primary and secondary
+payload ranges. The raw animation inspector classifies type-`0x05` set
+dependencies, validates type-`0x08` stream descriptors, and reads timing,
+track identities, key times, and four signed packed values without converting
+them into transforms.
+
+This layer deliberately does not feed the shared decoded-animation model.
+Matching metadata to one stream by name, class, and payload sizes proves
+container ownership, but does not prove skeleton ownership, component order,
+translation space, looping, or additive semantics. The Burning Skies reader
+continues to return no decoded clips until those boundaries are resolved.
+
 ## Asset Browser cache
 
 The Asset Browser cache is generated locally from a user-provided ISO. A

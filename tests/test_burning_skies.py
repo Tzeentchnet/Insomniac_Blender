@@ -9,12 +9,27 @@ import numpy as np
 
 from insomniac_asset_io.core.errors import FormatError, MissingResourceError
 from insomniac_asset_io.core.source import GameSource
+from insomniac_asset_io.games.resistance_burning_skies.animations import (
+    ANIMATION_FRAME_RATE,
+    ANIMATION_STREAM_CLASS,
+    PackedTrackKind,
+    animation_set_clip_names,
+    inspect_packed_animation,
+    packed_animation_descriptor,
+)
 from insomniac_asset_io.games.resistance_burning_skies.catalog import (
     build_source_catalog,
+)
+from insomniac_asset_io.games.resistance_burning_skies.containers import (
+    RESOURCE_INFO_PACK_MAGIC,
+    STREAM_PACK_MAGIC,
+    ResourceInfoPack,
+    StreamPack,
 )
 from insomniac_asset_io.games.resistance_burning_skies.formats import (
     NSIRSRC_MAGIC,
     NSIRSRC_VERSION,
+    NsirsrcFile,
 )
 from insomniac_asset_io.games.resistance_burning_skies.materials import (
     decode_material_texture_paths,
@@ -73,6 +88,225 @@ def _stream_descriptor(
         0,
         0,
     )
+
+
+def _resource_info_pack(resources: tuple[bytes, ...]) -> bytes:
+    inner_base = 0x10
+    root_pointer = 0x1C
+    table_pointer = 0x28
+    next_pointer = table_pointer + len(resources) * 4
+    offsets: list[int] = []
+    for resource in resources:
+        offsets.append(next_pointer)
+        next_pointer += len(resource)
+    data = bytearray(inner_base + next_pointer)
+    struct.pack_into("<I", data, 0, inner_base)
+    data[inner_base : inner_base + len(RESOURCE_INFO_PACK_MAGIC)] = (
+        RESOURCE_INFO_PACK_MAGIC
+    )
+    struct.pack_into(
+        "<III",
+        data,
+        inner_base + 0x10,
+        1,
+        next_pointer,
+        root_pointer,
+    )
+    struct.pack_into(
+        "<III",
+        data,
+        inner_base + root_pointer,
+        len(resources),
+        table_pointer,
+        next_pointer,
+    )
+    for index, (offset, resource) in enumerate(
+        zip(offsets, resources, strict=True)
+    ):
+        struct.pack_into(
+            "<I",
+            data,
+            inner_base + table_pointer + index * 4,
+            offset,
+        )
+        start = inner_base + offset
+        data[start : start + len(resource)] = resource
+    return bytes(data)
+
+
+def _stream_pack(
+    entries: tuple[tuple[str, int, bytes, bytes], ...],
+) -> bytes:
+    inner_base = 0x10
+    root_pointer = 0x10
+    name_table_pointer = 0x30
+    name_records_pointer = 0x38
+    name_records_end = name_records_pointer + 4 + len(entries) * 0x0C
+    name_pointer = (name_records_end + 3) & ~3
+    encoded_names = [name.encode("ascii") + b"\0" for name, *_ in entries]
+    name_pointers: list[int] = []
+    for encoded_name in encoded_names:
+        name_pointers.append(name_pointer)
+        name_pointer += len(encoded_name)
+    resource_table_pointer = (name_pointer + 0x0F) & ~0x0F
+    payload_pointer = (
+        resource_table_pointer + 8 + len(entries) * 0x54 + 0x0F
+    ) & ~0x0F
+    payload_pointers: list[tuple[int, int]] = []
+    for _name, _stream_class, primary, secondary in entries:
+        primary_pointer = payload_pointer
+        payload_pointer += len(primary)
+        secondary_pointer = payload_pointer
+        payload_pointer += len(secondary)
+        payload_pointers.append((primary_pointer, secondary_pointer))
+
+    data = bytearray(inner_base + payload_pointer)
+    struct.pack_into("<I", data, 0, inner_base)
+    data[inner_base : inner_base + len(STREAM_PACK_MAGIC)] = STREAM_PACK_MAGIC
+    struct.pack_into("<I", data, inner_base + 0x04, 2)
+    struct.pack_into("<I", data, inner_base + 0x0C, root_pointer)
+    root = inner_base + root_pointer
+    struct.pack_into("<I", data, root, len(entries))
+    struct.pack_into("<I", data, root + 0x0C, resource_table_pointer)
+    struct.pack_into("<I", data, root + 0x1C, name_table_pointer)
+    struct.pack_into(
+        "<II",
+        data,
+        inner_base + name_table_pointer,
+        len(entries),
+        name_records_pointer,
+    )
+    for index, (encoded_name, pointer) in enumerate(
+        zip(encoded_names, name_pointers, strict=True)
+    ):
+        struct.pack_into(
+            "<3I",
+            data,
+            inner_base + name_records_pointer + 4 + index * 0x0C,
+            len(encoded_name),
+            pointer,
+            0x1000 + index,
+        )
+        start = inner_base + pointer
+        data[start : start + len(encoded_name)] = encoded_name
+
+    for index, (
+        (name, stream_class, primary, secondary),
+        (primary_pointer, secondary_pointer),
+    ) in enumerate(zip(entries, payload_pointers, strict=True)):
+        del name
+        record = (
+            inner_base
+            + resource_table_pointer
+            + 8
+            + index * 0x54
+        )
+        struct.pack_into(
+            "<7I",
+            data,
+            record,
+            index,
+            stream_class,
+            1,
+            len(primary),
+            primary_pointer,
+            len(secondary),
+            secondary_pointer,
+        )
+        primary_start = inner_base + primary_pointer
+        secondary_start = inner_base + secondary_pointer
+        data[primary_start : primary_start + len(primary)] = primary
+        data[secondary_start : secondary_start + len(secondary)] = secondary
+    return bytes(data)
+
+
+def _animation_resource(
+    *,
+    name: str = "TestClip",
+    primary_size: int = 0x80,
+    secondary_size: int = 0x40,
+) -> bytes:
+    data = bytearray(0xB4)
+    data[:8] = NSIRSRC_MAGIC
+    struct.pack_into("<II", data, 0x08, NSIRSRC_VERSION, len(data))
+    struct.pack_into("<I", data, 0x28, 0x2C)
+    encoded_name = name.encode("ascii") + b"\0"
+    data[0x2C : 0x2C + len(encoded_name)] = encoded_name
+    struct.pack_into("<I", data, 0x5C, 0x08)
+    struct.pack_into(
+        "<f7I",
+        data,
+        0x8C,
+        1.0,
+        primary_size,
+        0,
+        0,
+        secondary_size,
+        primary_size,
+        0,
+        0,
+    )
+    return bytes(data)
+
+
+def _animation_primary() -> bytes:
+    duration = 10.0
+    rotation_offset = 0x50
+    translation_offset = rotation_offset + 2 * 0x0C
+    data = bytearray(translation_offset + 2 * 0x0C)
+    struct.pack_into("<II", data, 0, 2, ANIMATION_FRAME_RATE)
+    struct.pack_into("<f", data, 0x24, duration)
+    struct.pack_into("<2I", data, 0x28, 0xDDDDDDDD, 0xDDDDDDDD)
+    struct.pack_into(
+        "<4I",
+        data,
+        0x30,
+        2,
+        PackedTrackKind.RAW_0,
+        2,
+        rotation_offset,
+    )
+    struct.pack_into(
+        "<4I",
+        data,
+        0x40,
+        2,
+        PackedTrackKind.RAW_1,
+        2,
+        translation_offset,
+    )
+    struct.pack_into("<f4h", data, rotation_offset, 0.0, 0, 0, 0, 32767)
+    struct.pack_into(
+        "<f4h",
+        data,
+        rotation_offset + 0x0C,
+        duration,
+        0,
+        0,
+        16384,
+        28377,
+    )
+    struct.pack_into(
+        "<f4h",
+        data,
+        translation_offset,
+        0.0,
+        0,
+        0,
+        0,
+        -1,
+    )
+    struct.pack_into(
+        "<f4h",
+        data,
+        translation_offset + 0x0C,
+        duration,
+        1024,
+        -2048,
+        4096,
+        -1,
+    )
+    return bytes(data)
 
 
 def _model_resource(
@@ -482,6 +716,171 @@ def _texture_resource(
 
 
 class BurningSkiesFormatTests(unittest.TestCase):
+    def test_parses_resource_info_and_stream_pack_entries(self):
+        resources = (
+            bytes(_resource(0x05, DATA_BASE, "TestSet")),
+            _animation_resource(),
+        )
+        resource_pack = ResourceInfoPack(
+            _resource_info_pack(resources),
+            label="levels/Test.rip",
+        )
+
+        self.assertEqual(resource_pack.resource_count, 2)
+        self.assertEqual(
+            [resource.resource_name for resource in resource_pack.iter_resources()],
+            ["TestSet", "TestClip"],
+        )
+        self.assertEqual(resource_pack.resource(1).root_type, 0x08)
+
+        primary = _animation_primary()
+        secondary = bytes(range(64))
+        stream_pack = StreamPack(
+            _stream_pack(
+                (
+                    (
+                        "TestClip",
+                        ANIMATION_STREAM_CLASS,
+                        primary,
+                        secondary,
+                    ),
+                )
+            ),
+            label="levels/Test_global.spk",
+        )
+        entries = stream_pack.entries_named("TestClip")
+
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0].stream_class, ANIMATION_STREAM_CLASS)
+        self.assertEqual(stream_pack.primary_data(entries[0]), primary)
+        self.assertEqual(stream_pack.secondary_data(entries[0]), secondary)
+        self.assertEqual(stream_pack.entries_named("Missing"), ())
+
+    def test_rejects_malformed_resource_and_stream_packs(self):
+        invalid_magic = bytearray(
+            _resource_info_pack(
+                (bytes(_resource(0x05, DATA_BASE, "TestSet")),)
+            )
+        )
+        invalid_magic[0x10 + 0x0F] = ord("!")
+        with self.assertRaisesRegex(FormatError, "magic"):
+            ResourceInfoPack(bytes(invalid_magic), label="Bad.rip")
+
+        packed_resource = bytearray(
+            _resource_info_pack(
+                (bytes(_resource(0x05, DATA_BASE, "TestSet")),)
+            )
+        )
+        struct.pack_into("<I", packed_resource, 0x10 + 0x28, 0x20)
+        with self.assertRaisesRegex(FormatError, "overlaps"):
+            ResourceInfoPack(bytes(packed_resource), label="Bad.rip")
+
+        packed_stream = bytearray(
+            _stream_pack(
+                (
+                    (
+                        "TestClip",
+                        ANIMATION_STREAM_CLASS,
+                        _animation_primary(),
+                        bytes(16),
+                    ),
+                )
+            )
+        )
+        inner_base = struct.unpack_from("<I", packed_stream)[0]
+        root_pointer = struct.unpack_from(
+            "<I",
+            packed_stream,
+            inner_base + 0x0C,
+        )[0]
+        table_pointer = struct.unpack_from(
+            "<I",
+            packed_stream,
+            inner_base + root_pointer + 0x0C,
+        )[0]
+        record_offset = inner_base + table_pointer + 8
+        struct.pack_into("<I", packed_stream, record_offset, 99)
+        with self.assertRaisesRegex(FormatError, "invalid name index"):
+            StreamPack(bytes(packed_stream), label="Bad.spk")
+
+        struct.pack_into("<I", packed_stream, record_offset, 0)
+        struct.pack_into(
+            "<I",
+            packed_stream,
+            record_offset + 0x10,
+            len(packed_stream),
+        )
+        with self.assertRaisesRegex(FormatError, "outside the stream pack"):
+            StreamPack(bytes(packed_stream), label="Bad.spk")
+
+    def test_inspects_animation_set_descriptor_and_raw_tracks(self):
+        set_data = _resource(0x05, DATA_BASE, "TestSet")
+        struct.pack_into("<II", set_data, 0x7C, 2, 0x100)
+        struct.pack_into("<2I", set_data, 0x100, 0x110, 0x130)
+        struct.pack_into("<I", set_data, 0x110, 0x02)
+        set_data[0x114 : 0x11A] = b"Walk\0\0"
+        struct.pack_into("<I", set_data, 0x130, 0x02)
+        set_data[0x134 : 0x139] = b"Idle\0"
+        animation_set = NsirsrcFile(bytes(set_data), label="TestSet")
+
+        self.assertEqual(
+            animation_set_clip_names(animation_set),
+            ("Walk", "Idle"),
+        )
+
+        resource = NsirsrcFile(
+            _animation_resource(),
+            label="TestClip",
+        )
+        descriptor = packed_animation_descriptor(resource)
+        self.assertEqual(descriptor.primary_size, 0x80)
+        self.assertEqual(descriptor.primary_offset, 0)
+        self.assertEqual(descriptor.secondary_size, 0x40)
+        self.assertEqual(descriptor.secondary_offset, 0x80)
+
+        clip = inspect_packed_animation(
+            _animation_primary(),
+            label="TestClip",
+        )
+        self.assertEqual(clip.frame_rate, ANIMATION_FRAME_RATE)
+        self.assertEqual(clip.duration, 10.0)
+        self.assertEqual(len(clip.tracks), 2)
+        self.assertEqual(clip.tracks[0].bone_index, 2)
+        self.assertIs(clip.tracks[0].kind, PackedTrackKind.RAW_0)
+        self.assertIs(clip.tracks[1].kind, PackedTrackKind.RAW_1)
+        np.testing.assert_array_equal(
+            clip.tracks[0].times,
+            np.array((0.0, 10.0), dtype=np.float32),
+        )
+        np.testing.assert_array_equal(
+            clip.tracks[1].values[1],
+            np.array((1024, -2048, 4096, -1), dtype=np.int16),
+        )
+
+        placeholder = inspect_packed_animation(
+            bytes(0x28),
+            label="Empty",
+        )
+        self.assertTrue(placeholder.is_placeholder)
+        self.assertEqual(placeholder.tracks, ())
+
+    def test_rejects_malformed_raw_animation_tracks(self):
+        cases: list[tuple[str, int, int | float, str]] = [
+            ("frame rate", 0x04, 30, "frame rate"),
+            ("track kind", 0x34, 3, "unknown kind"),
+            ("key range", 0x3C, 0xFFFF, "key range"),
+            ("duration", 0x24, 9.0, "ends at"),
+        ]
+        for name, offset, value, message in cases:
+            with self.subTest(name=name):
+                data = bytearray(_animation_primary())
+                if isinstance(value, float):
+                    struct.pack_into("<f", data, offset, value)
+                else:
+                    struct.pack_into("<I", data, offset, value)
+                with self.assertRaisesRegex(FormatError, message):
+                    inspect_packed_animation(bytes(data), label=name)
+
     def test_decodes_rigid_gbuffer_geometry_and_uvs(self):
         model = decode_smf(
             _model_resource(),
