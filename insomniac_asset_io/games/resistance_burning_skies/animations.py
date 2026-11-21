@@ -118,8 +118,13 @@ def animation_set_clip_names(resource: NsirsrcFile) -> tuple[str, ...]:
             f"{resource.label}: root type 0x{resource.root_type:X} "
             "is not an animation set"
         )
+    dependencies = resource.dependencies()
+    if not dependencies:
+        raise FormatError(
+            f"{resource.label}: type-0x05 resource has no animation clips"
+        )
     names: list[str] = []
-    for index, dependency in enumerate(resource.dependencies()):
+    for index, dependency in enumerate(dependencies):
         if dependency.type_id != 0x02:
             raise FormatError(
                 f"{resource.label}: animation dependency {index} has "

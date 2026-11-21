@@ -360,6 +360,19 @@ container ownership, but does not prove skeleton ownership, component order,
 translation space, looping, or additive semantics. The Burning Skies reader
 continues to return no decoded clips until those boundaries are resolved.
 
+Native Burning Skies `.col` files use another isolated evidence layer. A
+bounded 32-bit Havok 2011 packfile reader validates the three sections and
+their local, global, and virtual fixups before accepting the single rigid-body
+and compressed-mesh object graph. The collision decoder reconstructs
+section-local packed and shared vertices, triangles and quads, and parallel
+raw user-data and collision-filter arrays.
+
+The result intentionally remains separate from the shared `CollisionScene`.
+The source archive contains 12 independent level meshes, while the
+experimental adapter has no selected-level context. Combining them would
+erase ownership rather than implement level support, so Blender integration
+waits for the separate Burning Skies level project.
+
 ## Asset Browser cache
 
 The Asset Browser cache is generated locally from a user-provided ISO. A

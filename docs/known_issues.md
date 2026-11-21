@@ -97,8 +97,15 @@ The authored multi-LOD table is decoded with its full-detail group as LOD 0.
 Lower groups are disabled by default and require the **Lower LODs** import
 option. The tested archive also contains 154 shadow-only packets and two
 `WorldCollision` packets; these are excluded from the visible base mesh and
-require **Collision geometry**. Other native collision resource families are
-not decoded.
+require **Collision geometry**.
+
+All 12 native level `.col` resources decode through their NSIRSRC-wrapped
+Havok 2011 compressed meshes. The decoder preserves 550,696 triangles plus
+raw per-face user data and collision-filter words. Burning Skies level support
+is still disabled, however, so these independent level meshes are not
+presented as one selectable level, placed into Blender Collections, or mixed
+into standalone model imports. The user-data and collision-filter gameplay
+meanings also remain uninterpreted.
 
 ## Resistance 3
 

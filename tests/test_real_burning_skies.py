@@ -17,6 +17,9 @@ from insomniac_asset_io.games.resistance_burning_skies.animations import (
     inspect_packed_animation,
     packed_animation_descriptor,
 )
+from insomniac_asset_io.games.resistance_burning_skies.collision import (
+    decode_col,
+)
 from insomniac_asset_io.games.resistance_burning_skies.containers import (
     ResourceInfoPack,
     StreamPack,
@@ -217,6 +220,189 @@ class RealBurningSkiesTests(unittest.TestCase):
                     PackedTrackKind.RAW_0: 361_733,
                     PackedTrackKind.RAW_1: 22_888,
                     PackedTrackKind.RAW_2: 99,
+                }
+            ),
+        )
+
+    def test_decodes_bayonne_native_collision(self):
+        with GameSource.open(Path(REAL_SOURCE)) as source:
+            collision = decode_col(
+                source.read("levels/Bayonne.col"),
+                label="levels/Bayonne.col",
+            )
+
+        self.assertEqual(collision.name, "Bayonne")
+        self.assertEqual(collision.section_count, 461)
+        self.assertEqual(collision.primitive_count, 34_079)
+        self.assertEqual(collision.quad_count, 31_271)
+        self.assertEqual(collision.positions.shape, (53_173, 3))
+        self.assertEqual(collision.indices.shape, (65_350, 3))
+        self.assertEqual(
+            collision.collision_filter_palette,
+            (
+                0x00800001,
+                0x00800100,
+                0x00800000,
+                0x00800900,
+                0x00800800,
+            ),
+        )
+        np.testing.assert_allclose(
+            collision.positions[0],
+            (-84.501297, 247.736664, -27.8601),
+            rtol=0.0,
+            atol=1e-5,
+        )
+        np.testing.assert_allclose(
+            collision.positions[10],
+            (-1926.7677, 297.95422, -0.13089821),
+            rtol=0.0,
+            atol=1e-4,
+        )
+        np.testing.assert_array_equal(
+            collision.indices[:3],
+            np.array(
+                (
+                    (16, 12, 11),
+                    (11, 10, 18),
+                    (10, 11, 12),
+                ),
+                dtype=np.int32,
+            ),
+        )
+        np.testing.assert_allclose(
+            collision.positions.min(axis=0),
+            (-1971.4274, 137.44019, -48.591206),
+            rtol=0.0,
+            atol=1e-4,
+        )
+        np.testing.assert_allclose(
+            collision.positions.max(axis=0),
+            (80.66589, 530.7216, 65.463806),
+            rtol=0.0,
+            atol=1e-4,
+        )
+
+    def test_validates_complete_native_collision_corpus(self):
+        totals: Counter[str] = Counter()
+        user_data: Counter[int] = Counter()
+        filter_info: Counter[int] = Counter()
+
+        with GameSource.open(Path(REAL_SOURCE)) as source:
+            paths = sorted(
+                path
+                for path in source.paths
+                if path.casefold().endswith(".col")
+            )
+            for path in paths:
+                col_path = PurePosixPath(path)
+                rip_path = next(
+                    candidate
+                    for candidate in source.paths
+                    if PurePosixPath(candidate).parent
+                    == col_path.parent
+                    and PurePosixPath(candidate).suffix.casefold()
+                    == ".rip"
+                    and PurePosixPath(candidate).stem.casefold()
+                    == col_path.stem.casefold()
+                )
+                level_metadata = [
+                    resource
+                    for resource in ResourceInfoPack(
+                        source.read(rip_path),
+                        label=rip_path,
+                    ).iter_resources()
+                    if resource.root_type == 0x05
+                    and resource.resource_name.casefold()
+                    == col_path.stem.casefold()
+                ]
+                self.assertEqual(len(level_metadata), 1)
+                self.assertEqual(level_metadata[0].dependencies(), ())
+                collision = decode_col(
+                    source.read(path),
+                    label=path,
+                )
+                self.assertEqual(
+                    len(collision.indices),
+                    collision.primitive_count + collision.quad_count,
+                )
+                self.assertEqual(
+                    collision.user_data.shape,
+                    (len(collision.indices),),
+                )
+                self.assertEqual(
+                    collision.collision_filter_info.shape,
+                    (len(collision.indices),),
+                )
+                self.assertTrue(np.all(np.isfinite(collision.positions)))
+                self.assertGreaterEqual(int(collision.indices.min()), 0)
+                self.assertLess(
+                    int(collision.indices.max()),
+                    len(collision.positions),
+                )
+                totals.update(
+                    files=1,
+                    sections=collision.section_count,
+                    vertices=len(collision.positions),
+                    primitives=collision.primitive_count,
+                    quads=collision.quad_count,
+                    faces=len(collision.indices),
+                    palette_entries=len(
+                        collision.collision_filter_palette
+                    ),
+                    level_metadata=len(level_metadata),
+                )
+                user_data.update(map(int, collision.user_data))
+                filter_info.update(
+                    map(int, collision.collision_filter_info)
+                )
+
+        self.assertEqual(
+            totals,
+            Counter(
+                {
+                    "faces": 550_696,
+                    "vertices": 450_191,
+                    "primitives": 287_211,
+                    "quads": 263_485,
+                    "sections": 3_831,
+                    "palette_entries": 39,
+                    "level_metadata": 12,
+                    "files": 12,
+                }
+            ),
+        )
+        self.assertEqual(
+            user_data,
+            Counter(
+                {
+                    0: 238_561,
+                    1: 125_676,
+                    2: 46_180,
+                    3: 27_384,
+                    4: 32_214,
+                    5: 17_547,
+                    6: 31_874,
+                    7: 8_219,
+                    8: 11_316,
+                    9: 1_537,
+                    10: 4_243,
+                    11: 4_473,
+                    12: 116,
+                    13: 1_338,
+                    14: 18,
+                }
+            ),
+        )
+        self.assertEqual(
+            filter_info,
+            Counter(
+                {
+                    0x00800000: 131,
+                    0x00800001: 537_744,
+                    0x00800100: 4_849,
+                    0x00800800: 861,
+                    0x00800900: 7_111,
                 }
             ),
         )

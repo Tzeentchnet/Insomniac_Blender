@@ -20,6 +20,9 @@ from insomniac_asset_io.games.resistance_burning_skies.animations import (
 from insomniac_asset_io.games.resistance_burning_skies.catalog import (
     build_source_catalog,
 )
+from insomniac_asset_io.games.resistance_burning_skies.collision import (
+    decode_col,
+)
 from insomniac_asset_io.games.resistance_burning_skies.containers import (
     RESOURCE_INFO_PACK_MAGIC,
     STREAM_PACK_MAGIC,
@@ -247,6 +250,297 @@ def _animation_resource(
         0,
     )
     return bytes(data)
+
+
+def _collision_resource() -> bytes:
+    rigid_body_name = b"hkpRigidBody\0"
+    compressed_mesh_name = b"hkpBvCompressedMeshShape\0"
+    class_names = rigid_body_name + compressed_mesh_name
+    class_section_size = (len(class_names) + 0x0F) & ~0x0F
+
+    class_section_start = 0xD0
+    data_section_start = class_section_start + class_section_size
+    shape_offset = 0x240
+    palette_offset = 0x310
+    root_nodes_offset = 0x320
+    sections_offset = 0x330
+    section_nodes_offset = 0x390
+    primitives_offset = 0x3A0
+    shared_indices_offset = 0x3B0
+    packed_vertices_offset = 0x3C0
+    shared_vertices_offset = 0x3D0
+    data_runs_offset = 0x3E0
+    local_fixups_offset = 0x3F0
+
+    local_fixups = (
+        (shape_offset + 0x20, palette_offset),
+        (shape_offset + 0x40, root_nodes_offset),
+        (shape_offset + 0x7C, sections_offset),
+        (sections_offset, section_nodes_offset),
+        (shape_offset + 0x88, primitives_offset),
+        (shape_offset + 0x94, shared_indices_offset),
+        (shape_offset + 0xA0, packed_vertices_offset),
+        (shape_offset + 0xAC, shared_vertices_offset),
+        (shape_offset + 0xB8, data_runs_offset),
+    )
+    global_fixups_offset = local_fixups_offset + len(local_fixups) * 8
+    virtual_fixups_offset = global_fixups_offset + 0x10
+    exports_offset = virtual_fixups_offset + 0x20
+    pack_size = data_section_start + exports_offset
+    pack = bytearray(pack_size)
+
+    struct.pack_into(
+        "<4I",
+        pack,
+        0,
+        0x57E0E057,
+        0x10C0C010,
+        0,
+        9,
+    )
+    pack[0x10:0x14] = b"\x04\x01\x01\x01"
+    struct.pack_into("<5i", pack, 0x14, 3, 2, 0, 0, 0)
+    pack[0x28:0x38] = b"hk_2011.3.0-r1\0\xFF"
+    struct.pack_into("<I", pack, 0x38, 0)
+    struct.pack_into("<I", pack, 0x3C, 0xFFFFFFFF)
+
+    def section_header(
+        index: int,
+        tag: str,
+        start: int,
+        local: int,
+        global_: int,
+        virtual: int,
+        exports: int,
+        imports: int,
+        end: int,
+    ) -> None:
+        offset = 0x40 + index * 0x30
+        encoded = tag.encode("ascii") + b"\0"
+        pack[offset : offset + len(encoded)] = encoded
+        struct.pack_into(
+            "<7I",
+            pack,
+            offset + 0x14,
+            start,
+            local,
+            global_,
+            virtual,
+            exports,
+            imports,
+            end,
+        )
+
+    section_header(
+        0,
+        "__classnames__",
+        class_section_start,
+        class_section_size,
+        class_section_size,
+        class_section_size,
+        class_section_size,
+        class_section_size,
+        class_section_size,
+    )
+    section_header(
+        1,
+        "__types__",
+        data_section_start,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+    )
+    section_header(
+        2,
+        "__data__",
+        data_section_start,
+        local_fixups_offset,
+        global_fixups_offset,
+        virtual_fixups_offset,
+        exports_offset,
+        exports_offset,
+        exports_offset,
+    )
+    pack[
+        class_section_start : class_section_start + len(class_names)
+    ] = class_names
+
+    data_start = data_section_start
+    identity_transform = (
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+    )
+    struct.pack_into(
+        "<16f",
+        pack,
+        data_start + 0xF0,
+        *identity_transform,
+    )
+    shape = data_start + shape_offset
+    struct.pack_into("<f", pack, shape + 0x18, 0.05)
+    pack[shape + 0x1C : shape + 0x20] = b"\x06\x01\x01\0"
+
+    def array_header(field: int, count: int) -> None:
+        struct.pack_into(
+            "<3I",
+            pack,
+            shape + field,
+            0,
+            count,
+            0x80000000 | count,
+        )
+
+    array_header(0x20, 1)
+    struct.pack_into("<3I", pack, shape + 0x2C, 0, 0, 0x80000000)
+    array_header(0x40, 1)
+    struct.pack_into(
+        "<4f",
+        pack,
+        shape + 0x50,
+        0.0,
+        0.0,
+        0.0,
+        0.95,
+    )
+    struct.pack_into(
+        "<4f",
+        pack,
+        shape + 0x60,
+        1.0,
+        1.0,
+        1.0,
+        1.05,
+    )
+    struct.pack_into("<3I", pack, shape + 0x70, 2, 2, 3)
+    array_header(0x7C, 1)
+    array_header(0x88, 1)
+    array_header(0x94, 1)
+    array_header(0xA0, 3)
+    array_header(0xAC, 1)
+    array_header(0xB8, 1)
+
+    struct.pack_into("<I", pack, data_start + palette_offset, 0x00800001)
+    section = data_start + sections_offset
+    struct.pack_into("<3I", pack, section, 0, 1, 0x80000001)
+    struct.pack_into(
+        "<4f",
+        pack,
+        section + 0x10,
+        -0.1,
+        -0.1,
+        -0.1,
+        0.95,
+    )
+    struct.pack_into(
+        "<4f",
+        pack,
+        section + 0x20,
+        1.1,
+        1.1,
+        1.1,
+        1.05,
+    )
+    struct.pack_into("<3f", pack, section + 0x30, 0.0, 0.0, 0.0)
+    struct.pack_into("<3f", pack, section + 0x3C, 1.0, 1.0, 1.0)
+    struct.pack_into("<I", pack, section + 0x48, 0)
+    struct.pack_into("<3I", pack, section + 0x4C, 3, 1, 1)
+    struct.pack_into("<BBH4B", pack, section + 0x58, 3, 1, 0, 0, 0, 0, 0)
+
+    pack[data_start + primitives_offset : data_start + primitives_offset + 4] = (
+        b"\x00\x01\x02\x03"
+    )
+    struct.pack_into("<H", pack, data_start + shared_indices_offset, 0)
+    struct.pack_into(
+        "<3I",
+        pack,
+        data_start + packed_vertices_offset,
+        0,
+        1,
+        1 << 11,
+    )
+    shared_value = (1 << 21) - 1
+    shared_value |= ((1 << 21) - 1) << 21
+    struct.pack_into(
+        "<Q",
+        pack,
+        data_start + shared_vertices_offset,
+        shared_value,
+    )
+    struct.pack_into(
+        "<IBBH",
+        pack,
+        data_start + data_runs_offset,
+        7 << 8,
+        0,
+        1,
+        0,
+    )
+
+    for index, (source, destination) in enumerate(local_fixups):
+        struct.pack_into(
+            "<2i",
+            pack,
+            data_start + local_fixups_offset + index * 8,
+            source,
+            destination,
+        )
+    struct.pack_into(
+        "<3i",
+        pack,
+        data_start + global_fixups_offset,
+        0x10,
+        2,
+        shape_offset,
+    )
+    pack[
+        data_start + global_fixups_offset + 12 :
+        data_start + virtual_fixups_offset
+    ] = b"\xFF" * 4
+    struct.pack_into(
+        "<3i",
+        pack,
+        data_start + virtual_fixups_offset,
+        0,
+        0,
+        0,
+    )
+    struct.pack_into(
+        "<3i",
+        pack,
+        data_start + virtual_fixups_offset + 12,
+        shape_offset,
+        0,
+        len(rigid_body_name),
+    )
+    pack[
+        data_start + virtual_fixups_offset + 24 :
+        data_start + exports_offset
+    ] = b"\xFF" * 8
+
+    resource = _resource(
+        0x05,
+        DATA_BASE + len(pack),
+        "TestCollision",
+    )
+    resource[DATA_BASE:] = pack
+    return bytes(resource)
 
 
 def _animation_primary() -> bytes:
@@ -827,6 +1121,12 @@ class BurningSkiesFormatTests(unittest.TestCase):
             animation_set_clip_names(animation_set),
             ("Walk", "Idle"),
         )
+        empty_type_five = NsirsrcFile(
+            bytes(_resource(0x05, DATA_BASE, "NotAnAnimationSet")),
+            label="NotAnAnimationSet",
+        )
+        with self.assertRaisesRegex(FormatError, "no animation clips"):
+            animation_set_clip_names(empty_type_five)
 
         resource = NsirsrcFile(
             _animation_resource(),
@@ -863,6 +1163,80 @@ class BurningSkiesFormatTests(unittest.TestCase):
         )
         self.assertTrue(placeholder.is_placeholder)
         self.assertEqual(placeholder.tracks, ())
+
+    def test_decodes_native_compressed_collision(self):
+        collision = decode_col(
+            _collision_resource(),
+            label="levels/TestCollision.col",
+        )
+
+        self.assertEqual(collision.name, "TestCollision")
+        self.assertEqual(collision.section_count, 1)
+        self.assertEqual(collision.primitive_count, 1)
+        self.assertEqual(collision.quad_count, 1)
+        self.assertEqual(collision.collision_filter_palette, (0x00800001,))
+        np.testing.assert_allclose(
+            collision.positions,
+            np.array(
+                (
+                    (0.0, 0.0, 0.0),
+                    (1.0, 0.0, 0.0),
+                    (0.0, 1.0, 0.0),
+                    (1.0, 1.0, 0.0),
+                ),
+                dtype=np.float32,
+            ),
+        )
+        np.testing.assert_array_equal(
+            collision.indices,
+            np.array(((0, 1, 2), (0, 2, 3)), dtype=np.int32),
+        )
+        np.testing.assert_array_equal(
+            collision.user_data,
+            np.array((7, 7), dtype=np.int32),
+        )
+        np.testing.assert_array_equal(
+            collision.collision_filter_info,
+            np.array((0x00800001, 0x00800001), dtype=np.uint32),
+        )
+
+    def test_rejects_malformed_native_collision(self):
+        cases: list[tuple[str, int, str, str]] = [
+            ("magic", DATA_BASE, "B", "magic"),
+            (
+                "transform",
+                DATA_BASE + 0x100 + 0xF0,
+                "f",
+                "non-identity",
+            ),
+            (
+                "primitive index",
+                DATA_BASE + 0x100 + 0x3A0,
+                "B",
+                "primitive index",
+            ),
+            (
+                "data run",
+                DATA_BASE + 0x100 + 0x3E0 + 4,
+                "B",
+                "discontinuous",
+            ),
+        ]
+        for name, offset, format_, message in cases:
+            with self.subTest(name=name):
+                data = bytearray(_collision_resource())
+                if name == "primitive index":
+                    value = 99
+                elif name == "transform":
+                    value = 2
+                else:
+                    value = 1
+                struct.pack_into(f"<{format_}", data, offset, value)
+                with self.assertRaisesRegex(FormatError, message):
+                    decode_col(
+                        bytes(data),
+                        label="levels/Bad.col",
+                    )
 
     def test_rejects_malformed_raw_animation_tracks(self):
         cases: list[tuple[str, int, int | float, str]] = [

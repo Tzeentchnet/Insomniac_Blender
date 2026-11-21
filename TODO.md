@@ -145,7 +145,7 @@ Created from the feature-gap review of [README.md](README.md) and
 - [x] Import skinned SMFs as working armatures rather than static bind-pose
   geometry.
 - [x] Investigate animation containers only after skinning is validated.
-- [ ] Expand collision-family coverage.
+- [x] Expand collision-family coverage.
 - [ ] Keep level, cutscene, and effect support as separate research projects.
 
 ## Explicitly deferred or evidence-blocked

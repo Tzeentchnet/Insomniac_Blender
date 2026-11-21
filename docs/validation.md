@@ -549,6 +549,38 @@ maximum bone index of 120 against the 121-bone `CH_BASE_Ellie` skeleton. This
 validates container and timing structure only; it intentionally does not
 assert decoded transforms, general model ownership, or Blender Actions.
 
+## Burning Skies native-collision validation
+
+The portable Burning Skies suite builds a complete one-section Havok
+compressed-mesh fixture. It verifies packed and shared vertex reconstruction,
+quad triangulation, user-data and collision-filter propagation, and explicit
+rejection of malformed magic, transforms, indices, and data runs:
+
+```powershell
+python -m unittest tests.test_burning_skies
+```
+
+Run the exact Bayonne fixture and all-file retail regression against a
+decrypted European archive:
+
+```powershell
+$env:BURNING_SKIES_ARCHIVE = "C:\path\to\decrypted\build.psa"
+python -m unittest `
+  tests.test_real_burning_skies.RealBurningSkiesTests.test_decodes_bayonne_native_collision `
+  tests.test_real_burning_skies.RealBurningSkiesTests.test_validates_complete_native_collision_corpus
+```
+
+The corpus regression requires all 12 COL files, 3,831 compressed sections,
+450,191 decoded section-local vertices, 287,211 source primitives, 263,485
+quads, and 550,696 output triangles. It also checks every finite coordinate
+and index range, all 15 observed user-data values, all five 32-bit collision
+filter words, and 39 per-file palette entries.
+
+The Bayonne fixture independently requires 461 sections, 53,173 vertices,
+34,079 primitives, 31,271 quads, and 65,350 triangles. Exact packed and
+shared coordinates, initial primitive indices, source bounds, and its five
+filter words guard both quantization paths and byte order.
+
 Analyze one extracted cached archive, or every cached level archive in an ISO:
 
 ```powershell

@@ -156,13 +156,14 @@ experimental game adapter.
 | Rigid and skinned vertex packets | Geometry, UVs, normalized model-bone influences, and working bind armatures are imported |
 | Lower LODs | Authored groups decoded; optional, disabled by default, and kept in a separate Collection |
 | Shadow-only and collision GBuffer packets | 156 auxiliary packets are excluded by default and available through the Collision geometry option |
+| Native `.col` level collision | All 12 Havok compressed meshes decode with raw filter and user data; level-scene and Blender import remain unavailable |
 | BMX material references | Exact serialized packet maps decoded for all 798 GBuffer SMFs |
 | BMX surface channels | Diffuse tint, direct RGB normals, dedicated gloss/specular data, detail data, specular power, alpha, and dedicated emissive color/strength are supported |
 | Vita GXT textures | NumPy-vectorized UBC1, UBC2, UBC3, 32-bit color, and PVRTC-II 4bpp supported |
 | Skeleton-only SMFs | All 23 files import as bind-pose armatures, including `CH_PHYS_ADrone` |
 | Skin weights | Rigid ownership and skinned weights are palette-mapped into working armatures |
 | Animation containers | RIP/SPK ownership, clip timing, and raw packed tracks are inspected; transform decoding and Blender Actions remain unavailable |
-| Levels, native collision resources, cutscenes, and effects | Not yet supported |
+| Level scenes, cutscenes, and effects | Not yet supported |
 
 See [Burning Skies formats](docs/formats/resistance_burning_skies.md) and
 [known issues](docs/known_issues.md) for the verified layouts and strict

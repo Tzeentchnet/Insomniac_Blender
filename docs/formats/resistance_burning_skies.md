@@ -44,8 +44,10 @@ The parser bounds-checks every pointer, table, vertex range, index range, and
 texture range before reading it.
 
 Known root types are `0x1C` for Model, `0x09` for Material, `0x0A` or
-`0x0E` for the observed texture variants, `0x05` for animation sets, and
-`0x08` for animation clip metadata.
+`0x0E` for the observed texture variants, and `0x08` for animation clip
+metadata. Root type `0x05` is context-dependent: resources with type-`0x02`
+dependencies are animation sets, while direct `.col` files and 12 empty
+level-metadata records use the same numeric root type.
 
 ## SMF models
 
@@ -323,10 +325,12 @@ distinct names.
 
 ## Animation metadata and raw tracks
 
-Root type `0x05` is an animation set. Its type-`0x02` dependencies enumerate
-the set's clip names, but do not identify a model or skeleton owner. Root type
-`0x08` is clip metadata. Its packed-stream descriptor begins at resource
-offset `0x8C`:
+Within a RIP, a root type `0x05` resource with one or more type-`0x02`
+dependencies is an animation set. Those dependencies enumerate the set's clip
+names, but do not identify a model or skeleton owner. Empty type-`0x05`
+resources are rejected by the animation-set inspector because the retail
+archive uses that shape for level metadata as well. Root type `0x08` is clip
+metadata. Its packed-stream descriptor begins at resource offset `0x8C`:
 
 | Descriptor offset | Type | Meaning |
 |---:|---|---|
@@ -389,11 +393,72 @@ For that reason the raw inspector does not create shared decoded clips, the
 Burning Skies reader does not expose animations, and Blender Actions are not
 created.
 
+## Native COL collision
+
+The 12 `levels/*.col` resources are direct NSIRSRC version 7 files with the
+context-dependent root type `0x05`. Their serialized data base begins a
+32-bit little-endian Havok packfile with:
+
+- magic words `0x57E0E057` and `0x10C0C010`;
+- packfile version 9 and layout bytes `04 01 01 01`;
+- contents version `hk_2011.3.0-r1`; and
+- `__classnames__`, empty `__types__`, and `__data__` sections.
+
+The bounded packfile reader validates all section ranges and local, global,
+and virtual pointer-fixup tables. The contents object is one `hkpRigidBody`.
+Its global shape fixup resolves to one `hkpBvCompressedMeshShape`; all 12
+rigid-body transforms are identity. The decoder rejects other object graphs,
+non-identity transforms, populated serialized pointers, invalid fixups, and
+unsupported compressed-mesh modes rather than treating them as this family.
+
+The compressed mesh stores:
+
+- one global quantization domain and root acceleration tree;
+- fixed `0x60`-byte section records with local domains and tree nodes;
+- packed vertices, shared vertices, shared-vertex indices, and four-byte
+  primitives;
+- per-primitive data runs; and
+- a palette of full 32-bit collision-filter values.
+
+Section-local packed vertices use unsigned `11:11:10` XYZ fields. Each section
+provides the three offsets and scales that convert those integers into source
+coordinates. Global shared vertices use unsigned `21:21:22` XYZ fields over
+the mesh domain, and each section selects them through a bounded `uint16`
+index range. A primitive contains four local `uint8` indices. Equal third and
+fourth indices encode one triangle; otherwise the record is a quad and
+expands to `(0, 1, 2)` and `(0, 2, 3)`. The reconstructed triangle total must
+equal the shape's primitive-key count.
+
+Primitive-data runs cover each section contiguously. The low eight bits select
+the collision-filter palette, while the upper 24 bits preserve per-primitive
+user data. Quad expansion duplicates both values for the second triangle.
+The decoder retains these fields as raw integers because gameplay meanings
+for the five observed filter words and user-data values zero through 14 are
+not proven.
+
+The complete European archive contains:
+
+- 12 COL files and identity rigid bodies;
+- 3,831 compressed sections;
+- 288,164 packed vertices, 77,140 global shared vertices, and 162,027
+  section shared-vertex references;
+- 450,191 decoded section-local vertices;
+- 287,211 primitives, including 263,485 quads, producing 550,696 triangles;
+- 45,718 primitive-data runs and 39 per-file palette entries; and
+- five filter words: `0x00800000`, `0x00800001`, `0x00800100`,
+  `0x00800800`, and `0x00800900`.
+
+This decoder is an evidence and validation layer. The experimental adapter
+still has level support disabled, so it does not combine the 12 independent
+level meshes into one scene or expose them through Blender. Level selection,
+placement context, collection naming, and any gameplay interpretation remain
+part of the separate level-support project.
+
 ## Unsupported resource families
 
 The experimental reader does not currently import:
 
 - decoded animation transforms or Blender Actions;
-- collision geometry not represented by GBuffer packets;
+- native `.col` collision as a selectable Blender level scene;
 - level `.geo` resources;
 - cutscenes, effects, lighting, or audio resources.
