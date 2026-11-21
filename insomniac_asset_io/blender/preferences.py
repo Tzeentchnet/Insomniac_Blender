@@ -118,8 +118,8 @@ class InsomniacAddonPreferences(bpy.types.AddonPreferences):
     asset_cache_level: bpy.props.StringProperty(
         name="Cached level",
         description=(
-            "Disc level whose Moby and Tie assets will be cached, for example "
-            "lobby or chicxulub/chicxulub"
+            "Disc level whose reusable model and vegetation assets will be "
+            "cached, for example lobby or chicxulub/chicxulub"
         ),
         default="lobby",
     )
@@ -142,6 +142,22 @@ class InsomniacAddonPreferences(bpy.types.AddonPreferences):
     asset_cache_previews: bpy.props.BoolProperty(
         name="Generate previews",
         description="Render collection previews for the Blender Asset Browser",
+        default=True,
+    )
+    asset_cache_vegetation: bpy.props.BoolProperty(
+        name="Cache supported vegetation",
+        description=(
+            "Create standalone Shrub and Foliage Collection assets when the "
+            "selected game's reader supports their geometry"
+        ),
+        default=True,
+    )
+    asset_cache_source_default_parts: bpy.props.BoolProperty(
+        name="Show source-default Moby parts",
+        description=(
+            "Make authored default customization segments visible in cached "
+            "Moby assets while preserving other segments as hidden choices"
+        ),
         default=True,
     )
     asset_import_materials: bpy.props.BoolProperty(
@@ -300,6 +316,8 @@ class InsomniacAddonPreferences(bpy.types.AddonPreferences):
         cache.prop(self, "asset_cache_level")
         cache.prop(self, "asset_cache_materials")
         cache.prop(self, "asset_cache_animations")
+        cache.prop(self, "asset_cache_vegetation")
+        cache.prop(self, "asset_cache_source_default_parts")
         cache.prop(self, "asset_cache_previews")
         cache.operator(
             "insomniac.rebuild_asset_library",

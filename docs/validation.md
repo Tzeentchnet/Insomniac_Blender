@@ -245,12 +245,17 @@ object dependency, and packed game image:
 & "C:\path\to\blender.exe" --background --factory-startup `
   --python-exit-code 1 --python tools\validate_asset_cache.py -- `
   "C:\path\to\InsomniacAssetIOCache\asset_library" `
-  --expected-mobys 3 --expected-ties 3 --expected-materials 3 `
+  --expected-mobys 3 --expected-ties 3 --expected-shrubs 3 `
+  --expected-foliage 3 --expected-materials 3 `
   --expected-animations 1
 ```
 
 Add `--skip-previews` when validating a cache generated with previews
-disabled.
+The report distinguishes manifest `asset_references` from unique `assets`.
+Repeated schema-2 references must share one logical ID, canonical `.blend`,
+name, and catalog assignment; `deduplicated_references` reports how many
+cross-level references were collapsed. The validator also checks that catalog
+paths map to their deterministic UUIDs.
 
 The current implementation was validated in Blender 5.2.2 LTS with:
 
@@ -275,9 +280,10 @@ The current implementation was validated in Blender 5.2.2 LTS with:
   frames across a 38-bone skeleton;
 - TOD `animate_spin`, reduced from 8,001 paired disk records to 4,000 Action
   frames at 15 fps;
-- a bounded Metropolis Asset Browser cache containing three Moby Collections,
-  three Ties, three standalone Materials, and one standalone `animate_spin`
-  Action, all reopened with their catalog assignments and metadata intact;
+- bounded Asset Browser caches for all four supported PS3 games, including
+  RFoM Shrub/Foliage Collections, TOD/R2/R3 Foliage Collections, canonical
+  cross-level R3 reuse, standalone Materials, packed images, and generated
+  previews, all reopened with their catalog assignments and metadata intact;
 - a selected `crumbling` import containing only its 38-bone compatible rig
   and one Action, plus a separately saved/reopened standalone TOD Material;
 - a saved TOD Metropolis level containing 6,228 objects and 313 mesh

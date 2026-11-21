@@ -24,11 +24,13 @@ if bpy is not None:
         _build_mesh,
         import_level,
         import_moby,
+        import_static_asset,
     )
     from insomniac_asset_io.blender.preferences import (
         InsomniacAddonPreferences,
     )
     from insomniac_asset_io.games.resistance_2.formats import (
+        AssetKind,
         CollisionMesh,
         CollisionPrimitive,
         GameplayRegion,
@@ -172,6 +174,30 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
             )
         )
 
+    def test_imports_foliage_as_standalone_collection(self) -> None:
+        result = import_static_asset(
+            bpy.context,
+            _LevelReader(),
+            2,
+            AssetImportOptions(materials=False, animations=False),
+            kind=AssetKind.FOLIAGE,
+            source_path="fixture",
+        )
+
+        collection = result.root.users_collection[0]
+        mesh_object = next(
+            obj for obj in collection.objects if obj.type == "MESH"
+        )
+        self.assertEqual(collection.name, "RFOM_Foliage_0000000000000002")
+        self.assertEqual(
+            mesh_object["insomniac_asset_kind"],
+            "FOLIAGE",
+        )
+        self.assertEqual(
+            mesh_object["insomniac_asset_tuid"],
+            "0x0000000000000002",
+        )
+
     def test_addon_preferences_default_optional_geometry_off(self) -> None:
         bpy.utils.register_class(InsomniacAddonPreferences)
         try:
@@ -196,6 +222,12 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
         try:
             properties = InsomniacAddonPreferences.bl_rna.properties
             self.assertTrue(properties["level_import_vegetation"].default)
+            self.assertTrue(properties["asset_cache_vegetation"].default)
+            self.assertTrue(
+                properties[
+                    "asset_cache_source_default_parts"
+                ].default
+            )
         finally:
             bpy.utils.unregister_class(InsomniacAddonPreferences)
 

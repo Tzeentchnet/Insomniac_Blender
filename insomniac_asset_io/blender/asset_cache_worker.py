@@ -19,6 +19,8 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--level", required=True)
     parser.add_argument("--cache-directory", type=Path, required=True)
     parser.add_argument("--report", type=Path, required=True)
+    parser.add_argument("--progress", type=Path)
+    parser.add_argument("--job-id")
     parser.add_argument("--no-materials", action="store_true")
     parser.add_argument("--animations", action="store_true")
     parser.add_argument("--no-convert-axes", action="store_true")
@@ -26,7 +28,18 @@ def _arguments() -> argparse.Namespace:
     parser.add_argument("--damage-permutations", action="store_true")
     parser.add_argument("--lower-lods", action="store_true")
     parser.add_argument("--collision-geometry", action="store_true")
-    parser.add_argument("--source-default-parts", action="store_true")
+    parser.set_defaults(source_default_parts=True)
+    parser.add_argument(
+        "--source-default-parts",
+        dest="source_default_parts",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--no-source-default-parts",
+        dest="source_default_parts",
+        action="store_false",
+    )
+    parser.add_argument("--no-vegetation", action="store_true")
     parser.add_argument("--no-previews", action="store_true")
     parser.add_argument("--asset-limit", type=int, default=0)
     return parser.parse_args(arguments)
@@ -43,6 +56,21 @@ def _load_generator():
     )
 
     return AssetCacheOptions, generate_asset_library
+
+
+def _write_progress(
+    path: Path | None,
+    payload: dict[str, object],
+) -> None:
+    if path is None:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    temporary.write_text(
+        json.dumps(payload, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    temporary.replace(path)
 
 
 def main() -> int:
@@ -65,8 +93,14 @@ def main() -> int:
                 lower_lods=args.lower_lods,
                 collision_geometry=args.collision_geometry,
                 source_default_parts=args.source_default_parts,
+                vegetation=not args.no_vegetation,
                 asset_limit=max(args.asset_limit, 0),
             ),
+            progress=lambda payload: _write_progress(
+                args.progress,
+                payload,
+            ),
+            job_id=args.job_id,
         )
     except Exception as exc:
         report = {
@@ -78,6 +112,16 @@ def main() -> int:
             json.dumps(report, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
+        _write_progress(
+            args.progress,
+            {
+                "phase": "failed",
+                "current": 0,
+                "total": 0,
+                "message": str(exc),
+                "cancellable": False,
+            },
+        )
         print(report["traceback"], file=sys.stderr)
         return 1
 
@@ -85,6 +129,16 @@ def main() -> int:
     args.report.write_text(
         json.dumps(report, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
+    )
+    _write_progress(
+        args.progress,
+        {
+            "phase": "complete",
+            "current": int(report.get("assets", 0)),
+            "total": int(report.get("assets", 0)),
+            "message": "Asset Browser cache generation complete",
+            "cancellable": False,
+        },
     )
     print("INSOMNIAC_ASSET_CACHE_REPORT=" + json.dumps(report, sort_keys=True))
     return 0

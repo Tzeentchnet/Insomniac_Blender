@@ -281,15 +281,23 @@ reports the reference and uses a deterministic placeholder material.
 
 ### Asset Browser cache scope
 
-Asset Browser generation currently caches the Mobys, Ties, and verified
-Materials referenced by one selected level and game at a time. Rebuild
-additional levels to add their catalogs.
+Asset Browser generation caches the Mobys, Ties, supported Shrubs/Foliage,
+and verified Materials referenced by one selected level and game at a time.
+Rebuild additional levels to add their assets. R2/R3 global TUIDs resolve to
+one canonical game-wide entry even when multiple generated levels reference
+them; RFoM/TOD identities remain level-scoped because their numeric IDs
+repeat.
 Level terrain and placed-instance scenes remain direct imports rather than
 Asset Browser entries. Moby Actions can be included as standalone assets
 under per-Moby catalogs, but are disabled by default because they
 substantially increase generation time and cache size. An Action remains
 skeleton-specific; use it with the source Moby rig identified in its metadata,
 or use **Import One Animation...** to create the compatible rig automatically.
+
+Cache generation remains selected-level only; there is no full-disc batch
+queue. The modal worker reports progress and supports cancellation before its
+atomic commit. Older schema-1 R2/R3 caches are migrated one level at a time
+when those levels are regenerated.
 
 Generated models, packed textures, and previews are local derivatives of the
 user's game data. They are intentionally excluded from extension packages and

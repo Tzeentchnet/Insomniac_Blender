@@ -40,7 +40,7 @@ both fields from `PARAM.SFO`.
 | USA v01.00 import catalog | 36,034 level-scoped assets across 41 levels: 5,556 Mobys, 6,714 Ties, and 23,764 Materials |
 | DXT1/3/5 and common uncompressed textures | Supported from raw `ps3leveltexs.dat` payloads |
 | Diffuse, reconstructed normal, packed, detail, masked, and blended materials | Supported through the shared Blender material path |
-| Blender Asset Browser | Moby/Tie Collections plus standalone Material and optional Action assets |
+| Blender Asset Browser | Moby, Tie, Shrub, and Foliage Collections plus standalone Material and optional Action assets |
 | Region terrain and Tie placement | Supported |
 | Shrub and foliage level geometry | Supported as linked static meshes and placements; foliage includes branch and sprite geometry |
 | Primary gameplay Moby placement | Supported as linked static mesh instances |
@@ -67,7 +67,7 @@ fields from `PARAM.SFO` before extraction.
 | USA v02.00 import catalog | 15,581 level-scoped assets across 20 levels: 3,012 Mobys, 2,048 Ties, and 10,521 Materials |
 | DXT1/3/5 and common uncompressed textures | Supported, including streamed high-resolution mips |
 | Diffuse, reconstructed normal, packed, masked, and blended materials | Supported |
-| Blender Asset Browser | Moby/Tie Collections plus standalone Material and optional Action assets |
+| Blender Asset Browser | Moby, Tie, and Foliage Collections plus standalone Material and optional Action assets |
 | Level terrain (`UFrag`) and Tie placement | Supported |
 | Foliage level geometry | Supported as linked first-LOD branch and sprite-card meshes with masked materials |
 | Gameplay Moby placement | Supported as linked static mesh instances |
@@ -96,7 +96,7 @@ both fields from `PARAM.SFO`.
 | Moby animsets | Supported, including additive subset and blend masks; clips become Blender Actions |
 | Tie static meshes | Supported |
 | USA model/level import catalog | 4,130 named assets and 27 levels bundled as metadata |
-| Blender Asset Browser library | Locally generated Moby/Tie Collections, standalone Materials, and optional Actions |
+| Blender Asset Browser library | Locally generated Moby, Tie, and Foliage Collections, standalone Materials, and optional Actions |
 | Diffuse textures and albedo-colored packed-blue emission | Supported |
 | Reconstructed normals and packed red-channel gloss | Supported in the default material mode |
 | DXT1/3/5 and common uncompressed textures | Supported |
@@ -125,7 +125,7 @@ both fields from `PARAM.SFO`.
 | Moby damage permutations and collision geometry | Optional; disabled by default |
 | Tie static meshes | Supported |
 | USA model/level import catalog | 5,820 named assets and 27 levels bundled as metadata |
-| Blender Asset Browser library | Locally generated Moby/Tie Collections, standalone Materials, and optional Actions |
+| Blender Asset Browser library | Locally generated Moby, Tie, and Foliage Collections, standalone Materials, and optional Actions |
 | Diffuse, reconstructed normal, packed red-gloss response, albedo-colored packed-blue emission, and the Goliath wet-leg overlay | Supported in the default material mode |
 | Detail and additional shader references | Bound detail images are preserved as unconnected Non-Color nodes; R3 effect slots remain metadata-only because runtime composition is not yet proven |
 | DXT and common uncompressed textures | Supported, including global texture bundles |
@@ -183,7 +183,7 @@ distributed with the extension.
 
 2. In Blender, open **Edit > Preferences > Get Extensions**.
 3. Use **Install from Disk** and choose
-   `dist\insomniac_asset_io-0.7.6.zip`.
+   `dist\insomniac_asset_io-0.7.7.zip`.
 4. Open the **Insomniac** tab in the 3D View sidebar.
 
 Blender includes NumPy; no external Python package is required at runtime.
@@ -335,6 +335,7 @@ and generated catalogs remain game-specific:
   visibility;
 - level materials, terrain, static props, gameplay instances, and axis
   conversion;
+- default-on Asset Browser vegetation and source-default Moby parts;
 - default-off enhanced source-material processing.
 
 Asset labels show only the readable source name by default, such as
@@ -365,17 +366,37 @@ To populate or regenerate it:
    Browser game**.
 3. Choose the local cache directory and a level from that game. `lobby` is the
    compact default cache.
-4. Choose whether to cache materials, Moby animations, and previews.
+4. Choose whether to cache materials, Moby animations, supported vegetation,
+   source-default Moby parts, and previews.
 5. Click **Regenerate Selected Level Cache**.
 
 Generation runs in an isolated background Blender process, so it does not
-alter the open scene. Each Moby or Tie becomes a marked Collection asset in
-its own compressed `.blend` file. Verified shaders become standalone Material
-assets under `<game>/<level>/Materials`. When animation caching is enabled,
-each decoded clip is also marked as an Action under
-`<game>/<level>/Animations/<Moby>`. The library uses Blender's **Append**
-import mode. Rebuilding a level is transactional: a failed generation leaves
-its previous cache intact.
+alter or block the open scene. Blender reports progress in the status bar;
+press **Esc** to cancel before the short final commit begins. Each Moby, Tie,
+and supported Shrub or Foliage model becomes a marked Collection asset in a
+compressed `.blend`. Verified shaders become standalone Material assets. When
+animation caching is enabled, each decoded clip is also marked as an Action
+under an `Animations/<Moby>` catalog. The library uses Blender's **Append**
+import mode.
+
+R2 and R3 TUIDs are game-global, so each logical model or Material is stored
+once under a game-wide catalog and reused by every subsequently generated
+level. RFoM and TOD numeric IDs are level-local; their catalog paths retain
+the owning level so unrelated assets are never collapsed. Duplicate pointer
+records inside a level are also removed before import. Manifests may reference
+a shared R2/R3 asset from multiple levels, but Blender indexes only its one
+canonical `.blend`.
+
+Cached Mobys show segments enabled by the source-authored default draw mask by
+default, while alternate customization Collections remain available but
+hidden. Rebuilding a level stages every output, manifest, stale-file deletion,
+and catalog update as one transaction. A failure or normal cancellation keeps
+the previously committed cache intact, and obsolete generated catalog
+categories are pruned without removing unrelated user catalogs.
+
+Libraries generated by releases using schema-1 per-level R2/R3 files remain
+readable. Regenerate each previously cached level once to migrate its entries
+to canonical game-wide files and remove its obsolete level catalogs.
 
 Action assets are off by default to keep the browser cache compact. They
 retain the source Moby identity needed to choose a compatible rig. Direct

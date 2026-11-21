@@ -4,8 +4,8 @@ import logging
 import math
 import re
 import zlib
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, replace
-from typing import Callable, Iterable
 
 import bpy
 import numpy as np
@@ -13,6 +13,7 @@ from mathutils import Matrix, Quaternion, Vector
 
 from ..core.errors import InsomniacError
 from ..games.resistance_2.formats import (
+    AssetKind,
     CollisionMesh,
     CollisionPrimitive,
     DecodedClip,
@@ -2756,16 +2757,32 @@ def _static_asset_geometry_and_materials(
     return geometries, blender_materials
 
 
-def import_tie(
+def import_static_asset(
     context: bpy.types.Context,
     reader: Resistance2Reader,
     tuid: int,
     options: AssetImportOptions,
     *,
+    kind: AssetKind,
     source_path: str,
 ) -> ImportResult:
-    asset = reader.read_tie(tuid)
-    name = f"{_reader_asset_prefix(reader)}_Tie_{tuid:016X}"
+    kind_config = {
+        AssetKind.TIE: ("Tie", "read_tie"),
+        AssetKind.SHRUB: ("Shrub", "read_shrub"),
+        AssetKind.FOLIAGE: ("Foliage", "read_foliage"),
+    }
+    config = kind_config.get(kind)
+    if config is None:
+        raise ValueError(f"{kind.name} is not a static geometry asset")
+    label, reader_method = config
+    read_asset = getattr(reader, reader_method, None)
+    if not callable(read_asset):
+        raise InsomniacError(
+            f"{_reader_game_label(reader)} does not support standalone "
+            f"{label.lower()} geometry"
+        )
+    asset = read_asset(tuid)
+    name = f"{_reader_asset_prefix(reader)}_{label}_{tuid:016X}"
     collection = _new_collection(context, name)
     root = _create_root(
         collection,
@@ -2784,7 +2801,7 @@ def import_tie(
     geometries, blender_materials = _static_asset_geometry_and_materials(
         materials,
         asset,
-        variant_kind="TIE",
+        variant_kind=kind.name,
     )
     # All materials are built; see _MaterialFactory.release_decoded_textures.
     materials.release_decoded_textures()
@@ -2793,7 +2810,7 @@ def import_tie(
     collection.objects.link(obj)
     obj.parent = root
     obj["insomniac_asset_tuid"] = f"0x{asset.tuid:016X}"
-    obj["insomniac_asset_kind"] = "TIE"
+    obj["insomniac_asset_kind"] = kind.name
     return ImportResult(
         root=root,
         objects=2,
@@ -2801,6 +2818,24 @@ def import_tie(
         materials=materials.material_count,
         images=len(materials.images),
         warnings=warnings,
+    )
+
+
+def import_tie(
+    context: bpy.types.Context,
+    reader: Resistance2Reader,
+    tuid: int,
+    options: AssetImportOptions,
+    *,
+    source_path: str,
+) -> ImportResult:
+    return import_static_asset(
+        context,
+        reader,
+        tuid,
+        options,
+        kind=AssetKind.TIE,
+        source_path=source_path,
     )
 
 

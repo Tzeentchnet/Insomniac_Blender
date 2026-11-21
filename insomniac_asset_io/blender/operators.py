@@ -13,7 +13,7 @@ from ..games.resistance_2.formats import AssetKind
 from .asset_cache import (
     AssetCacheOptions,
     ensure_asset_library_registered,
-    run_asset_cache_worker,
+    start_asset_cache_worker,
 )
 from .catalog_cache import run_catalog_worker
 from .importer import (
@@ -1125,10 +1125,29 @@ class INSOMNIAC_OT_rebuild_asset_library(bpy.types.Operator):
     )
     bl_options = {"REGISTER"}
 
+    _active_job = None
+    _asset_cache_job = None
+    _asset_cache_timer = None
+
+    @classmethod
+    def poll(cls, _context):
+        if cls._active_job is not None:
+            cls.poll_message_set(
+                "An Asset Browser cache generation job is already running"
+            )
+            return False
+        return True
+
     def execute(self, context):
         preferences = addon_preferences(context)
         if preferences is None:
             self.report({"ERROR"}, "Insomniac Asset IO preferences are unavailable")
+            return {"CANCELLED"}
+        if context.window is None:
+            self.report(
+                {"ERROR"},
+                "Asset Browser cache generation requires a Blender window",
+            )
             return {"CANCELLED"}
         adapter = get_game_adapter(preferences.asset_cache_game)
         configured_iso = getattr(
@@ -1142,11 +1161,8 @@ class INSOMNIAC_OT_rebuild_asset_library(bpy.types.Operator):
             )
             return {"CANCELLED"}
 
-        window = context.window
-        if window is not None:
-            window.cursor_set("WAIT")
         try:
-            report = run_asset_cache_worker(
+            self._asset_cache_job = start_asset_cache_worker(
                 game_id=adapter.id,
                 iso_path=bpy.path.abspath(configured_iso),
                 level_name=preferences.asset_cache_level,
@@ -1166,27 +1182,11 @@ class INSOMNIAC_OT_rebuild_asset_library(bpy.types.Operator):
                         preferences.asset_import_collision_geometry
                     ),
                     source_default_parts=(
-                        preferences.asset_import_source_default_parts
+                        preferences.asset_cache_source_default_parts
                     ),
+                    vegetation=preferences.asset_cache_vegetation,
                 ),
             )
-            library = ensure_asset_library_registered(
-                context,
-                bpy.path.abspath(preferences.asset_cache_directory),
-            )
-            warning_count = int(report.get("warnings", 0))
-            if warning_count:
-                self.report(
-                    {"WARNING"},
-                    f"Asset cache completed with {warning_count} source "
-                    f"warnings; see {report['manifest']}",
-                )
-            self.report(
-                {"INFO"},
-                f"Cached {report['assets']} assets for {report['level']} "
-                f"in {library.name}",
-            )
-            return {"FINISHED"}
         except InsomniacError as exc:
             self.report({"ERROR"}, str(exc))
             return {"CANCELLED"}
@@ -1194,9 +1194,152 @@ class INSOMNIAC_OT_rebuild_asset_library(bpy.types.Operator):
             LOGGER.exception("Unexpected Asset Browser cache failure")
             self.report({"ERROR"}, f"Unexpected asset cache error: {exc}")
             return {"CANCELLED"}
-        finally:
-            if window is not None:
-                window.cursor_set("DEFAULT")
+
+        type(self)._active_job = self._asset_cache_job
+        window_manager = context.window_manager
+        self._asset_cache_timer = window_manager.event_timer_add(
+            0.25,
+            window=context.window,
+        )
+        window_manager.modal_handler_add(self)
+        window_manager.progress_begin(0, 1000)
+        context.window.cursor_set("WAIT")
+        if context.workspace is not None:
+            context.workspace.status_text_set(
+                f"Generating {adapter.label} Asset Browser cache; "
+                "press Esc to cancel"
+            )
+        return {"RUNNING_MODAL"}
+
+    def modal(self, context, event):
+        job = self._asset_cache_job
+        if job is None:
+            self._finish_modal(context)
+            self.report(
+                {"ERROR"},
+                "Asset Browser cache job state was lost",
+            )
+            return {"CANCELLED"}
+        if event.type == "ESC":
+            try:
+                cancelled = job.cancel()
+            except Exception as exc:
+                LOGGER.exception("Could not cancel Asset Browser cache job")
+                self._finish_modal(context)
+                self.report(
+                    {"ERROR"},
+                    f"Could not cancel asset cache generation: {exc}",
+                )
+                return {"CANCELLED"}
+            if not cancelled:
+                self.report(
+                    {"INFO"},
+                    "Asset cache is committing and can no longer be cancelled",
+                )
+                return {"RUNNING_MODAL"}
+            self._finish_modal(context)
+            self.report({"INFO"}, "Asset cache generation cancelled")
+            return {"CANCELLED"}
+        if event.type != "TIMER":
+            return {"PASS_THROUGH"}
+
+        try:
+            progress = job.progress()
+            if progress is not None:
+                self._update_progress(context, progress)
+            report = job.poll()
+        except InsomniacError as exc:
+            self._finish_modal(context)
+            self.report({"ERROR"}, str(exc))
+            return {"CANCELLED"}
+        except Exception as exc:
+            LOGGER.exception("Unexpected Asset Browser cache failure")
+            self._finish_modal(context)
+            self.report(
+                {"ERROR"},
+                f"Unexpected asset cache error: {exc}",
+            )
+            return {"CANCELLED"}
+        if report is None:
+            return {"RUNNING_MODAL"}
+
+        try:
+            preferences = _preferences(context)
+            library = ensure_asset_library_registered(
+                context,
+                bpy.path.abspath(
+                    preferences.asset_cache_directory
+                ),
+            )
+        except Exception as exc:
+            LOGGER.exception("Could not register generated asset library")
+            self._finish_modal(context)
+            self.report(
+                {"ERROR"},
+                f"Asset cache completed but registration failed: {exc}",
+            )
+            return {"CANCELLED"}
+
+        self._finish_modal(context)
+        warning_count = int(report.get("warnings", 0))
+        if warning_count:
+            self.report(
+                {"WARNING"},
+                f"Asset cache completed with {warning_count} source "
+                f"warnings; see {report['manifest']}",
+            )
+        self.report(
+            {"INFO"},
+            f"Cached {report['assets']} assets for {report['level']} "
+            f"in {library.name} ({report.get('generated', 0)} generated, "
+            f"{report.get('reused', 0)} reused)",
+        )
+        return {"FINISHED"}
+
+    def cancel(self, context):
+        job = self._asset_cache_job
+        if job is not None:
+            try:
+                job.cancel(force=True)
+            except Exception:
+                LOGGER.exception(
+                    "Could not stop Asset Browser cache job during cleanup"
+                )
+        self._finish_modal(context)
+
+    def _update_progress(
+        self,
+        context,
+        progress: dict[str, object],
+    ) -> None:
+        current = int(progress.get("current", 0))
+        total = int(progress.get("total", 0))
+        value = int(1000 * current / total) if total > 0 else 0
+        context.window_manager.progress_update(value)
+        message = str(
+            progress.get(
+                "message",
+                "Generating Asset Browser cache",
+            )
+        )
+        if bool(progress.get("cancellable", True)):
+            message += "; press Esc to cancel"
+        if context.workspace is not None:
+            context.workspace.status_text_set(message)
+
+    def _finish_modal(self, context) -> None:
+        if self._asset_cache_timer is not None:
+            context.window_manager.event_timer_remove(
+                self._asset_cache_timer
+            )
+            self._asset_cache_timer = None
+        context.window_manager.progress_end()
+        if context.workspace is not None:
+            context.workspace.status_text_set(None)
+        if context.window is not None:
+            context.window.cursor_set("DEFAULT")
+        type(self)._active_job = None
+        self._asset_cache_job = None
 
 
 class INSOMNIAC_OT_register_asset_library(bpy.types.Operator):

@@ -3,9 +3,11 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import time
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import bpy
@@ -23,8 +25,21 @@ from .importer import (
 
 ASSET_LIBRARY_NAME = "Insomniac Assets"
 ASSET_LIBRARY_DIRECTORY = "asset_library"
-ASSET_CACHE_SCHEMA_VERSION = 1
+ASSET_CACHE_SCHEMA_VERSION = 2
 _CATALOG_NAMESPACE = uuid.UUID("23cceef5-2adc-420f-a221-5242aa1fc438")
+_ASSET_CACHE_TIMEOUT_SECONDS = 6 * 60 * 60
+_STATIC_ASSET_KINDS = (
+    AssetKind.TIE,
+    AssetKind.SHRUB,
+    AssetKind.FOLIAGE,
+)
+_ASSET_KIND_LABELS = {
+    AssetKind.MOBY: ("Moby", "Mobys"),
+    AssetKind.TIE: ("Tie", "Ties"),
+    AssetKind.SHRUB: ("Shrub", "Shrubs"),
+    AssetKind.FOLIAGE: ("Foliage", "Foliage"),
+    AssetKind.SHADER: ("Material", "Materials"),
+}
 _DATABLOCK_COLLECTIONS = (
     "actions",
     "armatures",
@@ -46,8 +61,123 @@ class AssetCacheOptions:
     damage_permutations: bool = False
     lower_lods: bool = False
     collision_geometry: bool = False
-    source_default_parts: bool = False
+    source_default_parts: bool = True
+    vegetation: bool = True
     asset_limit: int = 0
+
+
+@dataclass(slots=True)
+class AssetCacheJob:
+    process: subprocess.Popen[str]
+    report_path: Path
+    progress_path: Path
+    log_path: Path
+    staging_root: Path
+    started_at: float
+    _result: dict[str, object] | None = None
+    _error: str | None = None
+
+    def progress(self) -> dict[str, object] | None:
+        if not self.progress_path.is_file():
+            return None
+        try:
+            payload = json.loads(
+                self.progress_path.read_text(encoding="utf-8")
+            )
+        except FileNotFoundError:
+            return None
+        if not isinstance(payload, dict):
+            raise InsomniacError(
+                "The Asset Browser cache progress report is invalid"
+            )
+        return payload
+
+    def poll(self) -> dict[str, object] | None:
+        if self._result is not None:
+            return self._result
+        if self._error is not None:
+            raise InsomniacError(self._error)
+        return_code = self.process.poll()
+        if return_code is None:
+            return None
+
+        try:
+            report = self._read_report()
+            if return_code != 0 or "error" in report:
+                detail = str(report.get("error") or "").strip()
+                if not detail:
+                    detail = self._log_tail()
+                self._error = (
+                    "Asset Browser cache generation failed"
+                    + (f":\n{detail}" if detail else "")
+                )
+                raise InsomniacError(self._error)
+            self._result = report
+            return report
+        finally:
+            if self._result is None:
+                shutil.rmtree(self.staging_root, ignore_errors=True)
+            self._cleanup_control_files()
+
+    def cancel(self, *, force: bool = False) -> bool:
+        progress = self.progress()
+        if (
+            not force
+            and progress is not None
+            and not bool(progress.get("cancellable", True))
+        ):
+            return False
+        if self.process.poll() is None:
+            self.process.terminate()
+            try:
+                self.process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.process.kill()
+                self.process.wait(timeout=5)
+        shutil.rmtree(self.staging_root, ignore_errors=True)
+        self._cleanup_control_files()
+        return True
+
+    def _read_report(self) -> dict[str, object]:
+        if not self.report_path.is_file():
+            detail = self._log_tail()
+            raise InsomniacError(
+                "The Asset Browser cache worker finished without a report"
+                + (f":\n{detail}" if detail else "")
+            )
+        try:
+            report = json.loads(
+                self.report_path.read_text(encoding="utf-8")
+            )
+        except (OSError, json.JSONDecodeError) as exc:
+            raise InsomniacError(
+                f"Could not read the Asset Browser cache report: {exc}"
+            ) from exc
+        if not isinstance(report, dict):
+            raise InsomniacError(
+                "The Asset Browser cache report is invalid"
+            )
+        return report
+
+    def _log_tail(self) -> str:
+        if not self.log_path.is_file():
+            return ""
+        try:
+            lines = self.log_path.read_text(
+                encoding="utf-8",
+                errors="replace",
+            ).splitlines()
+        except OSError as exc:
+            return f"Could not read worker log: {exc}"
+        return "\n".join(lines[-20:])
+
+    def _cleanup_control_files(self) -> None:
+        self.report_path.unlink(missing_ok=True)
+        self.progress_path.unlink(missing_ok=True)
+        self.progress_path.with_suffix(
+            self.progress_path.suffix + ".tmp"
+        ).unlink(missing_ok=True)
+        self.log_path.unlink(missing_ok=True)
 
 
 def asset_library_path(cache_directory: str | Path) -> Path:
@@ -84,17 +214,21 @@ def ensure_asset_library_registered(
     return library
 
 
-def run_asset_cache_worker(
+def start_asset_cache_worker(
     *,
     game_id: str,
     iso_path: str | Path,
     level_name: str,
     cache_directory: str | Path,
     options: AssetCacheOptions,
-) -> dict[str, object]:
-    cache_root = Path(cache_directory).expanduser()
+) -> AssetCacheJob:
+    cache_root = Path(cache_directory).expanduser().resolve()
     cache_root.mkdir(parents=True, exist_ok=True)
-    report_path = cache_root / f".asset-cache-report-{uuid.uuid4().hex}.json"
+    job_id = uuid.uuid4().hex
+    report_path = cache_root / f".asset-cache-report-{job_id}.json"
+    progress_path = cache_root / f".asset-cache-progress-{job_id}.json"
+    log_path = cache_root / f".asset-cache-log-{job_id}.txt"
+    staging_root = cache_root / f".asset-cache-staging-{job_id}"
     worker = Path(__file__).with_name("asset_cache_worker.py")
     command = [
         bpy.app.binary_path,
@@ -115,6 +249,10 @@ def run_asset_cache_worker(
         str(cache_root),
         "--report",
         str(report_path),
+        "--progress",
+        str(progress_path),
+        "--job-id",
+        job_id,
     ]
     if not options.materials:
         command.append("--no-materials")
@@ -130,46 +268,77 @@ def run_asset_cache_worker(
         command.append("--lower-lods")
     if options.collision_geometry:
         command.append("--collision-geometry")
-    if options.source_default_parts:
-        command.append("--source-default-parts")
+    if not options.source_default_parts:
+        command.append("--no-source-default-parts")
+    if not options.vegetation:
+        command.append("--no-vegetation")
     if not options.generate_previews:
         command.append("--no-previews")
     if options.asset_limit:
         command.extend(("--asset-limit", str(options.asset_limit)))
 
     try:
-        adapter = get_game_adapter(game_id)
-        result = subprocess.run(
+        log_stream = log_path.open("w", encoding="utf-8")
+    except OSError as exc:
+        raise InsomniacError(
+            f"Could not create Asset Browser worker log: {exc}"
+        ) from exc
+    try:
+        process = subprocess.Popen(
             command,
-            check=False,
-            capture_output=True,
+            stdout=log_stream,
+            stderr=subprocess.STDOUT,
             text=True,
-            timeout=6 * 60 * 60,
         )
-        if result.returncode != 0:
-            output = "\n".join(
-                line
-                for line in (result.stdout + "\n" + result.stderr).splitlines()
-                if line.strip()
-            )
-            detail = "\n".join(output.splitlines()[-20:])
-            raise InsomniacError(
-                f"{adapter.label} Asset Browser cache generation failed"
-                + (f":\n{detail}" if detail else "")
-            )
-        if not report_path.is_file():
-            raise InsomniacError(
-                "The Asset Browser cache worker finished without a report"
-            )
-        report = json.loads(report_path.read_text(encoding="utf-8"))
-        if not isinstance(report, dict):
-            raise InsomniacError("The Asset Browser cache report is invalid")
-        return report
+    except OSError as exc:
+        log_path.unlink(missing_ok=True)
+        raise InsomniacError(
+            f"Could not start Asset Browser cache worker: {exc}"
+        ) from exc
     finally:
-        report_path.unlink(missing_ok=True)
+        log_stream.close()
+    return AssetCacheJob(
+        process=process,
+        report_path=report_path,
+        progress_path=progress_path,
+        log_path=log_path,
+        staging_root=staging_root,
+        started_at=time.monotonic(),
+    )
 
 
-def generate_asset_library(
+def run_asset_cache_worker(
+    *,
+    game_id: str,
+    iso_path: str | Path,
+    level_name: str,
+    cache_directory: str | Path,
+    options: AssetCacheOptions,
+) -> dict[str, object]:
+    job = start_asset_cache_worker(
+        game_id=game_id,
+        iso_path=iso_path,
+        level_name=level_name,
+        cache_directory=cache_directory,
+        options=options,
+    )
+    while True:
+        report = job.poll()
+        if report is not None:
+            return report
+        if (
+            time.monotonic() - job.started_at
+            > _ASSET_CACHE_TIMEOUT_SECONDS
+        ):
+            job.cancel(force=True)
+            adapter = get_game_adapter(game_id)
+            raise InsomniacError(
+                f"{adapter.label} Asset Browser cache generation timed out"
+            )
+        time.sleep(0.1)
+
+
+def _generate_asset_library_v1(
     context: bpy.types.Context,
     *,
     game_id: str,
@@ -441,7 +610,7 @@ def generate_asset_library(
             "schema_version": ASSET_CACHE_SCHEMA_VERSION,
             "game": adapter.id,
             "level": level_name.replace("\\", "/"),
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": datetime.now(UTC).isoformat(),
             "source": {
                 "iso": str(iso),
                 "size": iso.stat().st_size,
@@ -490,6 +659,31 @@ def generate_asset_library(
     }
 
 
+def generate_asset_library(
+    context: bpy.types.Context,
+    *,
+    game_id: str,
+    iso_path: str | Path,
+    level_name: str,
+    cache_directory: str | Path,
+    options: AssetCacheOptions,
+    progress: Callable[[dict[str, object]], None] | None = None,
+    job_id: str | None = None,
+) -> dict[str, object]:
+    from .asset_cache_generation import generate_asset_library_v2
+
+    return generate_asset_library_v2(
+        context,
+        game_id=game_id,
+        iso_path=iso_path,
+        level_name=level_name,
+        cache_directory=cache_directory,
+        options=options,
+        progress=progress,
+        job_id=job_id,
+    )
+
+
 def _safe_component(value: str) -> str:
     invalid = '<>:"/\\|?*'
     cleaned = "".join("_" if character in invalid else character for character in value)
@@ -516,7 +710,12 @@ def _mark_asset(
     generate_preview: bool,
     adapter: GameAdapter,
 ) -> None:
-    kind_label = "Moby" if kind is AssetKind.MOBY else "Tie"
+    try:
+        kind_label = _ASSET_KIND_LABELS[kind][0]
+    except KeyError as exc:
+        raise ValueError(
+            f"{kind.name} is not a Collection asset kind"
+        ) from exc
     collection["insomniac_game"] = adapter.id
     collection["insomniac_asset_kind"] = kind.name
     collection["insomniac_asset_tuid"] = f"0x{tuid:016X}"
@@ -632,9 +831,12 @@ def _merge_catalogs(
         for raw_line in catalog_file.read_text(encoding="utf-8").splitlines():
             if not raw_line or raw_line.startswith("#") or raw_line == "VERSION 1":
                 continue
-            parts = raw_line.split(":", 2)
-            if len(parts) == 3:
-                entries[parts[0]] = (parts[1], parts[2])
+            try:
+                catalog_id, remainder = raw_line.split(":", 1)
+                path, simple_name = remainder.rsplit(":", 1)
+            except ValueError:
+                continue
+            entries[catalog_id] = (path, simple_name)
     for catalog_path, (catalog_id, simple_name) in catalogs.items():
         entries[str(catalog_id)] = (catalog_path, simple_name)
 

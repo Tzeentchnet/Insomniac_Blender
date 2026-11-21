@@ -194,23 +194,32 @@ separate per game.
 ## Asset Browser cache
 
 The Asset Browser cache is generated locally from a user-provided ISO. A
-background factory-startup Blender process imports each selected-level Moby
-and Tie independently, marks its containing Collection as an asset, generates
-an optional preview, and writes that Collection plus dependencies to a
-compressed `.blend`. When requested, decoded Actions in the same file are
-marked under a deterministic per-Moby Animation catalog.
+factory-startup Blender subprocess imports each selected-level Moby, Tie, and
+supported Shrub or Foliage model independently, marks its containing
+Collection as an asset, generates an optional preview, and writes that
+Collection plus dependencies to a compressed `.blend`. The UI operator polls
+JSON progress from a modal timer, leaving Blender responsive; cancellation
+terminates the worker while all output is still staged. When requested,
+decoded Actions in the same file are marked under a deterministic per-Moby
+Animation catalog.
 
-Verified level shaders are built once as standalone Material assets in one
-shared level file so common images remain shared. Materials use a deterministic
-Material catalog; TOD names include the owner-level scope because shader
-indices repeat between levels.
+Asset identity follows the game adapter. R2 and R3 TUIDs are global, so
+schema-2 manifests point every owning level at one canonical file under the
+game's `_shared` directory and one game-wide catalog entry. RFoM and TOD IDs
+repeat between levels, so their files, logical IDs, and catalogs remain
+level-scoped. Input pointer tables are de-duplicated by TUID before generation.
+Verified shaders are standalone Material assets; global games use one
+canonical file per shader, while level-local games can keep their Materials
+together in one level file.
 
-Generation occurs in a staging directory. The prior level directory is
-replaced only after every selected asset and its manifest have been written.
-Catalog UUIDs are deterministic and catalog entries are merged without
-discarding unrelated library catalogs. The main Blender process only
-registers the generated library in Append mode and is never used as
-generation scratch space.
+Generation occurs in a staging directory. A commit first backs up every
+replaced or deleted path, installs the generated files, rewritten manifests,
+and rebuilt catalog, and only then deletes the backup. Any exception restores
+the prior files. Catalog UUIDs are deterministic; catalogs are reconstructed
+from committed manifests so stale generated categories disappear, while
+paths outside the supported game namespaces are preserved. The main Blender
+process only registers the generated library in Append mode and is never used
+as generation scratch space.
 
 No source-derived game asset is part of the extension package. The default
 library registration points at the user's local cache and remains empty until
