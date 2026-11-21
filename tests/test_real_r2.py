@@ -109,17 +109,44 @@ class RealResistance2Tests(unittest.TestCase):
                 )
             foliage_pointers = reader.asset_pointers(AssetKind.FOLIAGE)
             if foliage_pointers:
-                foliage = reader.read_foliage(foliage_pointers[0].tuid)
-                self.assertTrue(foliage.meshes)
-                self.assertTrue(
-                    np.isfinite(foliage.meshes[0].positions).all()
-                )
-                self.assertEqual(
-                    reader.read_shader(
-                        foliage.shader_tuids[0]
-                    ).alpha_mode,
-                    "MASK",
-                )
+                for pointer in foliage_pointers:
+                    foliage = reader.read_foliage(pointer.tuid)
+                    self.assertTrue(foliage.meshes)
+                    mesh = foliage.meshes[0]
+                    self.assertTrue(np.isfinite(mesh.positions).all())
+                    self.assertEqual(
+                        len(mesh.foliage_card_centers),
+                        len(mesh.positions),
+                    )
+                    self.assertEqual(
+                        len(mesh.foliage_card_offsets),
+                        len(mesh.positions),
+                    )
+                    self.assertEqual(
+                        len(mesh.foliage_normals),
+                        len(mesh.positions),
+                    )
+                    self.assertEqual(
+                        mesh.foliage_runtime_words.shape,
+                        (len(mesh.positions), 2),
+                    )
+                    np.testing.assert_allclose(
+                        mesh.positions,
+                        mesh.foliage_card_centers
+                        + mesh.foliage_card_offsets,
+                        atol=1e-4,
+                    )
+                    np.testing.assert_allclose(
+                        np.linalg.norm(mesh.foliage_normals, axis=1),
+                        1.0,
+                        atol=0.002,
+                    )
+                    self.assertEqual(
+                        reader.read_shader(
+                            foliage.shader_tuids[0]
+                        ).alpha_mode,
+                        "MASK",
+                    )
             zones = reader.read_zones()
             self.assertTrue(zones)
             shrub_instances = [

@@ -315,6 +315,19 @@ They preserve verified source data for later vegetation work but do not alter
 positions, normals, or materials. Runtime wind remains deliberately separate
 from static mesh import.
 
+R2/R3 Foliage geometry likewise carries optional repeated card-center,
+card-offset, decoded normal, and two-word runtime arrays. The Blender bridge
+writes `insomniac_foliage_center`,
+`insomniac_foliage_corner_offset`, `insomniac_foliage_normal`,
+`insomniac_foliage_runtime_word_0`, and
+`insomniac_foliage_runtime_word_1` point attributes. The decoded
+`R11G11B10` signed-normalized vectors also become Blender custom split
+normals. Centers and offsets remain separate so a future camera-aware
+billboard system does not need to reverse the static expansion. The raw
+runtime words remain intentionally uninterpreted, and
+`insomniac_foliage_runtime_billboarding` is false because import does not
+invent or bind a scene camera.
+
 ## Asset Browser cache
 
 The Asset Browser cache is generated locally from a user-provided ISO. A

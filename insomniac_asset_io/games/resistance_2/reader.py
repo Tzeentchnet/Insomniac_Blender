@@ -127,6 +127,28 @@ def _decode_vertex_colors(purposes: np.ndarray) -> np.ndarray:
     return np.column_stack((rgb, rgb, rgb, alpha))
 
 
+def _decode_r11g11b10_snorm(values: np.ndarray) -> np.ndarray:
+    packed = np.asarray(values, dtype=np.uint32)
+
+    def component(shift: int, bits: int) -> np.ndarray:
+        mask = (1 << bits) - 1
+        sign = 1 << (bits - 1)
+        raw = ((packed >> shift) & mask).astype(np.int32)
+        signed = np.where(raw & sign, raw - (1 << bits), raw)
+        return np.maximum(
+            signed.astype(np.float32) / np.float32(sign - 1),
+            np.float32(-1.0),
+        )
+
+    return np.column_stack(
+        (
+            component(0, 11),
+            component(11, 11),
+            component(22, 10),
+        )
+    ).astype(np.float32, copy=False)
+
+
 @dataclass(frozen=True, slots=True)
 class _GlobalTextureLocation:
     tuid: int
@@ -1008,6 +1030,7 @@ class Resistance2Reader:
             label=ighw.label,
             position_scale=YARD_TO_METERS,
             corner_y_sign=self.foliage_corner_y_sign,
+            decode_authored_metadata=True,
         )
         foliage_shader_tuid = (
             FOLIAGE_SHADER_TUID_BASE + shader_tuids[0]
@@ -1200,6 +1223,7 @@ class Resistance2Reader:
         label: str,
         position_scale: np.float32,
         corner_y_sign: float = 1.0,
+        decode_authored_metadata: bool = False,
     ) -> MeshGeometry:
         if (
             corner_begin > corner_end
@@ -1235,13 +1259,59 @@ class Resistance2Reader:
             offset=(corner_begin // 4) * center_stride,
             strides=(center_stride, 2),
         ).astype(np.float32)
-        positions = np.repeat(centers, 4, axis=0)
+        repeated_centers = np.repeat(centers, 4, axis=0)
+        positions = repeated_centers.copy()
         positions[:, 0] += corners[:, 0]
         positions[:, 1] += corners[:, 1] * corner_y_sign
         positions *= position_scale
+        card_centers = repeated_centers * position_scale
+        card_offsets = np.zeros((corner_count, 3), dtype=np.float32)
+        card_offsets[:, 0] = corners[:, 0]
+        card_offsets[:, 1] = corners[:, 1] * corner_y_sign
+        card_offsets *= position_scale
         uvs = corners[:, 2:].copy()
         if not np.isfinite(positions).all() or not np.isfinite(uvs).all():
             raise FormatError(f"{label}: foliage vertices are not finite")
+
+        normals = None
+        runtime_words = None
+        if decode_authored_metadata:
+            if center_stride < 0x0E:
+                raise FormatError(
+                    f"{label}: foliage center stride {center_stride:#x} "
+                    "cannot contain authored metadata"
+                )
+            center_count = corner_count // 4
+            center_offset = (corner_begin // 4) * center_stride
+            packed_normals = np.ndarray(
+                shape=(center_count,),
+                dtype=endian + "u4",
+                buffer=center_buffer,
+                offset=center_offset + 0x06,
+                strides=(center_stride,),
+            )
+            center_normals = _decode_r11g11b10_snorm(packed_normals)
+            normal_lengths = np.linalg.norm(center_normals, axis=1)
+            if np.any(
+                (normal_lengths < np.float32(0.99))
+                | (normal_lengths > np.float32(1.01))
+            ):
+                raise FormatError(
+                    f"{label}: foliage contains a non-unit packed normal"
+                )
+            normals = np.repeat(center_normals, 4, axis=0)
+            center_runtime_words = np.ndarray(
+                shape=(center_count, 2),
+                dtype=endian + "u2",
+                buffer=center_buffer,
+                offset=center_offset + 0x0A,
+                strides=(center_stride, 2),
+            ).astype(np.uint16)
+            runtime_words = np.repeat(
+                center_runtime_words,
+                4,
+                axis=0,
+            )
 
         quad_starts = (
             np.arange(corner_count // 4, dtype=np.int32) * 4
@@ -1261,6 +1331,14 @@ class Resistance2Reader:
             positions=positions,
             uvs=uvs,
             indices=indices,
+            foliage_card_centers=(
+                card_centers if decode_authored_metadata else None
+            ),
+            foliage_card_offsets=(
+                card_offsets if decode_authored_metadata else None
+            ),
+            foliage_normals=normals,
+            foliage_runtime_words=runtime_words,
         )
 
     @staticmethod

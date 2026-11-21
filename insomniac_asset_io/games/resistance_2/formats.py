@@ -98,6 +98,10 @@ class MeshGeometry:
     indices: IntArray
     secondary_uvs: FloatArray | None = None
     colors: FloatArray | None = None
+    foliage_card_centers: FloatArray | None = None
+    foliage_card_offsets: FloatArray | None = None
+    foliage_normals: FloatArray | None = None
+    foliage_runtime_words: UInt16Array | None = None
     shrub_position_w: IntArray | None = None
     shrub_height_weights: FloatArray | None = None
     shrub_runtime_remap: UInt16Array | None = None

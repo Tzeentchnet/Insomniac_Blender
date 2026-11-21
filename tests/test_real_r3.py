@@ -538,6 +538,33 @@ class RealResistance3FoliageTests(unittest.TestCase):
                 self.assertTrue(np.isfinite(mesh.uvs).all())
                 self.assertEqual(len(mesh.positions) % 4, 0)
                 self.assertEqual(len(mesh.indices) % 6, 0)
+                self.assertEqual(
+                    len(mesh.foliage_card_centers),
+                    len(mesh.positions),
+                )
+                self.assertEqual(
+                    len(mesh.foliage_card_offsets),
+                    len(mesh.positions),
+                )
+                self.assertEqual(
+                    len(mesh.foliage_normals),
+                    len(mesh.positions),
+                )
+                self.assertEqual(
+                    mesh.foliage_runtime_words.shape,
+                    (len(mesh.positions), 2),
+                )
+                np.testing.assert_allclose(
+                    mesh.positions,
+                    mesh.foliage_card_centers
+                    + mesh.foliage_card_offsets,
+                    atol=1e-4,
+                )
+                np.testing.assert_allclose(
+                    np.linalg.norm(mesh.foliage_normals, axis=1),
+                    1.0,
+                    atol=0.002,
+                )
                 shader = reader.read_shader(foliage.shader_tuids[0])
                 self.assertEqual(shader.alpha_mode, "MASK")
                 self.assertIsNotNone(shader.albedo_texture_id)

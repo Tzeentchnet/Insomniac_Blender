@@ -702,6 +702,16 @@ four consecutive corners share one center, and imported positions are
 opposite of R2; using the R2 sign places the card tops on the terrain and
 extends the foliage downward. Only the first authored LOD is expanded.
 
+The shared center record includes the same big-endian `R11G11B10`
+signed-normalized authored normal and two opaque runtime `u16` words
+documented for R2. A complete 27-level USA-disc scan found 28 references to
+13 unique, conflict-free payloads and 2,207 center records. All normals are
+unit length to packed-quantization error (`0.999385`-`1.000681`); 2,056 use
+the common `(0, -1, 0)` word and the remaining records cover 108 additional
+packed values. Blender preserves the center, signed corner offset, normal,
+and raw words as point attributes and applies the normal as a custom split
+normal. Runtime camera-facing rotation remains deliberately unavailable.
+
 Zones retain the `0x7400` array of foliage TUIDs, but `0x7440` uses
 `0x80`-byte V3 instance records. The row-major transform starts at `+0x00`
 and the `0x7400` lookup index is at `+0x70`.

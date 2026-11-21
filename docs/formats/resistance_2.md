@@ -792,17 +792,44 @@ the first authored LOD.
 
 The start of `0xA000` contains `0x08`-byte corner records with half-float
 `size[2]` and `uv[2]`. The center stream begins at the descriptor's
-sprite-center offset and uses `0x0E`-byte records: half-float position plus
-four signed 16-bit runtime fields. Four consecutive corners share one center.
-Imported card positions are
+sprite-center offset and uses this `0x0E`-byte record:
+
+| Offset | Type | Meaning |
+|---:|---|---|
+| `+0x00` | `f16[3]` | Card center |
+| `+0x06` | `u32` | Big-endian `R11G11B10` signed-normalized authored normal |
+| `+0x0A` | `u16` | Opaque runtime word 0 |
+| `+0x0C` | `u16` | Opaque runtime word 1 |
+
+For packed word `p`, the normal components are
+`signExtend(p[10:0], 11) / 1023`,
+`signExtend(p[21:11], 11) / 1023`, and
+`signExtend(p[31:22], 10) / 511`, clamped to `-1`. This is the same packed
+normal format used by other V2 geometry. Four consecutive corners share one
+center and normal. Imported card positions remain
 `(center + (size.x, size.y, 0)) * 0.9144`.
+
+A complete 27-level USA-disc scan found 59 references to 26 unique,
+conflict-free Foliage payloads and 5,147 center records. Every decoded normal
+is unit length to packed-quantization error (`0.998979`-`1.000937`), across
+541 distinct packed values. Runtime word 0 uses only values `0`, `2`, `512`,
+and `514`; runtime word 1 is always odd and uses only bits `0`-`4` and `8`.
+Those bit patterns are preserved without assigning unproven wind or
+billboard semantics.
+
+Blender stores the converted center, converted corner offset, decoded normal,
+and both runtime words as point attributes. The authored vectors also become
+custom split normals and therefore affect shading. Card geometry remains a
+static first-LOD expansion: camera-facing rotation requires a runtime camera,
+so import preserves the center/offset inputs but does not attach a camera
+constraint.
 
 Foliage uses its asset's first `0x5600` shader. A foliage-only shader identity
 preserves those source textures and parameters while forcing masked alpha, so
 the same source shader can remain opaque when used by a non-foliage asset.
 Blender mesh datablocks are shared by all placements of the same foliage TUID.
-Runtime wind, custom normals, and camera-facing billboard behavior are not
-reproduced.
+Authored normals are reproduced; runtime wind and camera-facing billboard
+motion are not.
 
 Shrub assets come from `0x1D500` pointers into `shrubs.dat`. Each standalone
 IGHW contains:

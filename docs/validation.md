@@ -107,9 +107,11 @@ writing game data to the repository.
 
 The portable `test_foliage.py` fixture separately exercises the R2 and R3
 `0xA000` card buffers, their distinct `0xA200` descriptors, and their
-distinct `0x7440` placement records. A real R2 source with foliage can be
-checked by setting `R2_LEVEL_SOURCE`; Scotia Co-op contains three foliage
-assets and 200 placements. The portable `test_shrubs.py` fixture exercises
+distinct `0x7440` placement records. It uses nonzero packed normal and
+runtime words, verifies the repeated center/offset/normal arrays, and rejects
+a non-unit packed normal. A real R2 source with foliage can be checked by
+setting `R2_LEVEL_SOURCE`; Scotia Co-op contains three foliage assets and 200
+placements. The portable `test_shrubs.py` fixture exercises
 the shared R2/R3 `0xB100` geometry, the half-float height weight, the raw
 position-W value, the little-endian `0x3150` remap, invalid reserved values,
 R3's exact zero-extent fallback, and `0x7540` placement records. Scotia Co-op
@@ -125,6 +127,15 @@ in every nonconstant payload. The scan also covers the two R3 powerline
 Shrubs whose zero serialized extent uses the independently verified `32.0`
 default.
 
+A separate direct scan of all 54 R2/R3 cached-level archives validates 59 R2
+and 28 R3 Foliage references, covering all 26 and 13 unique payloads without
+TUID conflicts. The 5,147 R2 and 2,207 R3 center records all decode as
+unit-length `R11G11B10` signed-normalized vectors within `0.0011` of unit
+length. The scan also proves the restricted raw runtime-word domains without
+assigning behavior to them. Production readers successfully decode every
+payload with center, corner-offset, normal, and two-word arrays matching the
+expanded point count.
+
 The retained
 `E:\Tests\InsomniacAssetIO\shrub_metadata_review\r2_r3_shrub_metadata.blend`
 review reopens in Blender 5.2.2 LTS with an R2 180-vertex short-grass Shrub
@@ -134,6 +145,15 @@ a review-only blue/green/red ramp for the `0.0`-`1.0` height weight, making
 the root-to-tip gradient visible without changing the importer's default
 material graph. The JSON report in the same directory records exact vertex,
 face, attribute, and persisted-mesh counts.
+
+The retained
+`E:\Tests\InsomniacAssetIO\foliage_metadata_review\r2_r3_foliage_metadata.blend`
+review reopens with R2 TUID `0x6DC5E5FA04DE1406` and R3 TUID
+`0xEA857D66E526A2A5`, custom normals, five point attributes, and explicit
+false runtime-billboarding markers intact. Its matching PNG shows both
+custom-normal lighting and a review-only RGB visualization of the decoded
+source vectors. The JSON report records the exact vertex, triangle,
+attribute, normal-range, and persistence results.
 
 Run the real R3 vegetation regression against `mine_traversal_train`:
 
@@ -146,10 +166,12 @@ Remove-Item Env:R3_FOLIAGE_SOURCE
 This decodes all 11 foliage assets, both masked leaf materials and their
 albedo textures, and all 1,050 placements, plus all six Shrub assets and 661
 Shrub placements. It verifies that every vegetation placement resolves to a
-level asset and that every Shrub vertex has finite height metadata plus
-position-W and runtime-remap arrays of matching length. The Blender
-optional-geometry suite writes all three point attributes, saves a `.blend`,
-reopens it, and verifies exact persisted values. The same regression checks
+level asset; every Foliage vertex has matching finite center, corner-offset,
+normal, and runtime-word arrays; and every Shrub vertex has finite height
+metadata plus position-W and runtime-remap arrays of matching length. The
+Blender optional-geometry suite writes the Foliage custom normals and five
+point attributes plus all three Shrub point attributes, saves a `.blend`,
+reopens it, and verifies their persisted values. The same regression checks
 the exact grass, conifer, and track
 Tie material groups selected by R3 primitive byte `+0x26`, their vertex light
 and optional UV2, and 6,730 placed-Tie lightmap IDs. It decodes the target

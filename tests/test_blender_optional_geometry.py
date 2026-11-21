@@ -407,6 +407,106 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
         )
         self.assertFalse(persisted["insomniac_shrub_runtime_wind"])
 
+    def test_mesh_preserves_foliage_metadata_after_reopen(self) -> None:
+        material = bpy.data.materials.new("Foliage")
+        centers = np.asarray(
+            ((0.5, 1.0, 1.5), (0.5, 1.0, 1.5), (0.5, 1.0, 1.5)),
+            dtype=np.float32,
+        )
+        offsets = np.asarray(
+            ((-0.5, -1.0, 0.0), (0.5, -1.0, 0.0), (-0.5, 1.0, 0.0)),
+            dtype=np.float32,
+        )
+        normals = np.asarray(
+            ((0.0, -1.0, 0.0), (0.0, -0.8, 0.6), (0.0, 0.0, 1.0)),
+            dtype=np.float32,
+        )
+        runtime_words = np.asarray(
+            ((0x0000, 0x0001), (0x0002, 0x001F), (0x0202, 0x011F)),
+            dtype=np.uint16,
+        )
+        geometry = MeshGeometry(
+            shader_index=0,
+            positions=centers + offsets,
+            uvs=np.asarray(
+                ((0.0, 0.0), (1.0, 0.0), (0.0, 1.0)),
+                dtype=np.float32,
+            ),
+            indices=np.asarray((0, 1, 2), dtype=np.int32),
+            foliage_card_centers=centers,
+            foliage_card_offsets=offsets,
+            foliage_normals=normals,
+            foliage_runtime_words=runtime_words,
+        )
+        mesh = _build_mesh("Foliage", (geometry,), (material,)).mesh
+        obj = bpy.data.objects.new("Foliage", mesh)
+        bpy.context.scene.collection.objects.link(obj)
+        mesh_name = mesh.name
+
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "foliage_metadata.blend"
+            self.assertEqual(
+                bpy.ops.wm.save_as_mainfile(filepath=str(output)),
+                {"FINISHED"},
+            )
+            self.assertEqual(
+                bpy.ops.wm.open_mainfile(filepath=str(output)),
+                {"FINISHED"},
+            )
+
+        persisted = bpy.data.meshes[mesh_name]
+        self.assertTrue(persisted.has_custom_normals)
+        np.testing.assert_allclose(
+            tuple(
+                item.vector
+                for item in persisted.attributes[
+                    "insomniac_foliage_center"
+                ].data
+            ),
+            centers,
+        )
+        np.testing.assert_allclose(
+            tuple(
+                item.vector
+                for item in persisted.attributes[
+                    "insomniac_foliage_corner_offset"
+                ].data
+            ),
+            offsets,
+        )
+        np.testing.assert_allclose(
+            tuple(
+                item.vector
+                for item in persisted.attributes[
+                    "insomniac_foliage_normal"
+                ].data
+            ),
+            normals,
+        )
+        for index in range(2):
+            self.assertEqual(
+                tuple(
+                    item.value
+                    for item in persisted.attributes[
+                        f"insomniac_foliage_runtime_word_{index}"
+                    ].data
+                ),
+                tuple(int(value) for value in runtime_words[:, index]),
+            )
+        np.testing.assert_allclose(
+            tuple(item.vector for item in persisted.corner_normals),
+            normals,
+            atol=1e-4,
+        )
+        self.assertEqual(
+            persisted["insomniac_foliage_metadata_layout"],
+            "CENTER_XYZ_METERS,CORNER_OFFSET_XYZ_METERS,"
+            "NORMAL_R11G11B10_SNORM,RUNTIME_U16X2",
+        )
+        self.assertFalse(
+            persisted["insomniac_foliage_runtime_billboarding"]
+        )
+
     def test_level_tie_preserves_instance_lightmap_index(self) -> None:
         reader = _LevelReader()
         reader.zones[0].tie_instances = [

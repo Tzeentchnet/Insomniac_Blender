@@ -4334,6 +4334,10 @@ def _build_mesh(
     uv_parts: list[np.ndarray] = []
     secondary_uv_parts: list[np.ndarray] = []
     color_parts: list[np.ndarray] = []
+    foliage_card_center_parts: list[np.ndarray] = []
+    foliage_card_offset_parts: list[np.ndarray] = []
+    foliage_normal_parts: list[np.ndarray] = []
+    foliage_runtime_word_parts: list[np.ndarray] = []
     shrub_position_w_parts: list[np.ndarray] = []
     shrub_height_weight_parts: list[np.ndarray] = []
     shrub_runtime_remap_parts: list[np.ndarray] = []
@@ -4346,6 +4350,18 @@ def _build_mesh(
         item.secondary_uvs is not None for item in geometry_list
     )
     any_colors = any(item.colors is not None for item in geometry_list)
+    any_foliage_card_centers = any(
+        item.foliage_card_centers is not None for item in geometry_list
+    )
+    any_foliage_card_offsets = any(
+        item.foliage_card_offsets is not None for item in geometry_list
+    )
+    any_foliage_normals = any(
+        item.foliage_normals is not None for item in geometry_list
+    )
+    any_foliage_runtime_words = any(
+        item.foliage_runtime_words is not None for item in geometry_list
+    )
     any_shrub_position_w = any(
         item.shrub_position_w is not None for item in geometry_list
     )
@@ -4396,6 +4412,50 @@ def _build_mesh(
                         else np.ones((len(positions), 4), dtype=np.float32)
                     ),
                     dtype=np.float32,
+                )
+            )
+        if any_foliage_card_centers:
+            foliage_card_center_parts.append(
+                np.asarray(
+                    (
+                        geometry.foliage_card_centers
+                        if geometry.foliage_card_centers is not None
+                        else np.zeros((len(positions), 3), dtype=np.float32)
+                    ),
+                    dtype=np.float32,
+                )
+            )
+        if any_foliage_card_offsets:
+            foliage_card_offset_parts.append(
+                np.asarray(
+                    (
+                        geometry.foliage_card_offsets
+                        if geometry.foliage_card_offsets is not None
+                        else np.zeros((len(positions), 3), dtype=np.float32)
+                    ),
+                    dtype=np.float32,
+                )
+            )
+        if any_foliage_normals:
+            foliage_normal_parts.append(
+                np.asarray(
+                    (
+                        geometry.foliage_normals
+                        if geometry.foliage_normals is not None
+                        else np.zeros((len(positions), 3), dtype=np.float32)
+                    ),
+                    dtype=np.float32,
+                )
+            )
+        if any_foliage_runtime_words:
+            foliage_runtime_word_parts.append(
+                np.asarray(
+                    (
+                        geometry.foliage_runtime_words
+                        if geometry.foliage_runtime_words is not None
+                        else np.zeros((len(positions), 2), dtype=np.uint16)
+                    ),
+                    dtype=np.uint16,
                 )
             )
         if any_shrub_position_w:
@@ -4468,6 +4528,26 @@ def _build_mesh(
         else None
     )
     colors = np.concatenate(color_parts) if color_parts else None
+    foliage_card_centers = (
+        np.concatenate(foliage_card_center_parts)
+        if foliage_card_center_parts
+        else None
+    )
+    foliage_card_offsets = (
+        np.concatenate(foliage_card_offset_parts)
+        if foliage_card_offset_parts
+        else None
+    )
+    foliage_normals = (
+        np.concatenate(foliage_normal_parts)
+        if foliage_normal_parts
+        else None
+    )
+    foliage_runtime_words = (
+        np.concatenate(foliage_runtime_word_parts)
+        if foliage_runtime_word_parts
+        else None
+    )
     shrub_position_w = (
         np.concatenate(shrub_position_w_parts)
         if shrub_position_w_parts
@@ -4529,6 +4609,55 @@ def _build_mesh(
             domain="POINT",
         )
         color_attribute.data.foreach_set("color", colors.reshape(-1))
+    if foliage_card_centers is not None:
+        attribute = mesh.attributes.new(
+            name="insomniac_foliage_center",
+            type="FLOAT_VECTOR",
+            domain="POINT",
+        )
+        attribute.data.foreach_set(
+            "vector",
+            foliage_card_centers.reshape(-1),
+        )
+    if foliage_card_offsets is not None:
+        attribute = mesh.attributes.new(
+            name="insomniac_foliage_corner_offset",
+            type="FLOAT_VECTOR",
+            domain="POINT",
+        )
+        attribute.data.foreach_set(
+            "vector",
+            foliage_card_offsets.reshape(-1),
+        )
+    if foliage_normals is not None:
+        attribute = mesh.attributes.new(
+            name="insomniac_foliage_normal",
+            type="FLOAT_VECTOR",
+            domain="POINT",
+        )
+        attribute.data.foreach_set("vector", foliage_normals.reshape(-1))
+    if foliage_runtime_words is not None:
+        for index in range(2):
+            attribute = mesh.attributes.new(
+                name=f"insomniac_foliage_runtime_word_{index}",
+                type="INT",
+                domain="POINT",
+            )
+            attribute.data.foreach_set(
+                "value",
+                foliage_runtime_words[:, index].astype(np.int32),
+            )
+    if (
+        foliage_card_centers is not None
+        or foliage_card_offsets is not None
+        or foliage_normals is not None
+        or foliage_runtime_words is not None
+    ):
+        mesh["insomniac_foliage_metadata_layout"] = (
+            "CENTER_XYZ_METERS,CORNER_OFFSET_XYZ_METERS,"
+            "NORMAL_R11G11B10_SNORM,RUNTIME_U16X2"
+        )
+        mesh["insomniac_foliage_runtime_billboarding"] = False
     if shrub_position_w is not None:
         attribute = mesh.attributes.new(
             name="insomniac_shrub_position_w",
@@ -4566,6 +4695,13 @@ def _build_mesh(
         mesh.materials.append(material)
     mesh.update(calc_edges=True)
     mesh.validate(clean_customdata=False)
+    if foliage_normals is not None:
+        custom_normals = foliage_normals.copy()
+        lengths = np.linalg.norm(custom_normals, axis=1)
+        valid = lengths > np.finfo(np.float32).eps
+        custom_normals[valid] /= lengths[valid, np.newaxis]
+        mesh.normals_split_custom_set_from_vertices(custom_normals)
+        mesh.update()
 
     bone_indices = (
         np.concatenate(bone_index_parts) if bone_index_parts else None

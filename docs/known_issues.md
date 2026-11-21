@@ -241,8 +241,10 @@ idle base for an exact in-game result.
 ### Level rendering limitations
 
 Resistance 3's game-specific foliage sprite cards and placements are
-imported, but runtime wind, custom normals, and camera-facing billboarding
-are not reproduced. UFrag terrain imports its packed per-vertex light,
+imported with their authored packed normals driving Blender custom-normal
+shading. Card centers, signed corner offsets, and both opaque runtime words
+are preserved as point attributes, but runtime wind and camera-facing
+billboarding are not reproduced. UFrag terrain imports its packed per-vertex light,
 secondary UV, and paired `0x5400` baked/`0x5410` directional zone lightmaps
 from the matching `lighting.dat` asset. R3 Ties likewise import packed vertex
 light, optional UV2, and per-instance paired lighting. Tie maps use two
@@ -273,7 +275,9 @@ masked materials. The first authored LOD is expanded into static cards.
 Shrub `0xB300`/`0xB400` meshes and `0x7500`/`0x7540` placements are likewise
 imported with shared mesh datablocks and their source masked materials.
 Their verified position-W, height-weight, and runtime-remap fields are
-preserved as point attributes. Runtime wind, custom normals, and
+preserved as point attributes. Foliage preserves its card centers, corner
+offsets, authored normals, and opaque runtime words as point attributes, and
+the authored vectors drive Blender custom-normal shading. Runtime wind and
 camera-facing foliage billboarding are not reproduced.
 
 ### Gameplay Mobys are static in level imports

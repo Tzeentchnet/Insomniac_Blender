@@ -7,6 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
+from insomniac_asset_io.core.errors import FormatError
 from insomniac_asset_io.core.source import GameSource
 from insomniac_asset_io.games.resistance_2.formats import AssetKind
 from insomniac_asset_io.games.resistance_2.reader import Resistance2Reader
@@ -28,7 +29,12 @@ def _ighw(
     return data
 
 
-def _write_fixture(root: Path, *, r3: bool = False) -> None:
+def _write_fixture(
+    root: Path,
+    *,
+    r3: bool = False,
+    normal_word: int = 0x0020_0800,
+) -> None:
     foliage = _ighw(
         0x188,
         (
@@ -58,7 +64,17 @@ def _write_fixture(root: Path, *, r3: bool = False) -> None:
         0.0,
         1.0,
     )
-    struct.pack_into(">3e4h", foliage, 0x80, 10.0, 20.0, 30.0, 0, 0, 0, 0)
+    struct.pack_into(
+        ">3eI2H",
+        foliage,
+        0x80,
+        10.0,
+        20.0,
+        30.0,
+        normal_word,
+        0x0202,
+        0x011F,
+    )
     if r3:
         struct.pack_into(">B", foliage, 0xC0 + 0x37, 1)
         struct.pack_into(">I", foliage, 0xC0 + 0x50, 0x20)
@@ -171,6 +187,37 @@ class FoliageTests(unittest.TestCase):
                         asset.meshes[0].indices,
                         (0, 1, 2, 3, 0, 2),
                     )
+                    np.testing.assert_allclose(
+                        asset.meshes[0].foliage_card_centers,
+                        np.repeat(
+                            np.asarray(((10.0, 20.0, 30.0),)),
+                            4,
+                            axis=0,
+                        )
+                        * 0.9144,
+                    )
+                    np.testing.assert_allclose(
+                        asset.meshes[0].foliage_card_offsets,
+                        asset.meshes[0].positions
+                        - asset.meshes[0].foliage_card_centers,
+                        atol=1e-6,
+                    )
+                    np.testing.assert_array_equal(
+                        asset.meshes[0].foliage_normals,
+                        np.repeat(
+                            np.asarray(((0.0, -1.0, 0.0),)),
+                            4,
+                            axis=0,
+                        ),
+                    )
+                    np.testing.assert_array_equal(
+                        asset.meshes[0].foliage_runtime_words,
+                        np.repeat(
+                            np.asarray(((0x0202, 0x011F),)),
+                            4,
+                            axis=0,
+                        ),
+                    )
                     self.assertEqual(shader.alpha_mode, "MASK")
                     self.assertEqual(len(zone.foliage_instances), 1)
                     self.assertEqual(
@@ -182,6 +229,18 @@ class FoliageTests(unittest.TestCase):
                         (1.0, 2.0, 3.0),
                     )
                     self.assertEqual(zone.unsupported_foliage_instances, 0)
+
+    def test_rejects_non_unit_packed_foliage_normal(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _write_fixture(root, normal_word=0)
+            with GameSource.open(root) as source:
+                reader = Resistance2Reader(source)
+                with self.assertRaisesRegex(
+                    FormatError,
+                    "non-unit packed normal",
+                ):
+                    reader.read_foliage(FOLIAGE_TUID)
 
 
 if __name__ == "__main__":
