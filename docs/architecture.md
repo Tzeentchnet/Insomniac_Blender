@@ -239,6 +239,11 @@ embedded program descriptors. The Blender bridge preserves that family and
 program metadata but does not connect its texture. Decompiled variants depend
 on a vertex-stage/runtime transition value that is absent from the serialized
 material, so inventing a static dissolve amount would change normal imports.
+The on-fire family follows the same metadata-only boundary. Its exact program
+identity, authored suffix, two verified fifth-slot paths, and three embedded
+program descriptors are classified, but its decompiled dual-sample projection
+depends on a runtime animation phase absent from the material. Blender does
+not freeze that animation at an invented phase or load the disconnected map.
 Decoded RGBA reader caches are cleared after each material while compact
 format/emission analysis and Blender image references remain cached for reuse.
 

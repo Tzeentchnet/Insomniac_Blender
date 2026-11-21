@@ -17,6 +17,10 @@ from insomniac_asset_io.games.resistance_3.reader import (
     DISSOLVE_EFFECT_PROGRAM_LENGTH,
     DISSOLVE_EFFECT_PROGRAM_TUID,
     DISSOLVE_EFFECT_TEXTURE_PATH,
+    FIRE_EFFECT_FAMILY,
+    FIRE_EFFECT_PROGRAM_TUID,
+    FIRE_EFFECT_TEXTURE_PATH,
+    FIRE_EFFECT_TEXTURE_PATHS,
     FROZEN_EFFECT_FAMILY,
     FROZEN_EFFECT_PROGRAM_TUID,
     FROZEN_EFFECT_TEXTURE_PATH,
@@ -238,6 +242,85 @@ def _dissolve_shader(
                 offset,
             )
     data[0x2FC0:0x2FCF] = b"\x01\x09\x13\x00" * 3 + b"\x01\x09\x13"
+    return bytes(data[:cursor])
+
+
+def _fire_shader(
+    *,
+    effect_path: str = FIRE_EFFECT_TEXTURE_PATH,
+    program_length: int = 0x2E30,
+    valid_descriptors: bool = True,
+) -> bytes:
+    data = bytearray(0x3400)
+    struct.pack_into(">4sHHI", data, 0, b"IGHW", 1, 1, 6)
+    sections = (
+        (0x5000, 0x90, 1, 0x80),
+        (0x5D00, 0x110, 1, 0x40),
+        (0x33001, 0x150, 1, program_length),
+        (0x33002, 0x2F80, 1, 0x30),
+        (0x33003, 0x2FB0, 1, 0x15),
+    )
+    for index, section in enumerate(sections):
+        struct.pack_into(">IIII", data, 0x20 + index * 0x10, *section)
+
+    cursor = 0x3000
+
+    def add_string(value: str) -> int:
+        nonlocal cursor
+        encoded = value.encode("utf-8") + b"\0"
+        offset = cursor
+        data[offset : offset + len(encoded)] = encoded
+        cursor += len(encoded)
+        return offset
+
+    lookup_path = add_string(
+        "fixture/cap_boots_onfire/cap_boots_onfire"
+    )
+    texture_paths = tuple(
+        add_string(
+            effect_path if index == 4 else f"fixture/r3_texture_{index}"
+        )
+        for index in range(6)
+    )
+    struct.pack_into(
+        ">IIII",
+        data,
+        0x70,
+        0x11300,
+        0x3000,
+        1,
+        cursor - 0x3000,
+    )
+
+    struct.pack_into(">6i", data, 0x90, 0, 1, 2, 3, 4, -1)
+    struct.pack_into(">2I", data, 0xA8, 0, 0)
+    struct.pack_into(">I", data, 0xB0, 0x1C00_1328)
+    struct.pack_into(">20f3f", data, 0xB4, *(1.0,) * 20, 0.0, 1.0, 0.0)
+    struct.pack_into(">Q", data, 0xD8, FIRE_EFFECT_PROGRAM_TUID)
+
+    struct.pack_into(">QII", data, 0x110, SHADER_TUID, lookup_path, 0)
+    struct.pack_into(">6I", data, 0x120, *TEXTURE_IDS)
+    struct.pack_into(">6I", data, 0x138, *texture_paths)
+    data[0x150 : 0x150 + program_length] = b"\x5a" * program_length
+    if valid_descriptors:
+        if program_length == 0x2E30:
+            chunk_lengths = (0x1010, 0x0EE0, 0x0EF0)
+            chunk_offsets = (0, 0x1040, 0x1F40)
+        else:
+            chunk_lengths = (0x0FC0, 0x0EE0, 0x0EF0)
+            chunk_offsets = (0, 0x0FC0, 0x1EC0)
+        for index, (length, offset) in enumerate(
+            zip(chunk_lengths, chunk_offsets, strict=True)
+        ):
+            struct.pack_into(
+                ">QII",
+                data,
+                0x2F80 + index * 0x10,
+                FIRE_EFFECT_PROGRAM_TUID + index + 1,
+                length,
+                offset,
+            )
+    data[0x2FB0:0x2FC5] = b"\x02\x09\x13\x0a\x14\x00\x00" * 3
     return bytes(data[:cursor])
 
 
@@ -513,6 +596,71 @@ class Resistance3Tests(unittest.TestCase):
 
     def test_rejects_invalid_dissolve_program_descriptors(self):
         shader_data = _dissolve_shader(valid_descriptors=False)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "assetlookup.dat").write_bytes(
+                _assetlookup(len(shader_data))
+            )
+            (root / "shaders.dat").write_bytes(shader_data)
+
+            with GameSource.open(root) as source:
+                shader = Resistance3Reader(source).read_shader(SHADER_TUID)
+
+        self.assertIsNone(shader.effect_family)
+
+    def test_classifies_verified_on_fire_effect_family(self):
+        fixtures = (
+            (FIRE_EFFECT_TEXTURE_PATH, 0x2E30),
+            (FIRE_EFFECT_TEXTURE_PATH, 0x2DB0),
+            ("graphshaders/iang/onfire_01.graphshader", 0x2E30),
+        )
+        for effect_path, program_length in fixtures:
+            with self.subTest(
+                effect_path=effect_path,
+                program_length=program_length,
+            ):
+                shader_data = _fire_shader(
+                    effect_path=effect_path,
+                    program_length=program_length,
+                )
+                with tempfile.TemporaryDirectory() as temporary:
+                    root = Path(temporary)
+                    (root / "assetlookup.dat").write_bytes(
+                        _assetlookup(len(shader_data))
+                    )
+                    (root / "shaders.dat").write_bytes(shader_data)
+
+                    with GameSource.open(root) as source:
+                        shader = Resistance3Reader(source).read_shader(
+                            SHADER_TUID
+                        )
+
+                self.assertEqual(
+                    shader.material_program_tuid,
+                    FIRE_EFFECT_PROGRAM_TUID,
+                )
+                self.assertEqual(shader.effect_family, FIRE_EFFECT_FAMILY)
+                self.assertIn(
+                    shader.extra_texture_lookup_paths[0],
+                    FIRE_EFFECT_TEXTURE_PATHS,
+                )
+
+    def test_rejects_invalid_on_fire_program_descriptors(self):
+        shader_data = _fire_shader(valid_descriptors=False)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "assetlookup.dat").write_bytes(
+                _assetlookup(len(shader_data))
+            )
+            (root / "shaders.dat").write_bytes(shader_data)
+
+            with GameSource.open(root) as source:
+                shader = Resistance3Reader(source).read_shader(SHADER_TUID)
+
+        self.assertIsNone(shader.effect_family)
+
+    def test_rejects_unverified_on_fire_effect_path(self):
+        shader_data = _fire_shader(effect_path="fixture/fire_customa")
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             (root / "assetlookup.dat").write_bytes(

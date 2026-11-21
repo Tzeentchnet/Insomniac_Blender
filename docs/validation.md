@@ -371,6 +371,16 @@ shared 512x512 opaque grayscale texture, and Blender metadata-only handling.
 The material test verifies that this runtime-driven family does not load or
 connect the effect texture and leaves source base color unchanged.
 
+The R3 on-fire investigation applies the same whole-disc gates. Exact program,
+control-byte, suffix, active-path, descriptor, program-length, and selector
+requirements identify 3,322 references to 239 unique shaders across 26
+levels. Synthetic regressions cover both program layouts, both authored
+effect paths, malformed descriptors, and an unverified-path exclusion. The
+`new_york_terraformer` regression requires exactly 39 family shaders, validates
+the 256x256 primary map, and excludes name-only, unbound, and frozen-program
+lookalikes. The Blender regression proves that family metadata persists while
+the runtime-phased map remains unloaded and base color remains unchanged.
+
 Analyze one extracted cached archive, or every cached level archive in an ISO:
 
 ```powershell

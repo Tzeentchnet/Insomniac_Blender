@@ -404,12 +404,12 @@ corpus, with `0x33001` SHA-256 values:
 - `77c073faca8456d5b85e83442eb713fd8414416306c2f7172bfdd9bd0858bc68`.
 
 Across the three decoded texture fixtures, four level-local IDs resolve to the
-same source texture TUID `0x12278F4B908A4115`: a 512x512 BC1, opaque grayscale
-map whose RGB channels are identical. Decompiled specialized fragments sample
-it either from the normalized reconstructed surface-normal XY or from a
-vertex-provided secondary varying. They shape that sample into the surface
-response, include a fixed `(0.2, 0.25, 1.0)` blue color, and scale the response
-with a value derived from vertex-stage input.
+same source texture TUID `0x12278F4B908A4115`: a 512x512 format-`0x05`
+A8R8G8B8, opaque grayscale map whose RGB channels are identical. Decompiled
+specialized fragments sample it either from the normalized reconstructed
+surface-normal XY or from a vertex-provided secondary varying. They shape that
+sample into the surface response, include a fixed `(0.2, 0.25, 1.0)` blue
+color, and scale the response with a value derived from vertex-stage input.
 
 That controlling transition value is not serialized in material section
 `0x5000`, and the observed effect-map sequence does not establish a static
@@ -418,6 +418,46 @@ classifies the family and preserves its program and effect metadata, but the
 Blender bridge intentionally leaves the gradient texture disconnected.
 Sixty-seven retail references have a `_dissolve` name without the verified
 program, bound slot, path, or embedded sections and are excluded.
+
+### On-fire family
+
+The on-fire program identity is `0xB2DAFFA9D7AF976A`. A complete 27-level
+USA-disc scan classified 3,322 references to 239 unique shaders in 26 levels.
+The family requires all of the following:
+
+- a shader basename ending in `_onfire`;
+- control byte `material_unknown_0` equal to `0x13`;
+- an active fifth slot whose path is either
+  `artdepartment/environment/decals/effects/onfire/fire_customa` or
+  `graphshaders/iang/onfire_01.graphshader`;
+- material-program TUID `0xB2DAFFA9D7AF976A`;
+- a `0x2DB0`- or `0x2E30`-byte `0x33001` program section;
+- three bounded, non-overlapping `0x33002` descriptors with consecutive TUIDs
+  `0xB2DAFFA9D7AF976B` through `0xB2DAFFA9D7AF976D`;
+- a `0x15`-byte `0x33003` selector section.
+
+The two program layouts have `0x33001` SHA-256 values:
+
+- `1d66ff9f988dac320c7aeff5f4b7669869930fe222566c4f394a596d2756f0c7`;
+- `b8f1186f6660b21c69bc775d69925f9828715854fc3be1fc09c27e7f63902f19`.
+
+The primary path accounts for 3,307 references to 238 unique shaders. Its
+decoded source texture TUID `0xC72BA28A17A2716A` is a 256x256 format-`0x05`
+A8R8G8B8 map with distinct color channels and alpha from 0 through 70. The
+alternate path occurs on one multiplayer shader repeated in 15 archives and
+resolves to a uniform 32x32 format-`0x06` DXT1 texture. Five name-only
+`_onfire` shaders lack the verified active path or program and are excluded.
+Two frozen-named hair shaders bind `fire_customa` but use the frozen program
+identity and are also excluded.
+
+RSX decompilation shows two normal-projected samples whose coordinates are
+offset from a dynamic phase at different rates. The common fragment includes
+fixed warm colors `(1.0, 0.75, 0.5)` and `(1.0, 0.15, 0.0)`. Comparison
+against 3,251 same-level base-material pairs found no serialized animation
+phase in material section `0x5000`; the phase is runtime draw state. The
+reader therefore preserves `R3_ON_FIRE` family and program metadata, while
+the Blender bridge leaves the animated texture disconnected rather than
+freezing every imported material at an invented phase.
 
 Some level-local textures have a zero-length entry in the high-mip pointer
 table while their texture TUID still owns a complete mip-zero payload in

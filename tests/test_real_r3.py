@@ -14,6 +14,9 @@ from insomniac_asset_io.games.resistance_3.reader import (
     DISSOLVE_EFFECT_FAMILY,
     DISSOLVE_EFFECT_PROGRAM_TUID,
     DISSOLVE_EFFECT_TEXTURE_PATH,
+    FIRE_EFFECT_FAMILY,
+    FIRE_EFFECT_PROGRAM_TUID,
+    FIRE_EFFECT_TEXTURE_PATH,
     FROZEN_EFFECT_FAMILY,
     FROZEN_EFFECT_PROGRAM_TUID,
     FROZEN_EFFECT_TEXTURE_PATH,
@@ -261,6 +264,62 @@ class RealResistance3EffectTests(unittest.TestCase):
                     0xFC71_4DBD_E3FD_89DD
                 ).effect_family
             )
+
+    def test_classifies_new_york_terraformer_on_fire_family(self):
+        with GameSource.open(Path(FROZEN_SOURCE)) as source:
+            reader = Resistance3Reader(source)
+            shaders = tuple(
+                reader.read_shader(pointer.tuid)
+                for pointer in reader.asset_pointers(AssetKind.SHADER)
+            )
+
+            on_fire = tuple(
+                shader
+                for shader in shaders
+                if shader.effect_family == FIRE_EFFECT_FAMILY
+            )
+            self.assertEqual(len(on_fire), 39)
+            self.assertEqual(
+                {shader.material_program_tuid for shader in on_fire},
+                {FIRE_EFFECT_PROGRAM_TUID},
+            )
+            self.assertTrue(
+                all(shader.is_texture_slot_bound(4) for shader in on_fire)
+            )
+            self.assertEqual(
+                {
+                    path.replace("\\", "/").casefold()
+                    for shader in on_fire
+                    for path in shader.extra_texture_lookup_paths[:1]
+                },
+                {FIRE_EFFECT_TEXTURE_PATH},
+            )
+
+            representative = reader.read_shader(0x01FD_CC23_E3C6_5EEE)
+            texture = reader.read_texture(
+                representative.extra_texture_ids[0],
+                lookup_path=representative.extra_texture_lookup_paths[0],
+            )
+            self.assertEqual(texture.info.tuid, 0xC72B_A28A_17A2_716A)
+            self.assertEqual(texture.info.format_code, 0x05)
+            self.assertEqual(texture.rgba.shape, (256, 256, 4))
+            self.assertEqual(int(texture.rgba[..., 3].min()), 0)
+            self.assertEqual(int(texture.rgba[..., 3].max()), 70)
+            self.assertFalse(
+                np.array_equal(
+                    texture.rgba[..., 0],
+                    texture.rgba[..., 1],
+                )
+            )
+
+            for shader_tuid in (
+                0x22D8_9CCA_E3C6_59EE,
+                0x2696_6D32_E3C6_4310,
+                0x9DB2_D445_E3C6_56F3,
+            ):
+                self.assertIsNone(
+                    reader.read_shader(shader_tuid).effect_family
+                )
 
 
 @unittest.skipUnless(FOLIAGE_SOURCE, "R3_FOLIAGE_SOURCE is not set")

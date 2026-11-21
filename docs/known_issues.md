@@ -126,8 +126,17 @@ descriptors, and either the authored `_dissolve` suffix or the retail
 members. The shader uses a 512x512 grayscale map, a fixed blue color, and a
 vertex-stage/runtime transition value that is not stored in the material.
 Blender therefore preserves the family identity without connecting a
-speculative static dissolve graph. Fire, pickup, upgrade, and all other effect
-families remain metadata until separately verified.
+speculative static dissolve graph.
+
+On-fire shaders are strictly identified as `R3_ON_FIRE` metadata from program
+`0xB2DAFFA9D7AF976A`, the `_onfire` suffix, control byte `0x13`, one of two
+verified active fifth-slot paths, and three valid embedded-program
+descriptors. A 27-level scan found 3,322 references to 239 unique family
+members. Decompiled fragments use two normal-projected samples, fixed warm
+colors, and a runtime phase that is not stored in material section `0x5000`.
+Blender therefore does not load the effect map or invent a frozen animation
+frame. Pickup, upgrade, and other effect families remain metadata until
+separately verified.
 
 ### Materials
 

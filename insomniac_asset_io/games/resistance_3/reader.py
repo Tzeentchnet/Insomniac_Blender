@@ -15,6 +15,18 @@ DISSOLVE_EFFECT_FAMILY = "R3_GRADIENT_DISSOLVE"
 DISSOLVE_EFFECT_PROGRAM_TUID = 0x13C6_0114_0542_FB72
 DISSOLVE_EFFECT_TEXTURE_PATH = "ssharit/gradientdissolve"
 DISSOLVE_EFFECT_PROGRAM_LENGTH = 0x2E30
+FIRE_EFFECT_FAMILY = "R3_ON_FIRE"
+FIRE_EFFECT_PROGRAM_TUID = 0xB2DA_FFA9_D7AF_976A
+FIRE_EFFECT_TEXTURE_PATH = (
+    "artdepartment/environment/decals/effects/onfire/fire_customa"
+)
+FIRE_EFFECT_TEXTURE_PATHS = frozenset(
+    {
+        FIRE_EFFECT_TEXTURE_PATH,
+        "graphshaders/iang/onfire_01.graphshader",
+    }
+)
+FIRE_EFFECT_PROGRAM_LENGTHS = frozenset({0x2DB0, 0x2E30})
 
 
 class Resistance3Reader(Resistance2Reader):
@@ -156,6 +168,25 @@ class Resistance3Reader(Resistance2Reader):
             and selectors.length == 0x0F
         ):
             return DISSOLVE_EFFECT_FAMILY
+        if (
+            shader_name.endswith("_onfire")
+            and shader.material_program_tuid == FIRE_EFFECT_PROGRAM_TUID
+            and shader.material_unknown_0 == 0x13
+            and has_effect_texture
+            and normalized_effect_path in FIRE_EFFECT_TEXTURE_PATHS
+            and program is not None
+            and program.length in FIRE_EFFECT_PROGRAM_LENGTHS
+            and self._matches_embedded_program_descriptors(
+                ighw,
+                program,
+                descriptors,
+                first_chunk_tuid=FIRE_EFFECT_PROGRAM_TUID + 1,
+                descriptor_count=3,
+            )
+            and selectors is not None
+            and selectors.length == 0x15
+        ):
+            return FIRE_EFFECT_FAMILY
         return super()._shader_effect_family(ighw, shader)
 
     @staticmethod
