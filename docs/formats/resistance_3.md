@@ -495,6 +495,48 @@ program metadata. Blender intentionally leaves `flash_002` disconnected
 rather than freezing pickup sheen, journal fades, and shield effects at one
 invented instant.
 
+### Weapon-upgrade family
+
+Program `0x747A316CD67FBD5D` and the exact fifth-slot path
+`artdepartment/environment/decals/effects/weaponupgrade/weaponupgrade_c`
+identify the weapon-upgrade family. A complete 27-level scan found 1,118
+references to 43 unique shaders in 26 levels. Forty unique names end in
+`_upgrading`, and three end in `_weaponupgrading`; all 43 recur in every
+level containing the family. No matching name has a conflicting signature,
+and no active `weaponupgrade_c` path uses another program.
+
+Classification also requires control byte `0x13`, an active fifth slot, a
+`0x2A00`- or `0x2A80`-byte `0x33001` section, three valid descriptors
+beginning at `0x747A316CD67FBD5E`, and an `0x0B`-byte selector containing
+`01 0c 13 00 01 0c 13 00 01 0c 13`. The `0x2A80` layout uses chunk
+lengths `0x0F60`, `0x0DC0`, and `0x0D40` at offsets `0`, `0x0F80`, and
+`0x1D40`. The `0x2A00` layout shortens the first chunk to `0x0EE0` and
+places the latter chunks at `0x0F00` and `0x1CC0`. Three complete-program
+variants occur:
+
+- `e9c787d205af2cc71f78f9c92770d1b96e2b5065199d288fa42807e184e3ca35`
+  (`0x2A80`, 676 references);
+- `58ea9bd8adecb737bc393a450b123113ca85a5cc6d3d3613af56e962f25a1f4f`
+  (`0x2A80`, 338 references);
+- `93a6a4ca163cd28ca933e987f71bf14e523dea7b5673c6059ffef3321e6678f3`
+  (`0x2A00`, 104 references).
+
+Level-local IDs `0x4FC58D4F` and `0x116431D2` both resolve to source texture
+TUID `0xEB23A2284FC58D4F`. It is a 256x256, nine-mip format-`0x05`
+A8R8G8B8 map. Decoded channel minima are `(36, 0, 3, 0)`, maxima are
+`(255, 148, 255, 116)`, and the mip-zero RGBA SHA-256 is
+`e6d1439f0a59e67544421f79b20bf7c9581711976cbde801c48cccbb2623440e`.
+
+All three fragment specializations sample slot eight twice. The first sample's
+result is scaled by `0.75`; a second coordinate uses a zero-valued inline
+constant placeholder with a fixed `0.15` factor, and other specializations
+include a cyan `(0, 0.5, 1.0)` response. Every retail upgrade reference has
+one same-level base shader after removing its upgrade suffix, but neither
+those paired material records nor section `0x5000` serialize the runtime
+offset or upgrade strength. The reader therefore preserves
+`R3_WEAPON_UPGRADE` and program metadata while Blender leaves the animated
+map unloaded.
+
 Some level-local textures have a zero-length entry in the high-mip pointer
 table while their texture TUID still owns a complete mip-zero payload in
 `textures.dat`. The reader uses that bounded asset payload before trying

@@ -23,6 +23,9 @@ from insomniac_asset_io.games.resistance_3.reader import (
     FROZEN_EFFECT_FAMILY,
     FROZEN_EFFECT_PROGRAM_TUID,
     FROZEN_EFFECT_TEXTURE_PATH,
+    WEAPON_UPGRADE_EFFECT_FAMILY,
+    WEAPON_UPGRADE_EFFECT_PROGRAM_TUID,
+    WEAPON_UPGRADE_EFFECT_TEXTURE_PATH,
     Resistance3Reader,
 )
 
@@ -385,6 +388,87 @@ class RealResistance3EffectTests(unittest.TestCase):
                 self.assertEqual(
                     reader.read_shader(shader_tuid).effect_family,
                     FLASH_OVERLAY_EFFECT_FAMILY,
+                )
+
+    def test_classifies_new_york_terraformer_weapon_upgrade_family(self):
+        with GameSource.open(Path(FROZEN_SOURCE)) as source:
+            reader = Resistance3Reader(source)
+            shaders = tuple(
+                reader.read_shader(pointer.tuid)
+                for pointer in reader.asset_pointers(AssetKind.SHADER)
+            )
+
+            weapon_upgrades = tuple(
+                shader
+                for shader in shaders
+                if shader.effect_family == WEAPON_UPGRADE_EFFECT_FAMILY
+            )
+            self.assertEqual(len(weapon_upgrades), 43)
+            self.assertEqual(
+                {
+                    shader.material_program_tuid
+                    for shader in weapon_upgrades
+                },
+                {WEAPON_UPGRADE_EFFECT_PROGRAM_TUID},
+            )
+            self.assertTrue(
+                all(
+                    shader.is_texture_slot_bound(4)
+                    for shader in weapon_upgrades
+                )
+            )
+            self.assertEqual(
+                {
+                    path.replace("\\", "/").casefold()
+                    for shader in weapon_upgrades
+                    for path in shader.extra_texture_lookup_paths[:1]
+                },
+                {WEAPON_UPGRADE_EFFECT_TEXTURE_PATH},
+            )
+            self.assertTrue(
+                all(
+                    (shader.lookup_path or "")
+                    .replace("\\", "/")
+                    .rsplit("/", 1)[-1]
+                    .casefold()
+                    .endswith(("_upgrading", "_weaponupgrading"))
+                    for shader in weapon_upgrades
+                )
+            )
+            self.assertEqual(
+                {
+                    shader.extra_texture_ids[0]
+                    for shader in weapon_upgrades
+                },
+                {0x1164_31D2, 0x4FC5_8D4F},
+            )
+
+            representative = reader.read_shader(0x0174_1E8A_D67F_BAC9)
+            texture = reader.read_texture(
+                representative.extra_texture_ids[0],
+                lookup_path=representative.extra_texture_lookup_paths[0],
+            )
+            self.assertEqual(texture.info.tuid, 0xEB23_A228_4FC5_8D4F)
+            self.assertEqual(texture.info.format_code, 0x05)
+            self.assertEqual(texture.info.mip_count, 9)
+            self.assertEqual(texture.rgba.shape, (256, 256, 4))
+            self.assertEqual(
+                texture.rgba.min(axis=(0, 1)).tolist(),
+                [36, 0, 3, 0],
+            )
+            self.assertEqual(
+                texture.rgba.max(axis=(0, 1)).tolist(),
+                [255, 148, 255, 116],
+            )
+
+            for shader_tuid in (
+                0x0174_1E8A_D67F_BAC9,
+                0x56C8_D008_D6A8_2A63,
+                0x93BE_39E8_D6BA_56A6,
+            ):
+                self.assertEqual(
+                    reader.read_shader(shader_tuid).effect_family,
+                    WEAPON_UPGRADE_EFFECT_FAMILY,
                 )
 
 

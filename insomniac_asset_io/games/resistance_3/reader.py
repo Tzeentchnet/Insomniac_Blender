@@ -32,6 +32,12 @@ FLASH_OVERLAY_EFFECT_PROGRAM_TUID = 0x22A1_46AA_E58E_49A4
 FLASH_OVERLAY_EFFECT_TEXTURE_PATH = "d_action_pickup/textures/flash_002"
 FLASH_OVERLAY_EFFECT_PROGRAM_LENGTHS = frozenset({0x2A10, 0x2A50})
 FLASH_OVERLAY_EFFECT_SELECTOR_LENGTHS = frozenset({0x09, 0x0B})
+WEAPON_UPGRADE_EFFECT_FAMILY = "R3_WEAPON_UPGRADE"
+WEAPON_UPGRADE_EFFECT_PROGRAM_TUID = 0x747A_316C_D67F_BD5D
+WEAPON_UPGRADE_EFFECT_TEXTURE_PATH = (
+    "artdepartment/environment/decals/effects/weaponupgrade/weaponupgrade_c"
+)
+WEAPON_UPGRADE_EFFECT_PROGRAM_LENGTHS = frozenset({0x2A00, 0x2A80})
 
 
 class Resistance3Reader(Resistance2Reader):
@@ -210,6 +216,25 @@ class Resistance3Reader(Resistance2Reader):
             and selectors.length in FLASH_OVERLAY_EFFECT_SELECTOR_LENGTHS
         ):
             return FLASH_OVERLAY_EFFECT_FAMILY
+        if (
+            shader_name.endswith(("_upgrading", "_weaponupgrading"))
+            and shader.material_program_tuid == WEAPON_UPGRADE_EFFECT_PROGRAM_TUID
+            and shader.material_unknown_0 == 0x13
+            and has_effect_texture
+            and normalized_effect_path == WEAPON_UPGRADE_EFFECT_TEXTURE_PATH
+            and program is not None
+            and program.length in WEAPON_UPGRADE_EFFECT_PROGRAM_LENGTHS
+            and self._matches_embedded_program_descriptors(
+                ighw,
+                program,
+                descriptors,
+                first_chunk_tuid=WEAPON_UPGRADE_EFFECT_PROGRAM_TUID + 1,
+                descriptor_count=3,
+            )
+            and selectors is not None
+            and selectors.length == 0x0B
+        ):
+            return WEAPON_UPGRADE_EFFECT_FAMILY
         return super()._shader_effect_family(ighw, shader)
 
     @staticmethod

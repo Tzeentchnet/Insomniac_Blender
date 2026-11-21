@@ -249,6 +249,13 @@ texture identity classify pickup sheen, journal, sketchbook, pickup-body, and
 shield specializations without relying on a shader-name suffix. Its moving
 sweep coordinate is runtime state, so Blender preserves `R3_FLASH_OVERLAY`
 metadata while leaving the fifth slot unloaded.
+The weapon-upgrade family similarly requires its exact program, active
+`weaponupgrade_c` path, authored upgrade suffix, and three embedded program
+descriptors. Decompiled specializations sample the map twice with fixed
+`0.75` and `0.15` factors, but zero-valued inline constant placeholders feed
+the sample offset and effect response. Those draw-time values are absent from
+the material, so Blender preserves `R3_WEAPON_UPGRADE` metadata without
+loading or freezing the overlay.
 Decoded RGBA reader caches are cleared after each material while compact
 format/emission analysis and Blender image references remain cached for reuse.
 

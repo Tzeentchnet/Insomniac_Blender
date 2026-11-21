@@ -457,9 +457,9 @@ unconnected Non-Color image nodes so their signed/packed values remain
 available without inventing a blend. Apart from the narrowly identified R3
 frozen family, effect-overlay slots remain disconnected rather than receiving
 speculative node connections. The strictly classified R3 gradient-dissolve,
-on-fire, and flash-overlay families are preserved as runtime-driven metadata
-because their transition and animation-phase values are not serialized in
-the material.
+on-fire, flash-overlay, and weapon-upgrade families are preserved as
+runtime-driven metadata because their transition and animation-phase values
+are not serialized in the material.
 
 ## Project layout
 

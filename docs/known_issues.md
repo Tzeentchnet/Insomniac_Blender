@@ -142,7 +142,16 @@ used by pickup sheen plus journal, sketchbook, pickup-body, and shield
 specializations. Its 755 retail references resolve to 52 unique shaders.
 Decompiled variants use a fractional runtime phase to move two samples across
 the DXT5 sweep map; that phase is absent from material section `0x5000`.
-Blender therefore leaves this fifth slot unloaded. Weapon upgrades and other
+Blender therefore leaves this fifth slot unloaded.
+
+The `R3_WEAPON_UPGRADE` family is strictly gated by program
+`0x747A316CD67FBD5D`, an authored `_upgrading` or `_weaponupgrading` suffix,
+control byte `0x13`, the active exact `weaponupgrade_c` path, and its verified
+embedded-program layout. Its 1,118 retail references represent 43 unique
+shaders. Decompiled variants use two map samples whose coordinates and effect
+response depend on zero-valued inline constant placeholders that are supplied
+at draw time rather than material section `0x5000`. Blender preserves the
+family and program metadata without loading this runtime-driven map. Other
 effect families remain metadata until separately verified.
 
 ### Materials

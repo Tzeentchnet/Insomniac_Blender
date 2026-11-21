@@ -391,6 +391,17 @@ non-sheen sketchbook materials share the family. Blender validation preserves
 the family/program metadata without loading the runtime-phased effect map or
 changing the direct base-color connection.
 
+The R3 weapon-upgrade investigation scanned all 27 level archives and
+classified 1,118 references to 43 unique shaders in 26 levels. Exact program,
+control-byte, authored-suffix, active-path, program-length, descriptor, and
+selector gates have no name-only or path-only retail outliers. Synthetic
+regressions cover both program layouts, both suffixes, malformed descriptors,
+an unverified path and suffix, and an invalid selector. The
+`new_york_terraformer` regression requires all 43 shaders, both level-local
+texture IDs, and the shared nine-mip 256x256 A8R8G8B8 source map. Blender
+validation preserves family/program metadata while leaving the draw-time
+upgrade map unloaded and the source base-color connection unchanged.
+
 Analyze one extracted cached archive, or every cached level archive in an ISO:
 
 ```powershell
@@ -539,6 +550,9 @@ The current implementation was validated in Blender 5.2.2 LTS with:
 - all 27 R3 cached level archives: 3,475 strictly classified
   gradient-dissolve references representing 247 unique shaders in 26 levels,
   including the authored `_dissovle` typo and excluding 67 name-only records;
+- all 27 R3 cached level archives: 1,118 strictly classified weapon-upgrade
+  references representing 43 unique shaders in 26 levels, with no name-only
+  or path-only outliers;
 - a full Ravager import with 9 objects, 7 meshes, 19 materials, 23 images,
   105 Actions, and all six source-default head/attachment Collections shown;
 - sampled parity for all 105 Ravager Actions across 245,700 dense-reference
