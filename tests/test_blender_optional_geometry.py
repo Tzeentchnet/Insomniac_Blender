@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -28,6 +30,13 @@ if bpy is not None:
     )
     from insomniac_asset_io.blender.preferences import (
         InsomniacAddonPreferences,
+    )
+    from insomniac_asset_io.core.collision import (
+        CollisionInstance,
+        CollisionScene,
+    )
+    from insomniac_asset_io.core.collision import (
+        CollisionMesh as LevelCollisionMesh,
     )
     from insomniac_asset_io.games.resistance_2.formats import (
         AssetKind,
@@ -63,6 +72,7 @@ class _LevelReader:
 
     def __init__(self):
         self.warnings: list[str] = []
+        self.collision_scene = CollisionScene()
         matrix = np.eye(4, dtype=np.float32)
         self.zones = [
             Zone(
@@ -121,6 +131,9 @@ class _LevelReader:
 
     def read_gameplay_regions(self):
         return [GameplayRegion(name="fixture", moby_instances=[])]
+
+    def read_level_collision(self):
+        return self.collision_scene
 
     def clear_texture_cache(self):
         pass
@@ -230,6 +243,9 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
         try:
             properties = InsomniacAddonPreferences.bl_rna.properties
             self.assertTrue(properties["level_import_vegetation"].default)
+            self.assertFalse(
+                properties["level_import_collision_geometry"].default
+            )
             self.assertTrue(properties["asset_cache_vegetation"].default)
             self.assertTrue(
                 properties[
@@ -338,6 +354,184 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
         tie = tuple(level_collection.children["Static Props"].objects)[0]
 
         self.assertEqual(tie["insomniac_lightmap_index"], 17)
+
+    def test_level_collision_reuses_meshes_and_persists_metadata(self) -> None:
+        reader = _LevelReader()
+        translated = np.eye(4, dtype=np.float32)
+        translated[0, 3] = 3.0
+        reader.collision_scene = CollisionScene(
+            meshes=(
+                LevelCollisionMesh(
+                    mesh_id="tie:0x1234",
+                    name="Barrier",
+                    positions=np.asarray(
+                        (
+                            (0, 0, 0),
+                            (1, 0, 0),
+                            (1, 1, 0),
+                            (0, 1, 0),
+                        ),
+                        dtype=np.float32,
+                    ),
+                    indices=np.asarray(
+                        ((0, 1, 2), (0, 2, 3)),
+                        dtype=np.int32,
+                    ),
+                    surface_ids=np.asarray((7, 8), dtype=np.int32),
+                    material_ids=np.asarray((2, 2), dtype=np.int32),
+                    source_kind="TIE",
+                    source_id="0x1234",
+                    metadata={"prototype_flags": 5},
+                ),
+            ),
+            instances=(
+                CollisionInstance(
+                    mesh_id="tie:0x1234",
+                    name="Barrier B",
+                    matrix=translated,
+                    source_group="Static Props",
+                    source_id="0xB",
+                    metadata={"zone": "fixture", "group": 3},
+                ),
+                CollisionInstance(
+                    mesh_id="tie:0x1234",
+                    name="Barrier A",
+                    matrix=np.eye(4, dtype=np.float32),
+                    source_group="Static Props",
+                    source_id="0xA",
+                    metadata={"zone": "fixture", "group": 3},
+                ),
+            ),
+        )
+
+        result = import_level(
+            bpy.context,
+            reader,
+            LevelImportOptions(
+                materials=False,
+                terrain=False,
+                ties=False,
+                vegetation=False,
+                gameplay=False,
+                collision_geometry=True,
+                convert_axes=False,
+            ),
+            source_path="fixture",
+        )
+        level_collection = result.root.users_collection[0]
+        collision = level_collection.children["Collision Geometry"]
+        group = collision.children["Static Props"]
+        objects = {
+            obj["insomniac_collision_source_id"]: obj
+            for obj in group.objects
+        }
+
+        self.assertTrue(collision.hide_render)
+        self.assertTrue(group.hide_render)
+        self.assertEqual(tuple(obj.name for obj in group.objects), (
+            "Barrier A",
+            "Barrier B",
+        ))
+        self.assertEqual(set(objects), {"0xA", "0xB"})
+        self.assertIs(objects["0xA"].data, objects["0xB"].data)
+        self.assertTrue(
+            all(obj["insomniac_collision_geometry"] for obj in objects.values())
+        )
+        self.assertTrue(all(obj.hide_render for obj in objects.values()))
+        self.assertTrue(all(obj.show_in_front for obj in objects.values()))
+        self.assertTrue(
+            all(obj.display_type == "WIRE" for obj in objects.values())
+        )
+        self.assertAlmostEqual(objects["0xB"].location.x, 3.0)
+
+        mesh = objects["0xA"].data
+        self.assertEqual(len(mesh.vertices), 4)
+        self.assertEqual(len(mesh.polygons), 2)
+        self.assertEqual(
+            tuple(
+                item.value
+                for item in mesh.attributes["insomniac_surface_id"].data
+            ),
+            (7, 8),
+        )
+        self.assertEqual(
+            tuple(
+                item.value
+                for item in mesh.attributes["insomniac_material_id"].data
+            ),
+            (2, 2),
+        )
+        self.assertEqual(
+            json.loads(mesh["insomniac_collision_metadata"]),
+            {"prototype_flags": 5},
+        )
+        self.assertEqual(
+            json.loads(
+                objects["0xA"]["insomniac_collision_metadata"]
+            ),
+            {"group": 3, "zone": "fixture"},
+        )
+        self.assertEqual(result.objects, 3)
+        self.assertEqual(result.meshes, 1)
+
+        mesh_name = mesh.name
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "collision.blend"
+            self.assertEqual(
+                bpy.ops.wm.save_as_mainfile(filepath=str(output)),
+                {"FINISHED"},
+            )
+            self.assertEqual(
+                bpy.ops.wm.open_mainfile(filepath=str(output)),
+                {"FINISHED"},
+            )
+
+        persisted = bpy.data.meshes[mesh_name]
+        persisted_instances = [
+            obj
+            for obj in bpy.data.objects
+            if obj.get("insomniac_collision_mesh_id") == "tie:0x1234"
+        ]
+        self.assertEqual(len(persisted_instances), 2)
+        self.assertTrue(
+            all(obj.data is persisted for obj in persisted_instances)
+        )
+        self.assertEqual(
+            tuple(
+                item.value
+                for item in persisted.attributes[
+                    "insomniac_surface_id"
+                ].data
+            ),
+            (7, 8),
+        )
+
+    def test_level_collision_reports_an_unimplemented_backend(self) -> None:
+        reader = _LevelReader()
+        reader.read_level_collision = None
+
+        result = import_level(
+            bpy.context,
+            reader,
+            LevelImportOptions(
+                materials=False,
+                terrain=False,
+                ties=False,
+                vegetation=False,
+                gameplay=False,
+                collision_geometry=True,
+                convert_axes=False,
+            ),
+            source_path="fixture",
+        )
+        level_collection = result.root.users_collection[0]
+
+        self.assertNotIn("Collision Geometry", level_collection.children)
+        self.assertIn(
+            "Resistance: Fall of Man does not implement level collision "
+            "geometry",
+            result.warnings,
+        )
 
     def test_source_default_customizations_can_be_shown(self) -> None:
         result = import_moby(

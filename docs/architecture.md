@@ -71,6 +71,14 @@ archive contains an ID.
 `BinaryView` and `IghwFile` bounds-check every access and preserve the
 container's detected endianness.
 
+Level collision crosses adapters through a game-neutral `CollisionScene`.
+It separates reusable mesh prototypes from placed instances, carries affine
+transforms and source groups, and preserves mesh/instance metadata plus
+per-face surface and material IDs. Shared validation rejects duplicate or
+missing prototype IDs, malformed triangle arrays, out-of-range indices,
+non-finite positions/transforms, and unsupported metadata values before the
+Blender bridge creates any datablocks.
+
 ## Resistance 2 adapter
 
 `Resistance2Reader` selects the level `assetlookup.dat`, records its resource
@@ -139,6 +147,14 @@ matrices.
 
 Meshes combine an asset's primitives into one datablock while retaining
 material indices. Level placements reference shared mesh datablocks.
+
+Level-collision instances are sorted by source group and identity before
+creation. Each group receives a deterministic non-rendering child Collection,
+and every instance of one collision prototype references the same Blender
+mesh datablock. Surface and material IDs become face-domain integer
+attributes; source IDs and JSON-encoded adapter metadata remain available as
+custom properties. Collision objects are wire helpers and never participate
+in renders.
 
 Materials retain their shader lookup paths, raw material control word,
 parameter vectors, texture IDs, texture paths, and texture-map indices as

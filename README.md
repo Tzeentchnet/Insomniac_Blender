@@ -295,6 +295,15 @@ mesh datablocks instead of duplicating geometry.
 Gameplay Mobys are intentionally placed as static linked meshes during a
 level import. Import an individual Moby to edit its rig and animations.
 
+Level collision has a separate default-off **Collision geometry** option.
+Adapters that implement it feed a game-neutral mesh/instance model into
+deterministic source-group Collections. Collision objects share prototype
+mesh datablocks, retain per-face surface/material IDs and source metadata,
+display as in-front wire geometry, and are excluded from renders. The
+compressed R2/R3, TOD, and RFoM level backends remain roadmap work; enabling
+the option for a game without a decoder reports that limitation instead of
+substituting render geometry.
+
 ### Use an ISO directly
 
 The ISO source path uses a bounded internal ISO9660 reader, with a
@@ -344,8 +353,8 @@ and generated catalogs remain game-specific:
   and collision-geometry import;
 - asset-selector duplicate suppression, TUID visibility, and owner-level
   visibility;
-- level materials, terrain, static props, gameplay instances, and axis
-  conversion;
+- level materials, terrain, static props, gameplay instances, axis
+  conversion, and default-off collision geometry;
 - default-on Asset Browser vegetation and source-default Moby parts;
 - default-off enhanced source-material processing.
 

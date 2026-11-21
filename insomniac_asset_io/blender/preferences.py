@@ -251,6 +251,13 @@ class InsomniacAddonPreferences(bpy.types.AddonPreferences):
         description="Place Moby meshes from gameplay region tables",
         default=True,
     )
+    level_import_collision_geometry: bpy.props.BoolProperty(
+        name="Collision geometry",
+        description=(
+            "Import supported level collision as non-rendering wire meshes"
+        ),
+        default=False,
+    )
     level_convert_axes: bpy.props.BoolProperty(
         name="Y-up to Z-up",
         description="Rotate imported levels into Blender Z-up space",
@@ -301,6 +308,7 @@ class InsomniacAddonPreferences(bpy.types.AddonPreferences):
         level.prop(self, "level_import_ties")
         level.prop(self, "level_import_vegetation")
         level.prop(self, "level_import_gameplay")
+        level.prop(self, "level_import_collision_geometry")
         level.prop(self, "level_convert_axes")
 
         materials = layout.box()

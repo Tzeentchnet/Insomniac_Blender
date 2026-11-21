@@ -16,6 +16,15 @@ python tools\smoke_r2.py "C:\path\to\level_cached.psarc"
 python tools\smoke_r3.py "C:\path\to\level_cached.psarc"
 ```
 
+`test_collision.py` validates the shared level-collision contract, including
+triangle bounds, face metadata lengths, prototype references, affine
+transforms, and malformed metadata. `test_blender_optional_geometry.py`
+imports two collision instances that share one prototype, verifies
+source-group Collections and face-domain surface/material attributes, then
+saves and reopens the `.blend` to confirm mesh sharing and metadata
+persistence. These are backend-independent foundation tests; representative
+retail R2/R3 collision validation is added with their compressed decoder.
+
 The RFoM smoke test reports resource counts and decodes one Moby, skeleton,
 animset, diffuse texture, Tie, zone, shrub and foliage placement counts, and
 gameplay region without writing game data to the repository.

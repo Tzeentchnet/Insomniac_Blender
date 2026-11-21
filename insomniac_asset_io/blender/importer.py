@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import math
 import re
@@ -11,6 +12,13 @@ import bpy
 import numpy as np
 from mathutils import Matrix, Quaternion, Vector
 
+from ..core.collision import (
+    CollisionMesh as LevelCollisionMesh,
+)
+from ..core.collision import (
+    CollisionScene,
+    validate_collision_scene,
+)
 from ..core.errors import InsomniacError
 from ..games.resistance_2.formats import (
     AssetKind,
@@ -120,6 +128,7 @@ class LevelImportOptions:
     ties: bool = True
     vegetation: bool = True
     gameplay: bool = True
+    collision_geometry: bool = False
     convert_axes: bool = True
     cycles_materials: bool = False
 
@@ -3292,6 +3301,135 @@ def _import_level_static_instances(
             materials.apply_tie_lightmap_transform(obj, instance)
 
 
+def _import_level_collision(
+    collection: bpy.types.Collection,
+    root: bpy.types.Object,
+    scene: CollisionScene,
+    result: ImportResult,
+) -> None:
+    validate_collision_scene(scene)
+    if not scene.instances:
+        return
+
+    collision_collection = _child_collection(
+        collection,
+        "Collision Geometry",
+    )
+    collision_collection["insomniac_geometry_kind"] = "LEVEL_COLLISION"
+    collision_collection.hide_render = True
+
+    meshes_by_id = {mesh.mesh_id: mesh for mesh in scene.meshes}
+    blender_meshes: dict[str, bpy.types.Mesh] = {}
+    group_collections: dict[str, bpy.types.Collection] = {}
+    instances = sorted(
+        scene.instances,
+        key=lambda instance: (
+            instance.source_group.casefold(),
+            instance.name.casefold(),
+            instance.source_id or "",
+            instance.mesh_id,
+        ),
+    )
+    for instance in instances:
+        group_collection = group_collections.get(instance.source_group)
+        if group_collection is None:
+            group_collection = _child_collection(
+                collision_collection,
+                _safe_name(instance.source_group),
+            )
+            group_collection["insomniac_collision_source_group"] = (
+                instance.source_group
+            )
+            group_collection.hide_render = True
+            group_collections[instance.source_group] = group_collection
+
+        mesh = blender_meshes.get(instance.mesh_id)
+        if mesh is None:
+            source_mesh = meshes_by_id[instance.mesh_id]
+            mesh = _level_collision_mesh(source_mesh)
+            blender_meshes[instance.mesh_id] = mesh
+            result.meshes += 1
+
+        obj = _new_collision_object(
+            _safe_name(instance.name),
+            mesh,
+            group_collection,
+        )
+        obj.parent = root
+        obj.matrix_local = Matrix(
+            np.asarray(instance.matrix, dtype=np.float64).tolist()
+        )
+        obj["insomniac_collision_kind"] = "LEVEL_MESH"
+        obj["insomniac_collision_mesh_id"] = instance.mesh_id
+        obj["insomniac_collision_source_group"] = instance.source_group
+        if instance.source_id is not None:
+            obj["insomniac_collision_source_id"] = instance.source_id
+        _set_collision_metadata(obj, instance.metadata)
+        result.objects += 1
+
+
+def _level_collision_mesh(
+    collision: LevelCollisionMesh,
+) -> bpy.types.Mesh:
+    digest = zlib.crc32(collision.mesh_id.encode("utf-8"))
+    name = (
+        f"Collision_{_safe_name(collision.name)[:42]}_{digest:08X}"
+    )
+    mesh = _mesh_from_geometry(
+        name,
+        collision.positions,
+        collision.indices,
+    )
+    mesh["insomniac_collision_geometry"] = True
+    mesh["insomniac_collision_mesh_id"] = collision.mesh_id
+    if collision.source_kind:
+        mesh["insomniac_collision_source_kind"] = collision.source_kind
+    if collision.source_id is not None:
+        mesh["insomniac_collision_source_id"] = collision.source_id
+    _set_collision_metadata(mesh, collision.metadata)
+    _set_collision_face_attribute(
+        mesh,
+        "insomniac_surface_id",
+        collision.surface_ids,
+    )
+    _set_collision_face_attribute(
+        mesh,
+        "insomniac_material_id",
+        collision.material_ids,
+    )
+    return mesh
+
+
+def _set_collision_face_attribute(
+    mesh: bpy.types.Mesh,
+    name: str,
+    values: np.ndarray | None,
+) -> None:
+    if values is None:
+        return
+    attribute = mesh.attributes.new(
+        name=name,
+        type="INT",
+        domain="FACE",
+    )
+    attribute.data.foreach_set(
+        "value",
+        np.asarray(values, dtype=np.int32),
+    )
+
+
+def _set_collision_metadata(
+    owner: bpy.types.ID,
+    metadata: dict[str, bool | int | float | str],
+) -> None:
+    if metadata:
+        owner["insomniac_collision_metadata"] = json.dumps(
+            metadata,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+
+
 def import_level(
     context: bpy.types.Context,
     reader: Resistance2Reader,
@@ -3554,6 +3692,25 @@ def import_level(
                 if default_draw_mask is not None:
                     obj["insomniac_default_draw_mask"] = default_draw_mask
                 result.objects += 1
+
+    if options.collision_geometry:
+        read_level_collision = getattr(
+            reader,
+            "read_level_collision",
+            None,
+        )
+        if not callable(read_level_collision):
+            warnings.append(
+                f"{_reader_game_label(reader)} does not implement level "
+                "collision geometry"
+            )
+        else:
+            _import_level_collision(
+                collection,
+                root,
+                read_level_collision(),
+                result,
+            )
 
     # Level materials are built lazily while terrain, ties and mobys are
     # placed, so release only after the last one.

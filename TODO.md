@@ -95,10 +95,10 @@ Created from the feature-gap review of [README.md](README.md) and
 
 ### Shared representation
 
-- [ ] Define a game-neutral collision mesh and metadata model.
-- [ ] Add deterministic, non-rendering Blender collision Collections.
-- [ ] Preserve source groups, material or surface IDs, and instance metadata.
-- [ ] Reuse mesh datablocks for repeated collision geometry.
+- [x] Define a game-neutral collision mesh and metadata model.
+- [x] Add deterministic, non-rendering Blender collision Collections.
+- [x] Preserve source groups, material or surface IDs, and instance metadata.
+- [x] Reuse mesh datablocks for repeated collision geometry.
 
 ### Game backends
 
