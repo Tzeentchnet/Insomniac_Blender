@@ -579,6 +579,17 @@ class RealResistance3FoliageTests(unittest.TestCase):
                 self.assertTrue(np.isfinite(mesh.positions).all())
                 self.assertTrue(np.isfinite(mesh.uvs).all())
                 self.assertEqual(len(mesh.indices) % 3, 0)
+                self.assertEqual(
+                    len(mesh.shrub_position_w),
+                    len(mesh.positions),
+                )
+                self.assertTrue(
+                    np.isfinite(mesh.shrub_height_weights).all()
+                )
+                self.assertEqual(
+                    len(mesh.shrub_runtime_remap),
+                    len(mesh.positions),
+                )
                 shader = reader.read_shader(shrub.shader_tuids[0])
                 self.assertEqual(shader.alpha_mode, "MASK")
                 vertex_count += len(mesh.positions)

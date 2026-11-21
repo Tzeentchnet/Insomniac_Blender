@@ -105,7 +105,7 @@ both fields from `PARAM.SFO`.
 | Zone Tie placement | Supported with linked mesh data |
 | Zone terrain (`UFrag`) | Supported |
 | Gameplay Moby placement | Supported as linked static mesh instances |
-| Shrub and foliage geometry and placement | Supported as linked static meshes; foliage uses first-LOD sprite cards and both use masked materials |
+| Shrub and foliage geometry and placement | Supported as linked static meshes; Shrub position-W, height-weight, and runtime-remap values are preserved as non-rendering point attributes; foliage uses first-LOD sprite cards and both use masked materials |
 | Level collision | Optional terrain and Tie triangle/primitive collision from regional `collision.dat`; disabled by default |
 | Lighting, VFX, and cubemaps | Not yet implemented |
 
@@ -133,7 +133,7 @@ both fields from `PARAM.SFO`.
 | DXT and common uncompressed textures | Supported, including global texture bundles |
 | Zone Tie placement and terrain (`UFrag`) | Supported, including R3's Tie material selector, Tie/UFrag vertex lighting and UV2/UV1, paired baked/directional zone maps, and compact-atlas per-instance Tie lighting |
 | Gameplay Moby placement | Supported as linked static mesh instances |
-| Shrub and foliage geometry and placement | Supported through the verified shared Shrub and V3 foliage layouts |
+| Shrub and foliage geometry and placement | Supported through the verified shared Shrub and V3 foliage layouts; Shrub position-W, height-weight, and runtime-remap values are preserved as non-rendering point attributes |
 | Level collision | Optional terrain and Tie triangle/primitive collision from regional `collision.dat`; disabled by default |
 | Remaining lighting, VFX, and cubemaps | Baked R3 radiosity-normal-map lighting is composed; dynamic scene lighting, VFX, and cubemaps remain unsupported |
 

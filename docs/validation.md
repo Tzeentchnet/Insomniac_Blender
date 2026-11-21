@@ -110,9 +110,30 @@ The portable `test_foliage.py` fixture separately exercises the R2 and R3
 distinct `0x7440` placement records. A real R2 source with foliage can be
 checked by setting `R2_LEVEL_SOURCE`; Scotia Co-op contains three foliage
 assets and 200 placements. The portable `test_shrubs.py` fixture exercises
-the shared R2/R3 `0xB100` geometry and `0x7540` placement records. Scotia
-Co-op contains ten Shrub assets with 2,250 vertices, 2,538 triangles, and
-8,426 placements.
+the shared R2/R3 `0xB100` geometry, the half-float height weight, the raw
+position-W value, the little-endian `0x3150` remap, invalid reserved values,
+R3's exact zero-extent fallback, and `0x7540` placement records. Scotia Co-op
+contains ten Shrub assets with 2,250 vertices, 2,538 triangles, and 8,426
+placements.
+
+A direct 54-level ISO scan validates all 77 unique R2 and 70 unique R3 Shrub
+payloads through the production readers: 20,075 and 15,126 vertices,
+respectively. No duplicate TUID has a conflicting payload. Every trailing
+second half and every `0x3150` padding pair is zero. The height scalar is
+finite and lies in `0.0`-`1.0`; raw Y is its strongest positional correlate
+in every nonconstant payload. The scan also covers the two R3 powerline
+Shrubs whose zero serialized extent uses the independently verified `32.0`
+default.
+
+The retained
+`E:\Tests\InsomniacAssetIO\shrub_metadata_review\r2_r3_shrub_metadata.blend`
+review reopens in Blender 5.2.2 LTS with an R2 180-vertex short-grass Shrub
+and an R3 84-vertex upright-twigs Shrub. Both meshes retain all three point
+attributes and the explicit false runtime-wind marker. Its matching PNG uses
+a review-only blue/green/red ramp for the `0.0`-`1.0` height weight, making
+the root-to-tip gradient visible without changing the importer's default
+material graph. The JSON report in the same directory records exact vertex,
+face, attribute, and persisted-mesh counts.
 
 Run the real R3 vegetation regression against `mine_traversal_train`:
 
@@ -125,7 +146,11 @@ Remove-Item Env:R3_FOLIAGE_SOURCE
 This decodes all 11 foliage assets, both masked leaf materials and their
 albedo textures, and all 1,050 placements, plus all six Shrub assets and 661
 Shrub placements. It verifies that every vegetation placement resolves to a
-level asset. The same regression checks the exact grass, conifer, and track
+level asset and that every Shrub vertex has finite height metadata plus
+position-W and runtime-remap arrays of matching length. The Blender
+optional-geometry suite writes all three point attributes, saves a `.blend`,
+reopens it, and verifies exact persisted values. The same regression checks
+the exact grass, conifer, and track
 Tie material groups selected by R3 primitive byte `+0x26`, their vertex light
 and optional UV2, and 6,730 placed-Tie lightmap IDs. It decodes the target
 grass instance's 256x256 BC3 lightmap from zone `0x58E8829DE249D884`. For all

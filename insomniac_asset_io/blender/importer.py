@@ -4334,6 +4334,9 @@ def _build_mesh(
     uv_parts: list[np.ndarray] = []
     secondary_uv_parts: list[np.ndarray] = []
     color_parts: list[np.ndarray] = []
+    shrub_position_w_parts: list[np.ndarray] = []
+    shrub_height_weight_parts: list[np.ndarray] = []
+    shrub_runtime_remap_parts: list[np.ndarray] = []
     face_parts: list[np.ndarray] = []
     material_parts: list[np.ndarray] = []
     bone_index_parts: list[np.ndarray] = []
@@ -4343,6 +4346,15 @@ def _build_mesh(
         item.secondary_uvs is not None for item in geometry_list
     )
     any_colors = any(item.colors is not None for item in geometry_list)
+    any_shrub_position_w = any(
+        item.shrub_position_w is not None for item in geometry_list
+    )
+    any_shrub_height_weights = any(
+        item.shrub_height_weights is not None for item in geometry_list
+    )
+    any_shrub_runtime_remap = any(
+        item.shrub_runtime_remap is not None for item in geometry_list
+    )
     vertex_offset = 0
 
     for geometry in geometry_list:
@@ -4386,6 +4398,39 @@ def _build_mesh(
                     dtype=np.float32,
                 )
             )
+        if any_shrub_position_w:
+            shrub_position_w_parts.append(
+                np.asarray(
+                    (
+                        geometry.shrub_position_w
+                        if geometry.shrub_position_w is not None
+                        else np.zeros(len(positions), dtype=np.int32)
+                    ),
+                    dtype=np.int32,
+                )
+            )
+        if any_shrub_height_weights:
+            shrub_height_weight_parts.append(
+                np.asarray(
+                    (
+                        geometry.shrub_height_weights
+                        if geometry.shrub_height_weights is not None
+                        else np.zeros(len(positions), dtype=np.float32)
+                    ),
+                    dtype=np.float32,
+                )
+            )
+        if any_shrub_runtime_remap:
+            shrub_runtime_remap_parts.append(
+                np.asarray(
+                    (
+                        geometry.shrub_runtime_remap
+                        if geometry.shrub_runtime_remap is not None
+                        else np.zeros(len(positions), dtype=np.uint16)
+                    ),
+                    dtype=np.uint16,
+                )
+            )
         face_parts.append(triangles.astype(np.int32) + vertex_offset)
         material_index = (
             geometry.shader_index
@@ -4423,6 +4468,21 @@ def _build_mesh(
         else None
     )
     colors = np.concatenate(color_parts) if color_parts else None
+    shrub_position_w = (
+        np.concatenate(shrub_position_w_parts)
+        if shrub_position_w_parts
+        else None
+    )
+    shrub_height_weights = (
+        np.concatenate(shrub_height_weight_parts)
+        if shrub_height_weight_parts
+        else None
+    )
+    shrub_runtime_remap = (
+        np.concatenate(shrub_runtime_remap_parts)
+        if shrub_runtime_remap_parts
+        else None
+    )
     faces = np.concatenate(face_parts)
     material_indices = np.concatenate(material_parts)
 
@@ -4469,6 +4529,39 @@ def _build_mesh(
             domain="POINT",
         )
         color_attribute.data.foreach_set("color", colors.reshape(-1))
+    if shrub_position_w is not None:
+        attribute = mesh.attributes.new(
+            name="insomniac_shrub_position_w",
+            type="INT",
+            domain="POINT",
+        )
+        attribute.data.foreach_set("value", shrub_position_w)
+    if shrub_height_weights is not None:
+        attribute = mesh.attributes.new(
+            name="insomniac_shrub_height_weight",
+            type="FLOAT",
+            domain="POINT",
+        )
+        attribute.data.foreach_set("value", shrub_height_weights)
+    if shrub_runtime_remap is not None:
+        attribute = mesh.attributes.new(
+            name="insomniac_shrub_runtime_remap",
+            type="INT",
+            domain="POINT",
+        )
+        attribute.data.foreach_set(
+            "value",
+            shrub_runtime_remap.astype(np.int32),
+        )
+    if (
+        shrub_position_w is not None
+        or shrub_height_weights is not None
+        or shrub_runtime_remap is not None
+    ):
+        mesh["insomniac_shrub_metadata_layout"] = (
+            "POSITION_W_I16,HEIGHT_WEIGHT_F16,RUNTIME_REMAP_LE_U16"
+        )
+        mesh["insomniac_shrub_runtime_wind"] = False
     for material in materials:
         mesh.materials.append(material)
     mesh.update(calc_edges=True)

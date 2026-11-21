@@ -134,7 +134,7 @@ Created from the feature-gap review of [README.md](README.md) and
   - [x] Classify the runtime-driven R3 flash/pickup-sheen family.
   - [x] Classify the runtime-driven R3 weapon-upgrade family.
 - [x] Verify R2/R3 detail-map scale and composition.
-- [ ] Investigate Shrub packed vertex metadata.
+- [x] Investigate Shrub packed vertex metadata.
 - [ ] Investigate authored Foliage normals and billboarding.
 - [x] Require a shader/TUID fixture, an in-game reference, and a visual review
   before enabling any new family by default.

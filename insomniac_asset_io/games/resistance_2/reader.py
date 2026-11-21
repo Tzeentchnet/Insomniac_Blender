@@ -64,6 +64,7 @@ SECT_SHRUB_VERTICES = 0xB300
 SECT_SHRUB_INDICES = 0xB400
 SECT_SHRUB_SHADER_TABLE = 0x5600
 SECT_SHRUB_NAME = 0xB700
+SECT_SHRUB_VERTEX_REMAP = 0x3150
 
 SECT_SHADER_MATERIAL = 0x5000
 SECT_SHADER_REFS = 0x5D00
@@ -1030,7 +1031,7 @@ class Resistance2Reader:
         vertex_offset = ighw.u32(base)
         index_offset = ighw.u32(base + 0x04)
         index_count = ighw.u32(base + 0x08)
-        position_extent = ighw.f32(base + 0x18)
+        position_extent = self._shrub_position_extent(ighw, base)
         header_tuid = ighw.u64(base + 0x28)
         actual_tuid = header_tuid or tuid
         if index_count > MAX_SHRUB_INDICES:
@@ -1084,8 +1085,69 @@ class Resistance2Reader:
             offset=vertex_base + 0x08,
             strides=(SHRUB_VERTEX_STRIDE, 2),
         ).astype(np.float32)
-        if not np.isfinite(positions).all() or not np.isfinite(uvs).all():
+        position_w = np.ndarray(
+            shape=(vertex_count,),
+            dtype=ighw.endian + "i2",
+            buffer=ighw.data,
+            offset=vertex_base + 0x06,
+            strides=(SHRUB_VERTEX_STRIDE,),
+        ).astype(np.int32)
+        height_weights = np.ndarray(
+            shape=(vertex_count,),
+            dtype=ighw.endian + "f2",
+            buffer=ighw.data,
+            offset=vertex_base + 0x0C,
+            strides=(SHRUB_VERTEX_STRIDE,),
+        ).astype(np.float32)
+        reserved_metadata = np.ndarray(
+            shape=(vertex_count,),
+            dtype=ighw.endian + "u2",
+            buffer=ighw.data,
+            offset=vertex_base + 0x0E,
+            strides=(SHRUB_VERTEX_STRIDE,),
+        )
+        if np.any(reserved_metadata):
+            raise FormatError(
+                f"{ighw.label}: unsupported nonzero shrub vertex "
+                "metadata component"
+            )
+        if (
+            not np.isfinite(positions).all()
+            or not np.isfinite(uvs).all()
+            or not np.isfinite(height_weights).all()
+        ):
             raise FormatError(f"{ighw.label}: shrub vertices are not finite")
+        remap_section = ighw.require_section(SECT_SHRUB_VERTEX_REMAP)
+        expected_remap_length = vertex_count * 4
+        if (
+            remap_section.count != 1
+            or remap_section.length != expected_remap_length
+        ):
+            raise FormatError(
+                f"{ighw.label}: expected one {expected_remap_length:#x}-byte "
+                "shrub vertex remap"
+            )
+        ighw.require(
+            remap_section.offset,
+            remap_section.length,
+            purpose="shrub vertex remap",
+        )
+        remap_bytes = np.ndarray(
+            shape=(vertex_count, 4),
+            dtype=np.uint8,
+            buffer=ighw.data,
+            offset=remap_section.offset,
+            strides=(4, 1),
+        )
+        if np.any(remap_bytes[:, 2:]):
+            raise FormatError(
+                f"{ighw.label}: unsupported nonzero shrub vertex remap "
+                "padding"
+            )
+        runtime_remap = (
+            remap_bytes[:, 0].astype(np.uint16)
+            | (remap_bytes[:, 1].astype(np.uint16) << np.uint16(8))
+        )
         shader_tuids = self._read_shader_table(
             ighw,
             SECT_SHRUB_SHADER_TABLE,
@@ -1100,10 +1162,20 @@ class Resistance2Reader:
                     positions=positions,
                     uvs=uvs,
                     indices=indices,
+                    shrub_position_w=position_w,
+                    shrub_height_weights=height_weights,
+                    shrub_runtime_remap=runtime_remap,
                 )
             ],
             shader_tuids=shader_tuids,
         )
+
+    @staticmethod
+    def _shrub_position_extent(
+        ighw: IghwFile,
+        base: int,
+    ) -> float:
+        return ighw.f32(base + 0x18)
 
     @staticmethod
     def _foliage_sprite_layout(

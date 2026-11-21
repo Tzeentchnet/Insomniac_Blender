@@ -38,6 +38,7 @@ WEAPON_UPGRADE_EFFECT_TEXTURE_PATH = (
     "artdepartment/environment/decals/effects/weaponupgrade/weaponupgrade_c"
 )
 WEAPON_UPGRADE_EFFECT_PROGRAM_LENGTHS = frozenset({0x2A00, 0x2A80})
+R3_DEFAULT_SHRUB_POSITION_EXTENT = 32.0
 
 
 class Resistance3Reader(Resistance2Reader):
@@ -261,3 +262,13 @@ class Resistance3Reader(Resistance2Reader):
             ighw.u32(base + 0x50),
             base + 0x58,
         )
+
+    @staticmethod
+    def _shrub_position_extent(
+        ighw: IghwFile,
+        base: int,
+    ) -> float:
+        extent = ighw.f32(base + 0x18)
+        if extent == 0.0:
+            return R3_DEFAULT_SHRUB_POSITION_EXTENT
+        return extent

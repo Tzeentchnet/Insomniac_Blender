@@ -30,7 +30,12 @@ def _ighw(
     return data
 
 
-def _write_fixture(root: Path, *, shrub_index: int = 0) -> None:
+def _write_fixture(
+    root: Path,
+    *,
+    shrub_index: int = 0,
+    position_extent: float = 10.0,
+) -> None:
     shrub = _ighw(
         0x28C,
         (
@@ -43,18 +48,19 @@ def _write_fixture(root: Path, *, shrub_index: int = 0) -> None:
         ),
     )
     vertices = (
-        ((32767, 0, 0, 0), (0.0, 0.0)),
-        ((0, 32767, 0, 0), (1.0, 0.0)),
-        ((0, 0, 32767, 0), (0.0, 1.0)),
+        ((32767, 0, 0, 0), (0.0, 0.0), 0.0),
+        ((0, 32767, 0, 1057), (1.0, 0.0), 0.5),
+        ((0, 0, 32767, 32767), (0.0, 1.0), 1.0),
     )
-    for index, (position, uv) in enumerate(vertices):
+    for index, (position, uv, height_weight) in enumerate(vertices):
         struct.pack_into(
-            ">4h2eI",
+            ">4h4e",
             shrub,
             0x80 + index * 0x10,
             *position,
             *uv,
-            0,
+            height_weight,
+            0.0,
         )
     struct.pack_into(">3H", shrub, 0xC0, 0, 1, 2)
     struct.pack_into(">Q", shrub, 0x100, SHADER_TUID)
@@ -71,13 +77,14 @@ def _write_fixture(root: Path, *, shrub_index: int = 0) -> None:
         0x10000,
         0.3,
         75.0,
-        10.0,
+        position_extent,
         0.2,
         0,
         0x180,
         SHRUB_TUID,
     )
-    struct.pack_into(">3I", shrub, 0x280, 0, 1, 2)
+    for index, value in enumerate((0x00FE, 0x0100, 0x1234)):
+        struct.pack_into("<H", shrub, 0x280 + index * 4, value)
     (root / "shrubs.dat").write_bytes(shrub)
 
     zone = _ighw(
@@ -145,6 +152,18 @@ class ShrubTests(unittest.TestCase):
                         ((0.0, 0.0), (1.0, 0.0), (0.0, 1.0)),
                     )
                     np.testing.assert_array_equal(mesh.indices, (0, 1, 2))
+                    np.testing.assert_array_equal(
+                        mesh.shrub_position_w,
+                        (0, 1057, 32767),
+                    )
+                    np.testing.assert_allclose(
+                        mesh.shrub_height_weights,
+                        (0.0, 0.5, 1.0),
+                    )
+                    np.testing.assert_array_equal(
+                        mesh.shrub_runtime_remap,
+                        (0x00FE, 0x0100, 0x1234),
+                    )
 
                     self.assertEqual(len(zone.shrub_instances), 1)
                     instance = zone.shrub_instances[0]
@@ -159,6 +178,57 @@ class ShrubTests(unittest.TestCase):
                         np.asarray((1.0, 2.0, 3.0)) * 0.9144,
                     )
                     self.assertEqual(zone.unsupported_shrub_instances, 0)
+
+    def test_r3_uses_default_extent_for_zero_extent_shrubs(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _write_fixture(root, position_extent=0.0)
+
+            with GameSource.open(root) as source:
+                r3_mesh = Resistance3Reader(source).read_shrub(
+                    SHRUB_TUID
+                ).meshes[0]
+            np.testing.assert_allclose(
+                r3_mesh.positions,
+                np.eye(3, dtype=np.float32) * (32.0 * 0.9144),
+                rtol=1e-5,
+            )
+
+            with GameSource.open(root) as source, self.assertRaisesRegex(
+                FormatError,
+                "invalid position extent 0.0",
+            ):
+                Resistance2Reader(source).read_shrub(SHRUB_TUID)
+
+    def test_rejects_nonzero_reserved_shrub_vertex_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _write_fixture(root)
+            path = root / "shrubs.dat"
+            shrub = bytearray(path.read_bytes())
+            struct.pack_into(">e", shrub, 0x8E, 1.0)
+            path.write_bytes(shrub)
+
+            with GameSource.open(root) as source, self.assertRaisesRegex(
+                FormatError,
+                "unsupported nonzero shrub vertex metadata component",
+            ):
+                Resistance2Reader(source).read_shrub(SHRUB_TUID)
+
+    def test_rejects_nonzero_shrub_remap_padding(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            _write_fixture(root)
+            path = root / "shrubs.dat"
+            shrub = bytearray(path.read_bytes())
+            shrub[0x282] = 1
+            path.write_bytes(shrub)
+
+            with GameSource.open(root) as source, self.assertRaisesRegex(
+                FormatError,
+                "unsupported nonzero shrub vertex remap padding",
+            ):
+                Resistance3Reader(source).read_shrub(SHRUB_TUID)
 
     def test_rejects_out_of_range_shrub_lookup(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:

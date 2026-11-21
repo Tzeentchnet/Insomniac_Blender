@@ -720,7 +720,25 @@ apply without a V3 override. `mine_traversal_train` contains six Shrub assets
 with 394 vertices, 356 triangles, and 661 placements; every placement resolves
 to one of those six TUIDs.
 
-Runtime wind, custom normals, and camera-facing billboarding are not
-reproduced.
+Two R3 powerline Shrubs store zero in the ordinary header `+0x18` extent:
+`0xD6318617D6281400` and `0x2F55AF72D6E181F8`. Their raw position bounds and
+serialized bounding spheres independently resolve the missing extent to the
+R3 default `32.0`. For example, applying `32 / 32767` to the first asset's
+raw Z range places its midpoint at `8.495`, matching the header sphere's
+`8.495` Z center. The R3 reader uses that default only for an exact zero;
+positive authored extents retain the shared R2 path.
+
+A scan of all 27 R3 cached-level archives found 215 Shrub references to 70
+unique, conflict-free payloads containing 15,126 vertices and 14,760
+triangles. The shared trailing vertex field is again one finite half-float
+height weight followed by a zero half in all 15,126 vertices. Raw Y is the
+strongest positional correlation for all 69 nonconstant assets, with median
+absolute correlation `0.9985`, and 14,333 triangles contain varying weights.
+Every `0x3150` section is exactly four bytes per vertex and uses the same
+little-endian `u16` remap plus zero padding as R2.
+
+Blender preserves position W, the height weight, and the remap as the shared
+non-rendering point attributes documented for R2. Runtime wind, custom
+normals, and camera-facing billboarding are not reproduced.
 
 Dynamic scene lighting, VFX, and cubemaps are not imported.

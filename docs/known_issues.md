@@ -251,7 +251,9 @@ preserve mesh sharing and avoid thousands of Blender images and materials.
 The directional atlas is composed with the verified radiosity-normal-map
 basis; it is not treated as RGB color. Dynamic scene lighting remains a
 separate unsupported feature. Shrub meshes and placements use the shared R2
-layout and are imported, but their packed vertex metadata is not decoded.
+layout and preserve their verified position-W, height-weight, and
+runtime-remap values as point attributes. Their exact runtime deformation use
+is not reproduced, and the stream contains no authored normal or tangent.
 R2/R3 regional `collision.dat` section `0x2900` is decoded for terrain and
 Tie collision, including triangle meshes and primitive groups. The associated
 `0x8200` and `0x8300` sections remain unclassified and are not imported;
@@ -270,8 +272,9 @@ Foliage `0xA000` sprite buffers, `0xA200` descriptors, and
 masked materials. The first authored LOD is expanded into static cards.
 Shrub `0xB300`/`0xB400` meshes and `0x7500`/`0x7540` placements are likewise
 imported with shared mesh datablocks and their source masked materials.
-Runtime wind, packed shrub vertex metadata, custom normals, and camera-facing
-foliage billboarding are not reproduced.
+Their verified position-W, height-weight, and runtime-remap fields are
+preserved as point attributes. Runtime wind, custom normals, and
+camera-facing foliage billboarding are not reproduced.
 
 ### Gameplay Mobys are static in level imports
 

@@ -307,6 +307,14 @@ and engine metadata from the active adapter. Import options remain shared;
 ISO paths, extraction roots, local catalogs, and Asset Browser paths are
 separate per game.
 
+The shared mesh representation also carries optional R2/R3 Shrub position-W,
+height-weight, and runtime-remap arrays. The Blender bridge writes them as
+point-domain attributes named `insomniac_shrub_position_w`,
+`insomniac_shrub_height_weight`, and `insomniac_shrub_runtime_remap`.
+They preserve verified source data for later vegetation work but do not alter
+positions, normals, or materials. Runtime wind remains deliberately separate
+from static mesh import.
+
 ## Asset Browser cache
 
 The Asset Browser cache is generated locally from a user-provided ISO. A

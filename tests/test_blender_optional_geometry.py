@@ -331,6 +331,82 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
         self.assertEqual(color.data_type, "BYTE_COLOR")
         self.assertEqual(len(color.data), 3)
 
+    def test_mesh_preserves_shrub_metadata_after_reopen(self) -> None:
+        material = bpy.data.materials.new("Shrub")
+        geometry = MeshGeometry(
+            shader_index=0,
+            positions=np.asarray(
+                ((0, 0, 0), (1, 0, 0), (0, 1, 0)),
+                dtype=np.float32,
+            ),
+            uvs=np.asarray(
+                ((0.0, 0.0), (1.0, 0.0), (0.0, 1.0)),
+                dtype=np.float32,
+            ),
+            indices=np.asarray((0, 1, 2), dtype=np.int32),
+            shrub_position_w=np.asarray(
+                (0, 1057, 32767),
+                dtype=np.int32,
+            ),
+            shrub_height_weights=np.asarray(
+                (0.0, 0.5, 1.0),
+                dtype=np.float32,
+            ),
+            shrub_runtime_remap=np.asarray(
+                (0x00FE, 0x0100, 0x1234),
+                dtype=np.uint16,
+            ),
+        )
+        mesh = _build_mesh("Shrub", (geometry,), (material,)).mesh
+        obj = bpy.data.objects.new("Shrub", mesh)
+        bpy.context.scene.collection.objects.link(obj)
+        mesh_name = mesh.name
+
+        with tempfile.TemporaryDirectory() as temporary:
+            output = Path(temporary) / "shrub_metadata.blend"
+            self.assertEqual(
+                bpy.ops.wm.save_as_mainfile(filepath=str(output)),
+                {"FINISHED"},
+            )
+            self.assertEqual(
+                bpy.ops.wm.open_mainfile(filepath=str(output)),
+                {"FINISHED"},
+            )
+
+        persisted = bpy.data.meshes[mesh_name]
+        self.assertEqual(
+            tuple(
+                item.value
+                for item in persisted.attributes[
+                    "insomniac_shrub_position_w"
+                ].data
+            ),
+            (0, 1057, 32767),
+        )
+        self.assertEqual(
+            tuple(
+                item.value
+                for item in persisted.attributes[
+                    "insomniac_shrub_height_weight"
+                ].data
+            ),
+            (0.0, 0.5, 1.0),
+        )
+        self.assertEqual(
+            tuple(
+                item.value
+                for item in persisted.attributes[
+                    "insomniac_shrub_runtime_remap"
+                ].data
+            ),
+            (0x00FE, 0x0100, 0x1234),
+        )
+        self.assertEqual(
+            persisted["insomniac_shrub_metadata_layout"],
+            "POSITION_W_I16,HEIGHT_WEIGHT_F16,RUNTIME_REMAP_LE_U16",
+        )
+        self.assertFalse(persisted["insomniac_shrub_runtime_wind"])
+
     def test_level_tie_preserves_instance_lightmap_index(self) -> None:
         reader = _LevelReader()
         reader.zones[0].tie_instances = [

@@ -812,16 +812,47 @@ IGHW contains:
 - `0xB400`: big-endian `u16` triangle indices;
 - `0x5600`: the source shader TUID;
 - `0xB700`: the null-terminated source entity path;
-- `0x3150`: a per-vertex runtime remap that is not needed for static geometry.
+- `0x3150`: a four-byte per-vertex runtime-remap record.
 
 The header stores vertex and index offset fields at `+0x00`/`+0x04`, the
 index count at `+0x08`, the authored position extent at `+0x18`, and the
 asset TUID at `+0x28`. Both offsets are zero in every verified R2 and R3
 asset; the bounded reader treats them as byte offsets if present. Each vertex
-stores signed-normalized `i16 position[4]` at `+0x00`, half-float UVs at
-`+0x08`, and one packed runtime word at `+0x0C`. Imported positions are
-`clamp(raw / 32767, -1, 1) * extent * 0.9144`. The packed word remains
-unidentified and is not imported as a Blender normal.
+has this verified layout:
+
+| Offset | Type | Meaning |
+|---:|---|---|
+| `+0x00` | `i16[3]` | Signed-normalized XYZ position |
+| `+0x06` | `i16` | Raw position-W metadata |
+| `+0x08` | `f16[2]` | UV |
+| `+0x0C` | `f16` | Height-correlated runtime weight |
+| `+0x0E` | `f16` | Reserved zero |
+
+Imported positions are
+`clamp(raw / 32767, -1, 1) * extent * 0.9144`. The former packed `u32`
+interpretation at `+0x0C` was misleading: every retail record is one finite
+half-float scalar followed by a zero half. It cannot contain a three-component
+normal, tangent, or RGBA color.
+
+The `0x3150` section is exactly `vertexCount * 4` bytes in every retail
+asset. Each record stores a little-endian `u16` remap in its first two bytes
+despite the surrounding big-endian IGHW, followed by two zero bytes. The
+remap is not needed to reconstruct the indexed static mesh. Blender retains
+the three non-reserved values as point-domain
+`insomniac_shrub_position_w`, `insomniac_shrub_height_weight`, and
+`insomniac_shrub_runtime_remap` attributes. It also marks
+`insomniac_shrub_runtime_wind = false`; no speculative deformation is
+applied.
+
+A complete scan of all 27 R2 cached-level archives found 224 Shrub references
+to 77 unique, conflict-free payloads containing 20,075 vertices and 20,809
+triangles. The second half at `+0x0E` and the final two `0x3150` bytes are
+zero for every vertex. The first half ranges from `0.0` to `1.0`; raw Y has
+the strongest positional correlation in all 77 assets, with median absolute
+correlation `0.9935`, and the value changes within 19,296 triangles. This
+supports a height/deformation weight rather than a normal or flat color.
+Position W remains raw because its exact runtime interpretation is not yet
+proven.
 
 Zones use `0x7500` as an eight-byte Shrub TUID lookup and `0x7540` as
 `0x40`-byte placement records. A placement stores position at `+0x00`, scale
@@ -846,8 +877,9 @@ Gameplay Euler values are composed in ZYX order.
 
 ## Known unknowns
 
-- Exact value-14 foliage material-vector semantics and Shrub packed vertex
-  metadata.
+- Exact value-14 foliage material-vector semantics.
+- The runtime interpretation of Shrub position W and exact use of the
+  preserved height weight and remap during vegetation deformation.
 - Packed normals/tangents for custom-normal import.
 - Packed green/specular behavior; the public `useSpecular` bit is absent from
   all 3,355 unique shaders in the current corpus.

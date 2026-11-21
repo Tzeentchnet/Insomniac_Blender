@@ -98,6 +98,9 @@ class MeshGeometry:
     indices: IntArray
     secondary_uvs: FloatArray | None = None
     colors: FloatArray | None = None
+    shrub_position_w: IntArray | None = None
+    shrub_height_weights: FloatArray | None = None
+    shrub_runtime_remap: UInt16Array | None = None
     bone_indices: UInt16Array | None = None
     bone_weights: UInt8Array | None = None
     segment_index: int = 0

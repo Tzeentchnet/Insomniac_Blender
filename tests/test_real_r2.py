@@ -91,6 +91,19 @@ class RealResistance2Tests(unittest.TestCase):
                 self.assertTrue(np.isfinite(shrub.meshes[0].uvs).all())
                 self.assertEqual(len(shrub.meshes[0].indices) % 3, 0)
                 self.assertEqual(
+                    len(shrub.meshes[0].shrub_position_w),
+                    len(shrub.meshes[0].positions),
+                )
+                self.assertTrue(
+                    np.isfinite(
+                        shrub.meshes[0].shrub_height_weights
+                    ).all()
+                )
+                self.assertEqual(
+                    len(shrub.meshes[0].shrub_runtime_remap),
+                    len(shrub.meshes[0].positions),
+                )
+                self.assertEqual(
                     reader.read_shader(shrub.shader_tuids[0]).alpha_mode,
                     "MASK",
                 )
