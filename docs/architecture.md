@@ -137,6 +137,29 @@ Destruction 8-bit delta shift or pair-frame reduction. The adapter exposes
 only the corroborated primary gameplay Moby group; unknown secondary groups
 remain unparsed.
 
+## R2/R3 level collision
+
+The shared R2 reader discovers every regional `collision.dat` beneath the
+selected level prefix. Each file is a big-endian IGHW 1.1 container. The
+backend bounds all reads to section `0x2900`, validates the aligned Tie TUID
+table, the `0x80`-byte instance table, and the prototype blob, then emits the
+game-neutral collision scene. R3 inherits this backend.
+
+Records with flag byte `0x00` reference terrain prototypes whose quantized
+positions are already in world space. Flag `0x20` records select a Tie TUID
+and carry the serialized Tie linear transform and translation. Prototype
+offsets are stable within one regional resource, so every repeated reference
+uses one shared collision mesh. The backend decodes compact quantized
+triangles and the verified SIMD box, sphere, capsule, and cylinder groups.
+Index-degenerate, zero-area, and duplicate source faces are omitted before
+the scene reaches Blender; source and discarded counts remain mesh metadata.
+All-degenerate no-op prototypes are skipped with one explicit warning per
+regional resource.
+
+Sections `0x8200` and `0x8300` are not needed to recover the authored
+collision geometry. They remain unclassified spatial/runtime data and are not
+used as a speculative fallback.
+
 ## Blender bridge
 
 Game coordinates remain untouched inside an imported hierarchy. When axis

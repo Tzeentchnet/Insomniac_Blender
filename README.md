@@ -104,7 +104,8 @@ both fields from `PARAM.SFO`.
 | Zone terrain (`UFrag`) | Supported |
 | Gameplay Moby placement | Supported as linked static mesh instances |
 | Shrub and foliage geometry and placement | Supported as linked static meshes; foliage uses first-LOD sprite cards and both use masked materials |
-| Lighting, level collision, VFX, and cubemaps | Not yet implemented |
+| Level collision | Optional terrain and Tie triangle/primitive collision from regional `collision.dat`; disabled by default |
+| Lighting, VFX, and cubemaps | Not yet implemented |
 
 See [Resistance 2 formats](docs/formats/resistance_2.md) and
 [known issues](docs/known_issues.md) for precise layouts and caveats.
@@ -131,7 +132,8 @@ both fields from `PARAM.SFO`.
 | Zone Tie placement and terrain (`UFrag`) | Supported, including R3's Tie material selector, Tie/UFrag vertex lighting and UV2/UV1, paired baked/directional zone maps, and compact-atlas per-instance Tie lighting |
 | Gameplay Moby placement | Supported as linked static mesh instances |
 | Shrub and foliage geometry and placement | Supported through the verified shared Shrub and V3 foliage layouts |
-| Remaining lighting, level collision, VFX, and cubemaps | Baked R3 radiosity-normal-map lighting is composed; dynamic scene lighting, collision, VFX, and cubemaps remain unsupported |
+| Level collision | Optional terrain and Tie triangle/primitive collision from regional `collision.dat`; disabled by default |
+| Remaining lighting, VFX, and cubemaps | Baked R3 radiosity-normal-map lighting is composed; dynamic scene lighting, VFX, and cubemaps remain unsupported |
 
 See [Resistance 3 formats](docs/formats/resistance_3.md) for the verified
 layout differences from Resistance 2 and
@@ -300,9 +302,11 @@ Adapters that implement it feed a game-neutral mesh/instance model into
 deterministic source-group Collections. Collision objects share prototype
 mesh datablocks, retain per-face surface/material IDs and source metadata,
 display as in-front wire geometry, and are excluded from renders. The
-compressed R2/R3, TOD, and RFoM level backends remain roadmap work; enabling
-the option for a game without a decoder reports that limitation instead of
-substituting render geometry.
+R2 and R3 backends decode regional terrain and Tie collision, including
+quantized triangle prototypes and oriented box, sphere, capsule, and cylinder
+groups. TOD and RFoM level backends remain roadmap work; enabling the option
+for a game without a decoder reports that limitation instead of substituting
+render geometry.
 
 ### Use an ISO directly
 

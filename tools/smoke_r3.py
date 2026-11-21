@@ -8,6 +8,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from insomniac_asset_io.core.collision import validate_collision_scene
 from insomniac_asset_io.core.source import GameSource
 from insomniac_asset_io.games.resistance_2.formats import AssetKind
 from insomniac_asset_io.games.resistance_3.reader import Resistance3Reader
@@ -97,6 +98,12 @@ def main() -> int:
         print(
             f"Gameplay regions={len(regions)} moby_instances="
             f"{sum(len(region.moby_instances) for region in regions)}"
+        )
+        collision = reader.read_level_collision()
+        validate_collision_scene(collision, label="Resistance 3 collision")
+        print(
+            f"Level collision meshes={len(collision.meshes)} "
+            f"instances={len(collision.instances)}"
         )
     return 0
 

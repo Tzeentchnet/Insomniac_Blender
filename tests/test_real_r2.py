@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
+from insomniac_asset_io.core.collision import validate_collision_scene
 from insomniac_asset_io.core.source import GameSource
 from insomniac_asset_io.games.resistance_2.formats import AssetKind
 from insomniac_asset_io.games.resistance_2.reader import Resistance2Reader
@@ -15,6 +16,30 @@ REAL_SOURCE = os.environ.get("R2_LEVEL_SOURCE")
 
 @unittest.skipUnless(REAL_SOURCE, "R2_LEVEL_SOURCE is not set")
 class RealResistance2Tests(unittest.TestCase):
+    def test_decodes_level_collision(self):
+        with GameSource.open(Path(REAL_SOURCE)) as source:
+            scene = Resistance2Reader(source).read_level_collision()
+
+        validate_collision_scene(scene, label="real R2 level collision")
+        self.assertTrue(scene.meshes)
+        self.assertGreater(len(scene.instances), len(scene.meshes))
+        self.assertIn("TERRAIN", {mesh.source_kind for mesh in scene.meshes})
+        self.assertIn("TIE", {mesh.source_kind for mesh in scene.meshes})
+        self.assertIn(
+            "Terrain",
+            {
+                instance.source_group.split(" - ")[0]
+                for instance in scene.instances
+            },
+        )
+        self.assertIn(
+            "Static Props",
+            {
+                instance.source_group.split(" - ")[0]
+                for instance in scene.instances
+            },
+        )
+
     def test_decodes_one_of_each_supported_chain(self):
         with GameSource.open(Path(REAL_SOURCE)) as source:
             reader = Resistance2Reader(source)

@@ -3380,6 +3380,11 @@ def _level_collision_mesh(
         collision.positions,
         collision.indices,
     )
+    if len(mesh.polygons) != len(collision.indices):
+        raise InsomniacError(
+            f"{collision.name}: Blender retained {len(mesh.polygons)} of "
+            f"{len(collision.indices)} collision faces"
+        )
     mesh["insomniac_collision_geometry"] = True
     mesh["insomniac_collision_mesh_id"] = collision.mesh_id
     if collision.source_kind:

@@ -18,12 +18,59 @@ python tools\smoke_r3.py "C:\path\to\level_cached.psarc"
 
 `test_collision.py` validates the shared level-collision contract, including
 triangle bounds, face metadata lengths, prototype references, affine
-transforms, and malformed metadata. `test_blender_optional_geometry.py`
-imports two collision instances that share one prototype, verifies
-source-group Collections and face-domain surface/material attributes, then
-saves and reopens the `.blend` to confirm mesh sharing and metadata
-persistence. These are backend-independent foundation tests; representative
-retail R2/R3 collision validation is added with their compressed decoder.
+transforms, and malformed metadata. `test_level_collision_r23.py` builds
+bounded synthetic `0x2900` resources for world terrain, shared Tie
+prototypes, triangle surfaces, boxes, spheres, capsules, and cylinders. It
+also covers malformed table relationships, AABBs, transforms, face indices,
+degenerate/duplicate faces, and all-degenerate no-op prototypes.
+
+`test_blender_optional_geometry.py` imports two collision instances that
+share one prototype, verifies source-group Collections and face-domain
+surface/material attributes, then saves and reopens the `.blend` to confirm
+mesh sharing and metadata persistence.
+
+Set `R2_LEVEL_SOURCE` or `R3_LEVEL_SOURCE` to run the corresponding
+environment-gated retail collision regression:
+
+```powershell
+$env:R2_LEVEL_SOURCE = "C:\path\to\r2\level_cached.psarc"
+python -m unittest `
+  tests.test_real_r2.RealResistance2Tests.test_decodes_level_collision -v
+
+$env:R3_LEVEL_SOURCE = "C:\path\to\r3\level_cached.psarc"
+python -m unittest `
+  tests.test_real_r3.RealResistance3Tests.test_decodes_level_collision -v
+```
+
+The current local retail corpus covers 58 regional files from representative
+R2 and R3 archives: 704,226 source records, including 663,776 Tie records and
+40,450 world-terrain records. It contains 86,393 quantized triangle
+prototypes and 1,729 primitive prototypes. After explicitly removing source
+no-op geometry, 682,256 instances and 87,331 shared meshes validate through
+the game-neutral scene contract.
+
+Run a collision-only Blender import, save, reopen, and revalidate shared mesh
+and face-attribute persistence with:
+
+```powershell
+& "D:\Blender Foundation\Blender 5.2\blender.exe" --background `
+  --factory-startup --python-exit-code 1 `
+  --python tools\blender_smoke_level_collision.py -- r2 `
+  "C:\path\to\r2\level_cached.psarc" `
+  --resource-suffix "/default/collision.dat" `
+  --output "E:\Tests\collision_review\r2_collision.blend"
+
+& "D:\Blender Foundation\Blender 5.2\blender.exe" --background `
+  --factory-startup --python-exit-code 1 `
+  --python tools\blender_smoke_level_collision.py -- r3 `
+  "C:\path\to\r3\level_cached.psarc" `
+  --resource-suffix "/a_start/collision.dat" `
+  --output "E:\Tests\collision_review\r3_collision.blend"
+```
+
+The retained review files contain 2,201 R2 instances using 558 meshes and
+7,261 R3 instances using 550 meshes. Both were reopened in Blender 5.2 with
+exact object, shared-mesh, metadata, and face-domain surface-attribute counts.
 
 The RFoM smoke test reports resource counts and decodes one Moby, skeleton,
 animset, diffuse texture, Tie, zone, shrub and foliage placement counts, and

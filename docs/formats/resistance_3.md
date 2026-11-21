@@ -449,6 +449,15 @@ The marker-`257` variant was verified on unrelated Resistance 3 assets with 8
 and 70 vertices and on every Moby referenced by the tested
 `haven_town_defense` archive.
 
+Regional R3 `collision.dat` uses the complete R2 `0x2900` level-collision
+layout documented in
+[Resistance 2 format notes](resistance_2.md#regional-level-collision).
+Retail R3 level prototypes in the current corpus use triangle marker `256`
+and additionally exercise oriented boxes, spheres, capsules, and kind-`8`
+cylinders. The serialized Tie transforms, world-space terrain records,
+surface values, prototype reuse, and no-op face handling are shared without
+an R3 override.
+
 ## Verified import coverage
 
 The real-data regression and Blender 5.2 smoke tests cover:
@@ -497,4 +506,4 @@ to one of those six TUIDs.
 Runtime wind, custom normals, and camera-facing billboarding are not
 reproduced.
 
-Dynamic scene lighting, level collision, VFX, and cubemaps are not imported.
+Dynamic scene lighting, VFX, and cubemaps are not imported.

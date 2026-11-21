@@ -188,10 +188,14 @@ The directional atlas is composed with the verified radiosity-normal-map
 basis; it is not treated as RGB color. Dynamic scene lighting remains a
 separate unsupported feature. Shrub meshes and placements use the shared R2
 layout and are imported, but their packed vertex metadata is not decoded.
-The shared level-collision scene and Blender Collections exist, but no game
-backend decodes the compressed retail level payload yet. VFX and cubemaps are
-also not imported. Terrain, Tie placement, and gameplay Moby placement are
-supported.
+R2/R3 regional `collision.dat` section `0x2900` is decoded for terrain and
+Tie collision, including triangle meshes and primitive groups. The associated
+`0x8200` and `0x8300` sections remain unclassified and are not imported;
+current evidence indicates that the recoverable geometry does not depend on
+them. Dynamic gameplay Moby collision is still represented by each Moby's
+separate optional collision helpers rather than duplicated into the level
+collision Collection. VFX and cubemaps are also not imported. Terrain, Tie
+placement, and gameplay Moby placement are supported.
 
 ## Resistance 2
 

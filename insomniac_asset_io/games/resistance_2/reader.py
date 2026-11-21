@@ -10,6 +10,7 @@ from pathlib import Path, PurePosixPath
 import numpy as np
 
 from ...core.binary import IghwFile
+from ...core.collision import CollisionScene as LevelCollisionScene
 from ...core.errors import (
     AmbiguousResourceError,
     FormatError,
@@ -38,6 +39,7 @@ from .formats import (
     TieAsset,
     Zone,
 )
+from .level_collision import decode_level_collision_resource
 from .textures import decode_texture, texture_mip_size
 
 LOGGER = logging.getLogger(__name__)
@@ -2039,6 +2041,42 @@ class Resistance2Reader:
                 )
             )
         return zones
+
+    def read_level_collision(self) -> LevelCollisionScene:
+        prefix = self.resource_prefix.casefold().rstrip("/")
+        paths = sorted(
+            (
+                path
+                for path in self.source.paths
+                if path.casefold().endswith("/collision.dat")
+                and (
+                    not prefix
+                    or path.casefold().startswith(prefix + "/")
+                )
+            ),
+            key=str.casefold,
+        )
+        if not paths:
+            raise MissingResourceError(
+                f"{self.game_label} source has no collision.dat beneath "
+                f"{self.resource_prefix or 'the source root'}"
+            )
+
+        meshes = []
+        instances = []
+        for path in paths:
+            scene = decode_level_collision_resource(
+                IghwFile(self.source.read(path), label=path),
+                resource_path=path,
+                quantization_markers=self.collision_quantization_markers,
+                warnings=self.warnings,
+            )
+            meshes.extend(scene.meshes)
+            instances.extend(scene.instances)
+        return LevelCollisionScene(
+            meshes=tuple(meshes),
+            instances=tuple(instances),
+        )
 
     def _tie_instance_lightmap_index(
         self,

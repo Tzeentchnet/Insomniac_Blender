@@ -212,6 +212,73 @@ Face words immediately follow the vertex groups. Each big-endian `u32` stores
 face type in bits 27-31 and three nine-bit vertex indices in bits 18-26, 9-17,
 and 0-8.
 
+## Regional level collision
+
+Each regional `collision.dat` is a big-endian IGHW 1.1 container with
+sections `0x2900`, `0x8200`, and `0x8300`. The verified geometry and placement
+data are in `0x2900`; `0x8200` and `0x8300` remain unclassified spatial or
+runtime structures and are not required by the importer.
+
+The `0x2900` header fields used by the reader are:
+
+| Offset | Type | Meaning |
+|---:|---|---|
+| `+0x00` | `u32` | `0x80`-aligned byte length of the Tie TUID table |
+| `+0x04` | `u32` | collision record count plus one |
+| `+0x08` | `u32` | section-relative prototype-blob offset |
+| `+0x0C` | `u32` | prototype-blob byte length |
+| `+0x80` | `u64[]` | big-endian Tie TUID table |
+
+The `0x80`-byte collision records begin immediately after the TUID table. The
+prototype blob must begin immediately after the complete record table.
+
+| Record offset | Type | Meaning |
+|---:|---|---|
+| `+0x00` | `f32[3]` | broad-phase AABB minimum |
+| `+0x10` | `f32[3]` | broad-phase AABB maximum |
+| `+0x20` | `u32` | prototype-relative byte offset |
+| `+0x24` | `u16` | prototype extent minus `0x10` |
+| `+0x26` | `u16` | collision grouping value, preserved as metadata |
+| `+0x28` | `u32` | high-byte flags and low-24-bit Tie TUID-table index |
+| `+0x30` | `f32[3][4]` | transposed linear transform with zero padding |
+| `+0x60` | `f32[3]` | translation |
+| `+0x70` | `f32[4]` | broad-phase bounding sphere |
+
+Flag byte `0x00` identifies world-space terrain records. Their low 24 bits
+and serialized transform are zero, and the decoded instance uses identity.
+Flag byte `0x20` identifies Tie collision. Its low 24 bits index the TUID
+table, and transposing the stored `3x3` basis exactly reproduces the matching
+Tie placement transform.
+
+Triangle prototypes place the compact collision header at prototype `+0x00`
+rather than Moby prototype `+0x80`. Retail level files use marker `256`.
+Vertices retain the group-of-eight unsigned-delta layout and `/ 1024`
+conversion documented above; face words retain the same type and three
+nine-bit indices. The record extent also covers a trailing acceleration
+payload, so it can be larger than the aligned vertex/face data length.
+
+Primitive prototypes use this header:
+
+| Offset | Type | Meaning |
+|---:|---|---|
+| `+0x00` | `u16` | data offset marker, `0x20` |
+| `+0x02` | `u16` | total primitive count |
+| `+0x10` | `u8[4]` | box, sphere, capsule, and cylinder counts |
+
+Each primitive family is stored in groups of four lanes. Four `0x10`-byte
+descriptors are followed by structure-of-arrays vectors. Active descriptors
+repeat the family kind (`4`, `5`, `6`, or `8`), store the face surface value
+at byte `+0x01`, and use `0xFF` at `+0x03`. A box batch is `0x130` bytes and
+stores center XYZ, a `3x3` basis, and half extents XYZ. A sphere batch is
+`0x80` bytes and stores center XYZ plus radius. Capsule and cylinder batches
+are `0xB0` bytes and store two endpoints plus radius.
+
+The importer emits one reusable mesh per prototype and one instance per
+non-empty record. Degenerate and duplicate face words are no-op source data;
+they are removed before Blender mesh validation, with original and discarded
+counts retained as mesh metadata. Prototypes containing no valid faces are
+skipped with an explicit per-resource warning.
+
 ### Vertices
 
 Static stride `0x14`:

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
+from insomniac_asset_io.core.collision import validate_collision_scene
 from insomniac_asset_io.core.source import GameSource
 from insomniac_asset_io.games.resistance_2.animations import _bind_trs
 from insomniac_asset_io.games.resistance_2.formats import AssetKind
@@ -20,6 +21,16 @@ CAPELLI_SOURCE = os.environ.get("R3_CAPELLI_SOURCE")
 
 @unittest.skipUnless(REAL_SOURCE, "R3_LEVEL_SOURCE is not set")
 class RealResistance3Tests(unittest.TestCase):
+    def test_decodes_level_collision(self):
+        with GameSource.open(Path(REAL_SOURCE)) as source:
+            scene = Resistance3Reader(source).read_level_collision()
+
+        validate_collision_scene(scene, label="real R3 level collision")
+        self.assertTrue(scene.meshes)
+        self.assertGreater(len(scene.instances), len(scene.meshes))
+        self.assertIn("TERRAIN", {mesh.source_kind for mesh in scene.meshes})
+        self.assertIn("TIE", {mesh.source_kind for mesh in scene.meshes})
+
     def test_decodes_supported_resistance_3_chains(self):
         with GameSource.open(Path(REAL_SOURCE)) as source:
             reader = Resistance3Reader(source)
