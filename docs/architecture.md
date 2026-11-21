@@ -224,14 +224,30 @@ nodes work in Eevee and Cycles. A default-off **Enhanced source materials**
 preference additionally applies safe source color factors; it does not change
 the scene render engine. No metalness channel is inferred. Packed green is
 connected only when the shader's specular flag is present; that flag is absent
-from the current R2 corpus. Bound detail maps are exposed as unconnected
-Non-Color image nodes. The verified R3 frozen family is an explicit exception:
+from the current R2 corpus.
+
+Standard R2/R3 detail composition has an equally strict gate: an active detail
+slot, control bit `0x10`, texture-address bit `0x1000` for the RSX biased
+signed remap, a finite vector-4-Z UV scale, a bound packed map, and no custom
+R3 material program. The detail sampler is tiled from the primary UV and each
+8-bit channel is recentered as approximately
+`(round(channel * 255) - 128) / 127`. Packed alpha masks all four channels.
+Detail R/G perturb the reconstructed tangent normal, B multiplies diffuse as
+`base * (1 + B)`, and A multiplies packed-red gloss as
+`gloss * (1 + A)`. The original vertex program also supplies a runtime
+distance fade beside the scaled UV; that value is not serialized, so Blender
+uses a documented unit fade and does not invent a camera-distance function.
+Records outside the exact gate retain an unconnected Non-Color detail node and
+an explicit data-only reason.
+
+The verified R3 frozen family is an explicit additional-program exception:
 the reader requires the frozen program identity, active fifth slot, exact
 effect path, control byte, frozen shader name, and embedded program sections.
 Its graph samples the effect map with the camera-space shading normal, applies
 the decompiled blue and grazing-angle response, screens that result over base
-color, and lowers roughness under the same coverage. Unverified packed-alpha,
-detail composition, and all other R3 overlay families remain disconnected.
+color, and lowers roughness under the same coverage. Packed-alpha meanings
+outside the strictly gated detail path and all other R3 overlay families
+remain disconnected.
 
 The R3 reader also identifies the gradient-dissolve family from its exact
 program identity, fifth-slot path, control byte, authored suffix, and four

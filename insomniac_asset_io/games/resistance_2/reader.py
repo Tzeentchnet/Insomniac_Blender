@@ -1333,6 +1333,7 @@ class Resistance2Reader:
                 ...,
             ] = ()
             material_tail_values: tuple[float, ...] = ()
+            detail_sampler_address = None
             material = ighw.section(SECT_SHADER_MATERIAL)
             if material is not None:
                 map_index_length = self.shader_texture_slot_count * 4
@@ -1408,6 +1409,18 @@ class Resistance2Reader:
                     ighw.f32(tail_offset + index * 4)
                     for index in range(self.shader_material_tail_count)
                 )
+                detail_map_index = texture_map_indices[3]
+                texture_descriptors = ighw.section(SECT_GLOBAL_TEXTURE)
+                if (
+                    texture_descriptors is not None
+                    and texture_descriptors.length >= 0x0C
+                    and 0 <= detail_map_index < texture_descriptors.count
+                ):
+                    detail_sampler_address = ighw.u32(
+                        texture_descriptors.offset
+                        + detail_map_index * texture_descriptors.length
+                        + 0x08
+                    )
             shader = ShaderInfo(
                 tuid=tuid,
                 albedo_texture_id=texture_ids[0] or None,
@@ -1426,6 +1439,7 @@ class Resistance2Reader:
                 material_word=material_word,
                 material_values=material_values,
                 material_tail_values=material_tail_values,
+                detail_sampler_address=detail_sampler_address,
             )
             effect_family = self._shader_effect_family(ighw, shader)
             if effect_family is not None:

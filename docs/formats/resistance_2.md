@@ -571,7 +571,7 @@ Other correlations are not strong enough to drive nodes:
 
 - vector 1 Z is mostly integer-like, commonly 32 or 16, and may be a classic
   specular exponent;
-- vector 4 Z strongly correlates with detail-map scale/tiling;
+- vector 4 Z is the verified detail-map scale/tiling value;
 - vectors 2 and 3 likely contain lighting, specular, or emission constants;
 - vector layouts vary for foliage and specialized BRDF families.
 
@@ -671,13 +671,33 @@ interpretation.
 ### Detail maps
 
 The detail flag and slot agree for 903 shaders, while another 33 have a detail
-slot without the flag. In a decoded 24-map Chicxulub sample, only one detail
-texture was grayscale. Most were multi-channel data centered near 128,
-consistent with detail normals or other signed/packed perturbations rather
-than a simple color overlay. Vector 4 Z likely controls scale, but the exact
-composition and per-family differences remain unverified. Bound detail images
-are created as unconnected Non-Color nodes, preserving the source data in the
-Blender material without assigning speculative rendering semantics.
+slot without the flag. The sampler state makes that split exact: all 903
+flag-enabled records use address `0x00031101` (847 shaders) or `0x00031121`
+(56), both of which set RSX `UNSIGNED_REMAP_BIASED` bit `0x1000`. The 33
+slot-only records instead use unsigned address `0x00030101` (19) or
+`0x00030303` (14). Blender therefore requires both the flag and the sampler
+bit rather than inferring signed data from a texture path.
+
+All 903 flagged records have a finite positive vector-4-Z value. Its authored
+distribution includes common scales 4, 8, 6, 5, 12, 10, 20, 16, and 32. The
+same field occupies vector 4 Z in R3, confirming it as primary-UV tiling rather
+than one of the neighboring parallax scale/bias values.
+
+The shared standard-material fragment path establishes four-channel
+composition. After the hardware's approximate
+`(round(channel * 255) - 128) / 127` remap, packed-map alpha masks all four
+detail channels. R/G perturb the base tangent normal, B multiplies diffuse as
+`base * (1 + detail_b)`, and A multiplies packed-red gloss as
+`gloss * (1 + detail_a)`. The vertex shader also provides a distance fade;
+that runtime value is absent from section `0x5000`, so Blender uses unit fade
+while retaining the verified packed-alpha mask.
+
+Blender composes the 872 flagged records that also bind the required packed
+mask. Flag-disabled slots, missing packed masks, unknown/unsigned sampler
+states, invalid scales, and non-R2/R3 layouts remain unconnected Non-Color
+data with an explicit reason. The Chicxulub shotgun fixture
+`0x40A104580F8228C8` validates scale `7.944`, sampler `0x00031101`, a spatial
+packed-alpha mask spanning 0-255, and the four-channel `brushed1_d` map.
 
 R2 texture format bytes:
 

@@ -559,6 +559,14 @@ payloads:
 - 1,281 shaders bind detail maps, while the detail bit and slot agree in
   4,575 of 4,579 records.
 
+The four detail-slot exceptions are foliage shadow-map bindings rather than
+detail data. Their samplers are unsigned `0x00030101`; every one of the 1,277
+flag-enabled detail records sets biased signed-remap bit `0x1000` through
+address `0x00031101` (1,149 records) or `0x00031121` (128). Of the flagged
+records, 992 use the standard material path and 285 carry a custom embedded
+material program. Vector 4 Z is the shared authored UV scale: 958 of the 992
+standard records use `4.0`, with finite authored exceptions.
+
 InsomniaToolset's related material path independently identifies the packed
 channels as red gloss, green specular, and blue emission, with red inverted
 for PBR roughness and metallic fixed to zero. The exact R3 flag/slot
@@ -594,15 +602,25 @@ Standard R3 Blender materials therefore:
 - invert packed red into Principled roughness when gloss bit `0x04` is set;
 - color enabled packed-blue emission with the authored albedo and base-color
   factor;
-- preserve bound detail images as unconnected Non-Color nodes;
+- tile verified signed detail maps from vector 4 Z, mask them with packed
+  alpha, apply R/G to the tangent normal, B to diffuse, and A to gloss;
 - keep Principled Metallic at zero.
 
 The only normal-slot format outlier is `dark_cable/dark_cable`, which binds a
 BC1 diffuse `*_c` texture. It is reported and left disconnected. Packed green,
-packed alpha, detail-map composition, and the two effect slots remain
-unconnected because their R3 semantics are not independently proven. Unlike
-the two effect slots, bound detail textures are still imported as data-only
-nodes.
+packed-alpha meanings outside the verified detail mask, custom-program detail
+maps, and the two effect slots remain unconnected because their semantics are
+not independently proven. The standard detail graph recenters each channel as
+approximately `(round(channel * 255) - 128) / 127`, uses packed alpha as a
+shared weight, and applies the same R/G normal, B diffuse, and A gloss
+responses found in multiple decompiled embedded programs. The accompanying
+vertex-stage distance fade is runtime-only; Blender uses unit fade rather
+than inventing a distance curve.
+
+The Mine plaster fixture `0x26257DF8E54423E8` validates scale `4.0`, signed
+sampler `0x00031101`, a 0-255 packed-alpha mask, and the four-channel
+`concretedetail` texture. Any bound detail slot outside the exact standard
+gate remains an unconnected Non-Color node with a data-only reason.
 
 ### Goliath wet-leg overlay
 

@@ -173,9 +173,12 @@ class ShaderTests(unittest.TestCase):
         self.assertTrue(shader.use_glossiness)
         self.assertTrue(shader.use_normal_map)
         self.assertTrue(shader.use_detail_map)
+        self.assertIsNone(shader.detail_sampler_address)
+        self.assertFalse(shader.detail_uses_signed_remap)
         self.assertEqual(len(shader.material_values), 6)
         self.assertEqual(shader.material_values[0], (0.0, 0.25, 0.5, 0.75))
         self.assertEqual(shader.base_color_factor, (0.0, 0.25, 0.5, 0.75))
+        self.assertEqual(shader.detail_uv_scale, 4.5)
         self.assertEqual(
             shader.material_values[-1],
             (5.0, 5.25, 5.5, 5.75),

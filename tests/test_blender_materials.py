@@ -708,6 +708,161 @@ class BlenderMaterialTests(unittest.TestCase):
                 self.assertTrue(material["insomniac_detail_data_only"])
                 self.assertEqual(reader.clear_texture_cache_calls, 1)
 
+    def test_r2_r3_compose_verified_signed_detail_maps(self) -> None:
+        for index, game_id in enumerate(("RESISTANCE_2", "RESISTANCE_3")):
+            with self.subTest(game_id=game_id):
+                shader, textures = self._detail_fixture(0x800 + index)
+                reader = _MaterialReader(game_id, shader, textures)
+                material = _MaterialFactory(reader, True, []).material(
+                    shader.tuid
+                )
+                nodes = material.node_tree.nodes
+                detail_id = shader.detail_texture_id
+                normal_id = shader.normal_texture_id
+                packed_id = shader.specular_texture_id
+                self.assertIsNotNone(detail_id)
+                self.assertIsNotNone(normal_id)
+                self.assertIsNotNone(packed_id)
+
+                detail = nodes[f"Detail_{detail_id:08X}"]
+                coordinates = nodes[f"Detail_UV_{shader.tuid:016X}"]
+                mapping = nodes[f"Detail_Mapping_{shader.tuid:016X}"]
+                channels = nodes[f"Detail_Channels_{detail_id:08X}"]
+                weight = nodes[f"Detail_Weight_{detail_id:08X}"]
+                packed = nodes[f"Packed_{packed_id:08X}"]
+                diffuse = nodes[f"Detail_Diffuse_Multiply_{detail_id:08X}"]
+                normal = nodes[f"Normal_Map_{normal_id:08X}"]
+                normal_rgb = nodes[f"Detail_Normal_RGB_{detail_id:08X}"]
+                roughness = nodes[f"Roughness_{packed_id:08X}"]
+                gloss = nodes[f"Detail_Gloss_Multiply_{detail_id:08X}"]
+                principled = nodes["Principled BSDF"]
+
+                self.assertFalse(material["insomniac_detail_data_only"])
+                self.assertTrue(material["insomniac_detail_composed"])
+                self.assertEqual(material["insomniac_detail_uv_scale"], 8.0)
+                self.assertEqual(
+                    material["insomniac_detail_sampler_address"],
+                    "0x00031101",
+                )
+                self.assertEqual(
+                    material["insomniac_detail_channels"],
+                    "RG=TANGENT_NORMAL,B=DIFFUSE,A=GLOSS",
+                )
+                self.assertEqual(
+                    tuple(mapping.inputs["Scale"].default_value),
+                    (8.0, 8.0, 1.0),
+                )
+                self.assertTrue(
+                    self._has_link(
+                        material,
+                        coordinates,
+                        mapping,
+                        "Vector",
+                        from_socket="UV",
+                    )
+                )
+                self.assertTrue(
+                    self._has_link(
+                        material,
+                        mapping,
+                        detail,
+                        "Vector",
+                        from_socket="Vector",
+                    )
+                )
+                self.assertTrue(
+                    self._has_link(material, detail, channels, "Color")
+                )
+                self.assertTrue(
+                    self._has_link(
+                        material,
+                        packed,
+                        weight,
+                        0,
+                        from_socket="Alpha",
+                    )
+                )
+                self.assertEqual(weight.operation, "MULTIPLY")
+                self.assertEqual(weight.inputs[1].default_value, 1.0)
+                for channel in "RGBA":
+                    quantized = nodes[
+                        f"Detail_Quantized_{channel}_{detail_id:08X}"
+                    ]
+                    rounded = nodes[
+                        f"Detail_Rounded_{channel}_{detail_id:08X}"
+                    ]
+                    signed = nodes[
+                        f"Detail_Signed_{channel}_{detail_id:08X}"
+                    ]
+                    self.assertEqual(quantized.operation, "MULTIPLY")
+                    self.assertEqual(
+                        quantized.inputs[1].default_value,
+                        255.0,
+                    )
+                    self.assertEqual(rounded.operation, "ROUND")
+                    self.assertEqual(signed.operation, "MULTIPLY_ADD")
+                    self.assertAlmostEqual(
+                        signed.inputs[1].default_value,
+                        1.0 / 127.0,
+                    )
+                    self.assertAlmostEqual(
+                        signed.inputs[2].default_value,
+                        -128.0 / 127.0,
+                    )
+                self.assertTrue(
+                    self._has_link(
+                        material,
+                        diffuse,
+                        principled,
+                        "Base Color",
+                    )
+                )
+                self.assertTrue(
+                    self._has_link(
+                        material,
+                        normal_rgb,
+                        normal,
+                        "Color",
+                    )
+                )
+                self.assertTrue(
+                    self._has_link(material, gloss, roughness, 1)
+                )
+
+    def test_detail_composition_rejects_unverified_layouts(self) -> None:
+        shader, textures = self._detail_fixture(0x810)
+        cases = (
+            (
+                "DETAIL_FLAG_DISABLED",
+                replace(shader, material_word=0x0C00_0000),
+            ),
+            (
+                "CUSTOM_MATERIAL_PROGRAM",
+                replace(shader, material_program_tuid=1),
+            ),
+            (
+                "UNSIGNED_OR_UNKNOWN_SAMPLER",
+                replace(shader, detail_sampler_address=0x0003_0101),
+            ),
+        )
+        for reason, candidate in cases:
+            with self.subTest(reason=reason):
+                reader = _MaterialReader("RESISTANCE_3", candidate, textures)
+                material = _MaterialFactory(reader, True, []).material(
+                    candidate.tuid
+                )
+                detail = material.node_tree.nodes[
+                    f"Detail_{candidate.detail_texture_id:08X}"
+                ]
+
+                self.assertTrue(material["insomniac_detail_data_only"])
+                self.assertFalse(material["insomniac_detail_composed"])
+                self.assertEqual(
+                    material["insomniac_detail_data_only_reason"],
+                    reason,
+                )
+                self.assertFalse(detail.outputs["Color"].is_linked)
+
     def test_burning_skies_connects_dedicated_specular_data(self) -> None:
         texture_id = 0x750
         shader = ShaderInfo(
@@ -1958,6 +2113,50 @@ class BlenderMaterialTests(unittest.TestCase):
             ),
             np.full((2, 2, 4), value, dtype=np.uint8),
         )
+
+    @classmethod
+    def _detail_fixture(
+        cls,
+        tuid: int,
+    ) -> tuple[ShaderInfo, dict[int, DecodedTexture]]:
+        albedo_id = 0x810
+        normal_id = 0x820
+        packed_id = 0x830
+        detail_id = 0x840
+        textures = {
+            albedo_id: cls._decoded_texture(albedo_id, value=192),
+            normal_id: cls._decoded_texture(
+                normal_id,
+                format_code=0x08,
+                value=128,
+            ),
+            packed_id: cls._decoded_texture(packed_id, value=128),
+            detail_id: cls._decoded_texture(detail_id, value=128),
+        }
+        shader = ShaderInfo(
+            tuid=tuid,
+            albedo_texture_id=albedo_id,
+            normal_texture_id=normal_id,
+            specular_texture_id=packed_id,
+            detail_texture_id=detail_id,
+            texture_lookup_paths=(
+                "fixture/detail_c",
+                "fixture/detail_n",
+                "fixture/detail_e",
+                "fixture/detail_d",
+            ),
+            texture_map_indices=(0, 1, 2, 3),
+            material_word=0x1C00_0000,
+            material_values=(
+                (1.0, 1.0, 1.0, 1.0),
+                (0.0, 0.0, 0.0, 0.0),
+                (0.0, 0.0, 0.0, 0.0),
+                (0.0, 0.0, 0.0, 0.0),
+                (0.0, 0.0, 8.0, 0.0),
+            ),
+            detail_sampler_address=0x0003_1101,
+        )
+        return shader, textures
 
     @staticmethod
     def _emission_fixture(

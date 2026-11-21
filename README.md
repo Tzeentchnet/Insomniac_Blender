@@ -100,7 +100,7 @@ both fields from `PARAM.SFO`.
 | USA model/level import catalog | 7,588 unique assets across 27 levels: 923 Mobys, 3,207 Ties, 77 Shrubs, 26 Foliage assets, and 3,355 Materials |
 | Blender Asset Browser library | Locally generated Moby, Tie, Shrub, and Foliage Collections, standalone Materials, and optional Actions |
 | Diffuse textures and albedo-colored packed-blue emission | Supported |
-| Reconstructed normals and packed red-channel gloss | Supported in the default material mode |
+| Reconstructed normals, packed red-channel gloss, and signed RGBA detail maps | Supported in the default material mode for verified standard materials |
 | DXT1/3/5 and common uncompressed textures | Supported |
 | Zone Tie placement | Supported with linked mesh data |
 | Zone terrain (`UFrag`) | Supported |
@@ -128,8 +128,8 @@ both fields from `PARAM.SFO`.
 | Tie static meshes | Supported |
 | USA model/level import catalog | 10,482 unique assets across 27 levels: 969 Mobys, 4,851 Ties, 70 Shrubs, 13 Foliage assets, and 4,579 Materials |
 | Blender Asset Browser library | Locally generated Moby, Tie, Shrub, and Foliage Collections, standalone Materials, and optional Actions |
-| Diffuse, reconstructed normal, packed red-gloss response, albedo-colored packed-blue emission, and the Goliath wet-leg overlay | Supported in the default material mode |
-| Detail and additional shader references | Bound detail images are preserved as unconnected Non-Color nodes; R3 effect slots remain metadata-only because runtime composition is not yet proven |
+| Diffuse, reconstructed normal, packed red-gloss response, signed RGBA detail maps, albedo-colored packed-blue emission, and the Goliath wet-leg overlay | Supported in the default material mode for verified standard materials |
+| Additional shader references | R3 effect slots and custom-program detail maps remain metadata-only unless their individual runtime composition is proven |
 | DXT and common uncompressed textures | Supported, including global texture bundles |
 | Zone Tie placement and terrain (`UFrag`) | Supported, including R3's Tie material selector, Tie/UFrag vertex lighting and UV2/UV1, paired baked/directional zone maps, and compact-atlas per-instance Tie lighting |
 | Gameplay Moby placement | Supported as linked static mesh instances |
@@ -437,11 +437,14 @@ The extension has a standard path plus one shared enhancement preference:
 - **Standard**, the default, imports diffuse color, source alpha modes, and
   verified albedo-colored blue-channel emission masks. Supported PS3 readers
   reconstruct flagged BC3/RG8 tangent normals and convert flagged packed-red
-  gloss to Principled roughness in Eevee and Cycles. R3 also preserves the
-  base legs under its opaque-BC1 Goliath wet overlay and composes the verified
-  `ig_frozen_customa` family through its camera-normal projection and
-  grazing-angle response. The standard path recognizes the verified R2
-  mode-zero `ch_hex_glass_glowy` alpha exception as well.
+  gloss to Principled roughness in Eevee and Cycles. Verified standard R2/R3
+  materials also apply their authored detail-map tiling, biased signed RGBA
+  remap, packed-alpha mask, tangent-normal perturbation, diffuse modulation,
+  and gloss modulation. R3 preserves the base legs under its opaque-BC1
+  Goliath wet overlay and composes the verified `ig_frozen_customa` family
+  through its camera-normal projection and grazing-angle response. The
+  standard path recognizes the verified R2 mode-zero
+  `ch_hex_glass_glowy` alpha exception as well.
 - **Enhanced source materials** additionally applies the source base-color
   multiplier while keeping the same normal, packed-map, and alpha behavior.
 
@@ -452,14 +455,18 @@ rebuild existing materials or change the active scene render engine.
 
 Packed green remains disconnected because the corresponding R2 specular flag
 is absent from every shader in both current whole-disc corpora. Neither game
-provides a verified metalness channel. Bound detail maps are imported as
-unconnected Non-Color image nodes so their signed/packed values remain
-available without inventing a blend. Apart from the narrowly identified R3
-frozen family, effect-overlay slots remain disconnected rather than receiving
-speculative node connections. The strictly classified R3 gradient-dissolve,
-on-fire, flash-overlay, and weapon-upgrade families are preserved as
-runtime-driven metadata because their transition and animation-phase values
-are not serialized in the material.
+provides a verified metalness channel. Detail composition is restricted to
+R2/R3 records with the detail flag, the hardware's biased signed-remap sampler
+bit, a finite vector-4-Z scale, a bound packed-alpha mask, and no custom R3
+material program. Other bound detail maps remain unconnected Non-Color data.
+The source vertex shader supplies a distance fade that is not serialized;
+Blender preserves the verified packed-alpha mask and uses a documented unit
+fade rather than inventing a camera-distance curve. Apart from the narrowly
+identified R3 frozen family, effect-overlay slots remain disconnected rather
+than receiving speculative node connections. The strictly classified R3
+gradient-dissolve, on-fire, flash-overlay, and weapon-upgrade families are
+preserved as runtime-driven metadata because their transition and
+animation-phase values are not serialized in the material.
 
 ## Project layout
 

@@ -35,6 +35,7 @@ RAVAGER_SOURCE = os.environ.get("R3_RAVAGER_SOURCE")
 STALKER_SOURCE = os.environ.get("R3_STALKER_SOURCE")
 CAPELLI_SOURCE = os.environ.get("R3_CAPELLI_SOURCE")
 FROZEN_SOURCE = os.environ.get("R3_FROZEN_SOURCE")
+DETAIL_SOURCE = os.environ.get("R3_DETAIL_SOURCE")
 
 
 @unittest.skipUnless(REAL_SOURCE, "R3_LEVEL_SOURCE is not set")
@@ -156,6 +157,53 @@ class RealResistance3Tests(unittest.TestCase):
                 0,
             )
             self.assertTrue(reader.read_gameplay_regions())
+
+
+@unittest.skipUnless(DETAIL_SOURCE, "R3_DETAIL_SOURCE is not set")
+class RealResistance3DetailTests(unittest.TestCase):
+    def test_decodes_masked_plaster_detail_material(self) -> None:
+        with GameSource.open(Path(DETAIL_SOURCE)) as source:
+            reader = Resistance3Reader(source)
+            shader = reader.read_shader(0x2625_7DF8_E544_23E8)
+
+            self.assertEqual(
+                shader.lookup_path,
+                "em_hav_farm_house_plaster/em_hav_farm_house_plaster",
+            )
+            self.assertTrue(shader.use_detail_map)
+            self.assertTrue(shader.detail_uses_signed_remap)
+            self.assertEqual(shader.detail_sampler_address, 0x0003_1101)
+            self.assertEqual(shader.detail_uv_scale, 4.0)
+            self.assertIsNone(shader.material_program_tuid)
+            self.assertEqual(shader.detail_texture_id, 0xCF1C_8993)
+            self.assertEqual(
+                shader.texture_lookup_paths[3],
+                "artdepartment/detailtextures/concretedetail",
+            )
+
+            packed = reader.read_texture(
+                shader.specular_texture_id,
+                lookup_path=shader.texture_lookup_paths[2],
+            )
+            detail = reader.read_texture(
+                shader.detail_texture_id,
+                lookup_path=shader.texture_lookup_paths[3],
+            )
+
+        self.assertEqual((packed.info.width, packed.info.height), (512, 512))
+        self.assertEqual(
+            (int(packed.rgba[..., 3].min()), int(packed.rgba[..., 3].max())),
+            (0, 255),
+        )
+        self.assertEqual((detail.info.width, detail.info.height), (256, 256))
+        self.assertEqual(
+            tuple(int(value) for value in detail.rgba.min(axis=(0, 1))),
+            (77, 0, 0, 14),
+        )
+        self.assertEqual(
+            tuple(int(value) for value in detail.rgba.max(axis=(0, 1))),
+            (136, 255, 255, 255),
+        )
 
 
 @unittest.skipUnless(FROZEN_SOURCE, "R3_FROZEN_SOURCE is not set")

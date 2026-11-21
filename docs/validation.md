@@ -345,9 +345,39 @@ such as the Chimeran Shuttle's orange and cyan glows. Its red channel is
 inverted into roughness when the shader enables gloss in either game. Packed
 green connects to Principled specular only when the corresponding shader flag
 is present; that flag is absent from the current R2 corpus. Additional
-material-vector emission tint, authored emission strength, packed alpha, and
-detail-map composition remain under research. Bound detail textures are still
-imported as unconnected Non-Color nodes for inspection and downstream authoring.
+material-vector emission tint and authored emission strength remain under
+research.
+
+Detail-map validation covers the full 27-level corpora. R2 has 903
+flag-enabled signed samplers and 33 unsigned slot-only records; R3 has 1,277
+flag-enabled signed samplers and four unsigned foliage shadow-map bindings.
+Synthetic Blender tests require vector-4-Z UV tiling, the exact biased signed
+remap, packed-alpha weighting, R/G tangent-normal perturbation, B diffuse
+modulation, and A gloss modulation. They also prove that disabled flags,
+unsigned samplers, and custom R3 material programs remain data-only.
+
+Run the exact retail fixtures with:
+
+```powershell
+$env:R2_DETAIL_SOURCE = "C:\path\to\chicxulub_multiplayer\level_cached.psarc"
+$env:R3_DETAIL_SOURCE = "C:\path\to\mine_traversal_train\level_cached.psarc"
+python -m unittest `
+  tests.test_real_r2.RealResistance2DetailTests `
+  tests.test_real_r3.RealResistance3DetailTests -v
+Remove-Item Env:R2_DETAIL_SOURCE, Env:R3_DETAIL_SOURCE
+```
+
+The R2 shotgun fixture validates scale `7.944`, sampler `0x00031101`, a
+spatial 0-255 packed-alpha mask, and exact `brushed1_d` channel extrema. The
+R3 plaster fixture validates scale `4.0`, the same sampler state, a spatial
+0-255 packed-alpha mask, and exact `concretedetail` extrema. Four isolated
+Blender 5.2.2 review files under
+`E:\Tests\InsomniacAssetIO\detail_material_review` were saved, reopened, and
+rendered. The R2 before/after pair changed 80,535 pixels with maximum
+8-bit-channel delta 15; the R3 pair changed 140,395 pixels with maximum delta
+133 and visibly restored concrete relief. The vertex-stage distance fade is
+not serialized, so Blender documents and tests a unit fade rather than an
+invented camera-distance function.
 
 The R3 frozen family is validated independently of generic effect slots.
 Portable reader regressions require the exact frozen material-program identity,

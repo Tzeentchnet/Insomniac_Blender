@@ -177,6 +177,7 @@ class ShaderInfo:
     alpha_mode_override: str | None = None
     emissive_enabled: bool = False
     use_emissive_texture: bool | None = None
+    detail_sampler_address: int | None = None
 
     @property
     def expensive_texture_id(self) -> int | None:
@@ -250,6 +251,16 @@ class ShaderInfo:
     @property
     def use_detail_map(self) -> bool:
         return bool((self.material_flags or 0) & 0x10)
+
+    @property
+    def detail_uv_scale(self) -> float | None:
+        if len(self.material_values) <= 4:
+            return None
+        return self.material_values[4][2]
+
+    @property
+    def detail_uses_signed_remap(self) -> bool:
+        return bool((self.detail_sampler_address or 0) & 0x1000)
 
     @property
     def uses_implicit_albedo_alpha(self) -> bool:

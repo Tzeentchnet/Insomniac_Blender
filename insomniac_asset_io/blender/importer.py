@@ -718,7 +718,7 @@ class _MaterialFactory:
                         shader,
                         normal=normal,
                     )
-                    self._add_detail(material, shader)
+                    self._add_detail(material, principled, shader)
                     self._add_dedicated_emission(
                         material,
                         principled,
@@ -1860,6 +1860,7 @@ class _MaterialFactory:
     def _add_detail(
         self,
         material: bpy.types.Material,
+        principled: bpy.types.Node,
         shader: ShaderInfo,
     ) -> None:
         texture_id = shader.detail_texture_id
@@ -1887,6 +1888,342 @@ class _MaterialFactory:
         )
         node.location = (-600.0, -600.0)
         material["insomniac_detail_data_only"] = True
+        material["insomniac_detail_composed"] = False
+        if shader.detail_sampler_address is not None:
+            material["insomniac_detail_sampler_address"] = (
+                f"0x{shader.detail_sampler_address:08X}"
+            )
+        scale = shader.detail_uv_scale
+        if scale is not None:
+            material["insomniac_detail_uv_scale"] = scale
+
+        game_id = _reader_game_id(self.reader)
+        if game_id not in {"RESISTANCE_2", "RESISTANCE_3"}:
+            material["insomniac_detail_data_only_reason"] = "UNVERIFIED_GAME"
+            return
+        if not shader.use_detail_map:
+            material["insomniac_detail_data_only_reason"] = (
+                "DETAIL_FLAG_DISABLED"
+            )
+            return
+        if shader.material_program_tuid is not None:
+            material["insomniac_detail_data_only_reason"] = (
+                "CUSTOM_MATERIAL_PROGRAM"
+            )
+            return
+        if not shader.detail_uses_signed_remap:
+            material["insomniac_detail_data_only_reason"] = (
+                "UNSIGNED_OR_UNKNOWN_SAMPLER"
+            )
+            return
+        if not self.surface_material_channels:
+            material["insomniac_detail_data_only_reason"] = (
+                "SURFACE_CHANNELS_DISABLED"
+            )
+            return
+        if scale is None or not math.isfinite(scale) or scale < 0.0:
+            material["insomniac_detail_data_only_reason"] = (
+                "INVALID_UV_SCALE"
+            )
+            self._warn(
+                f"Shader 0x{shader.tuid:016X} has an invalid detail-map "
+                "UV scale"
+            )
+            return
+
+        packed_id = shader.expensive_texture_id
+        if packed_id is None or not shader.is_texture_slot_bound(2):
+            material["insomniac_detail_data_only_reason"] = (
+                "PACKED_MASK_UNAVAILABLE"
+            )
+            return
+        packed_path = shader.texture_lookup_paths[2]
+        try:
+            packed_image = self.image(
+                packed_id,
+                role="packed",
+                lookup_path=packed_path,
+            )
+        except InsomniacError as exc:
+            material["insomniac_detail_data_only_reason"] = (
+                "PACKED_MASK_UNAVAILABLE"
+            )
+            self._warn(
+                f"Shader 0x{shader.tuid:016X} detail mask unavailable: "
+                f"{exc}"
+            )
+            return
+
+        nodes = material.node_tree.nodes
+        links = material.node_tree.links
+        suffix = f"{shader.tuid:016X}"
+
+        coordinates = nodes.new("ShaderNodeTexCoord")
+        coordinates.name = f"Detail_UV_{suffix}"
+        coordinates.label = "Detail-map primary UV"
+        coordinates.location = (-1100.0, -650.0)
+
+        mapping = nodes.new("ShaderNodeMapping")
+        mapping.name = f"Detail_Mapping_{suffix}"
+        mapping.label = f"Authored detail tiling ({scale:g}x)"
+        mapping.vector_type = "POINT"
+        mapping.inputs["Scale"].default_value = (scale, scale, 1.0)
+        mapping.location = (-900.0, -650.0)
+        links.new(coordinates.outputs["UV"], mapping.inputs["Vector"])
+        links.new(mapping.outputs["Vector"], node.inputs["Vector"])
+        node.label = f"{_reader_game_label(self.reader)} signed detail data"
+        node.extension = "REPEAT"
+
+        channels = nodes.new("ShaderNodeSeparateColor")
+        channels.name = f"Detail_Channels_{texture_id:08X}"
+        channels.label = "R/G=normal B=diffuse A=gloss"
+        channels.mode = "RGB"
+        channels.location = (-350.0, -600.0)
+        links.new(node.outputs["Color"], channels.inputs["Color"])
+
+        def signed_channel(
+            source: bpy.types.NodeSocket,
+            channel: str,
+        ) -> bpy.types.Node:
+            quantized = nodes.new("ShaderNodeMath")
+            quantized.name = (
+                f"Detail_Quantized_{channel}_{texture_id:08X}"
+            )
+            quantized.label = f"Detail {channel} x 255"
+            quantized.operation = "MULTIPLY"
+            quantized.inputs[1].default_value = 255.0
+            links.new(source, quantized.inputs[0])
+
+            rounded = nodes.new("ShaderNodeMath")
+            rounded.name = f"Detail_Rounded_{channel}_{texture_id:08X}"
+            rounded.label = f"Rounded detail {channel}"
+            rounded.operation = "ROUND"
+            links.new(quantized.outputs["Value"], rounded.inputs[0])
+
+            signed = nodes.new("ShaderNodeMath")
+            signed.name = f"Detail_Signed_{channel}_{texture_id:08X}"
+            signed.label = f"Biased signed detail {channel}"
+            signed.operation = "MULTIPLY_ADD"
+            signed.inputs[1].default_value = 1.0 / 127.0
+            signed.inputs[2].default_value = -128.0 / 127.0
+            links.new(rounded.outputs["Value"], signed.inputs[0])
+            return signed
+
+        signed = {
+            "R": signed_channel(channels.outputs["Red"], "R"),
+            "G": signed_channel(channels.outputs["Green"], "G"),
+            "B": signed_channel(channels.outputs["Blue"], "B"),
+            "A": signed_channel(node.outputs["Alpha"], "A"),
+        }
+
+        packed = nodes.get(f"Packed_{packed_id:08X}")
+        if packed is None or packed.bl_idname != "ShaderNodeTexImage":
+            packed = self._texture_node(
+                material,
+                packed_image,
+                name=f"Detail_Mask_{packed_id:08X}",
+                label="Packed alpha detail mask",
+            )
+            packed.location = (-600.0, -900.0)
+
+        weight = nodes.new("ShaderNodeMath")
+        weight.name = f"Detail_Weight_{texture_id:08X}"
+        weight.label = "Packed alpha x unit runtime fade"
+        weight.operation = "MULTIPLY"
+        weight.inputs[1].default_value = 1.0
+        links.new(packed.outputs["Alpha"], weight.inputs[0])
+
+        weighted: dict[str, bpy.types.Node] = {}
+        for channel, signed_node in signed.items():
+            multiply = nodes.new("ShaderNodeMath")
+            multiply.name = (
+                f"Detail_Weighted_{channel}_{texture_id:08X}"
+            )
+            multiply.label = f"Masked signed detail {channel}"
+            multiply.operation = "MULTIPLY"
+            links.new(signed_node.outputs["Value"], multiply.inputs[0])
+            links.new(weight.outputs["Value"], multiply.inputs[1])
+            weighted[channel] = multiply
+
+        base_color = principled.inputs["Base Color"]
+        if base_color.is_linked:
+            source_color = base_color.links[0].from_socket
+            links.remove(base_color.links[0])
+        else:
+            source = nodes.new("ShaderNodeRGB")
+            source.name = f"Detail_Base_Color_{suffix}"
+            source.outputs["Color"].default_value = base_color.default_value
+            source_color = source.outputs["Color"]
+
+        diffuse_factor = nodes.new("ShaderNodeMath")
+        diffuse_factor.name = f"Detail_Diffuse_Factor_{texture_id:08X}"
+        diffuse_factor.label = "1 + masked signed detail B"
+        diffuse_factor.operation = "ADD"
+        diffuse_factor.inputs[1].default_value = 1.0
+        links.new(
+            weighted["B"].outputs["Value"],
+            diffuse_factor.inputs[0],
+        )
+
+        diffuse = nodes.new("ShaderNodeMixRGB")
+        diffuse.name = f"Detail_Diffuse_Multiply_{texture_id:08X}"
+        diffuse.label = "Base color x detail B response"
+        diffuse.blend_type = "MULTIPLY"
+        diffuse.inputs[0].default_value = 1.0
+        links.new(source_color, diffuse.inputs[1])
+        links.new(diffuse_factor.outputs["Value"], diffuse.inputs[2])
+        links.new(diffuse.outputs["Color"], base_color)
+
+        normal_input = principled.inputs["Normal"]
+        if normal_input.is_linked:
+            normal = normal_input.links[0].from_node
+            normal_color = normal.inputs.get("Color")
+            if (
+                normal.bl_idname == "ShaderNodeNormalMap"
+                and normal_color is not None
+                and normal_color.is_linked
+            ):
+                base_normal = normal_color.links[0].from_socket
+                links.remove(normal_color.links[0])
+
+                base_channels = nodes.new("ShaderNodeSeparateColor")
+                base_channels.name = (
+                    f"Detail_Base_Normal_{texture_id:08X}"
+                )
+                base_channels.label = "Encoded base tangent normal"
+                base_channels.mode = "RGB"
+                links.new(base_normal, base_channels.inputs["Color"])
+
+                normal_z = nodes.new("ShaderNodeMath")
+                normal_z.name = (
+                    f"Detail_Base_Normal_Z_{texture_id:08X}"
+                )
+                normal_z.operation = "MULTIPLY_ADD"
+                normal_z.inputs[1].default_value = 2.0
+                normal_z.inputs[2].default_value = -1.0
+                links.new(base_channels.outputs["Blue"], normal_z.inputs[0])
+
+                normal_z_squared = nodes.new("ShaderNodeMath")
+                normal_z_squared.name = (
+                    f"Detail_Base_Normal_Z2_{texture_id:08X}"
+                )
+                normal_z_squared.operation = "MULTIPLY"
+                links.new(
+                    normal_z.outputs["Value"],
+                    normal_z_squared.inputs[0],
+                )
+                links.new(
+                    normal_z.outputs["Value"],
+                    normal_z_squared.inputs[1],
+                )
+
+                combined_channels: dict[str, bpy.types.Node] = {}
+                for channel, base_channel in (
+                    ("R", "Red"),
+                    ("G", "Green"),
+                ):
+                    scaled = nodes.new("ShaderNodeMath")
+                    scaled.name = (
+                        f"Detail_Normal_{channel}_Z2_{texture_id:08X}"
+                    )
+                    scaled.operation = "MULTIPLY"
+                    links.new(
+                        weighted[channel].outputs["Value"],
+                        scaled.inputs[0],
+                    )
+                    links.new(
+                        normal_z_squared.outputs["Value"],
+                        scaled.inputs[1],
+                    )
+
+                    offset = nodes.new("ShaderNodeMath")
+                    offset.name = (
+                        f"Detail_Normal_{channel}_Offset_"
+                        f"{texture_id:08X}"
+                    )
+                    offset.operation = "MULTIPLY"
+                    offset.inputs[1].default_value = -0.5
+                    links.new(scaled.outputs["Value"], offset.inputs[0])
+
+                    combined = nodes.new("ShaderNodeMath")
+                    combined.name = (
+                        f"Detail_Normal_{channel}_{texture_id:08X}"
+                    )
+                    combined.operation = "ADD"
+                    links.new(
+                        base_channels.outputs[base_channel],
+                        combined.inputs[0],
+                    )
+                    links.new(offset.outputs["Value"], combined.inputs[1])
+                    combined_channels[channel] = combined
+
+                combine = nodes.new("ShaderNodeCombineColor")
+                combine.name = f"Detail_Normal_RGB_{texture_id:08X}"
+                combine.label = "Detail-composed tangent normal"
+                combine.mode = "RGB"
+                links.new(
+                    combined_channels["R"].outputs["Value"],
+                    combine.inputs["Red"],
+                )
+                links.new(
+                    combined_channels["G"].outputs["Value"],
+                    combine.inputs["Green"],
+                )
+                links.new(
+                    base_channels.outputs["Blue"],
+                    combine.inputs["Blue"],
+                )
+                links.new(combine.outputs["Color"], normal_color)
+
+        roughness_input = principled.inputs["Roughness"]
+        if roughness_input.is_linked:
+            invert = roughness_input.links[0].from_node
+            if (
+                invert.bl_idname == "ShaderNodeMath"
+                and invert.operation == "SUBTRACT"
+                and invert.inputs[1].is_linked
+            ):
+                gloss = invert.inputs[1].links[0].from_socket
+                links.remove(invert.inputs[1].links[0])
+
+                gloss_factor = nodes.new("ShaderNodeMath")
+                gloss_factor.name = (
+                    f"Detail_Gloss_Factor_{texture_id:08X}"
+                )
+                gloss_factor.label = "1 + masked signed detail A"
+                gloss_factor.operation = "ADD"
+                gloss_factor.inputs[1].default_value = 1.0
+                links.new(
+                    weighted["A"].outputs["Value"],
+                    gloss_factor.inputs[0],
+                )
+
+                gloss_multiply = nodes.new("ShaderNodeMath")
+                gloss_multiply.name = (
+                    f"Detail_Gloss_Multiply_{texture_id:08X}"
+                )
+                gloss_multiply.label = "Packed gloss x detail A response"
+                gloss_multiply.operation = "MULTIPLY"
+                links.new(gloss, gloss_multiply.inputs[0])
+                links.new(
+                    gloss_factor.outputs["Value"],
+                    gloss_multiply.inputs[1],
+                )
+                links.new(
+                    gloss_multiply.outputs["Value"],
+                    invert.inputs[1],
+                )
+
+        material["insomniac_detail_data_only"] = False
+        material["insomniac_detail_composed"] = True
+        material["insomniac_detail_signed_remap"] = (
+            "(round(channel*255)-128)/127"
+        )
+        material["insomniac_detail_channels"] = (
+            "RG=TANGENT_NORMAL,B=DIFFUSE,A=GLOSS"
+        )
+        material["insomniac_detail_mask"] = "PACKED_ALPHA"
+        material["insomniac_detail_runtime_fade"] = 1.0
 
     def _add_packed(
         self,

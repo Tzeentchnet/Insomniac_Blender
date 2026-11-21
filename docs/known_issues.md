@@ -166,9 +166,10 @@ an invalid tangent vector.
 All 3,232 shaders with control bit `0x04` bind a packed third map. Standard R3
 materials invert its red gloss channel into Principled roughness. The legacy
 specular bit `0x02` does not occur in any of the 4,579 unique shaders, so
-packed green remains disconnected. Packed alpha varies in some BC3 maps but
-its role is not proven. R3 uses a legacy specular/gloss workflow; no source or
-corpus evidence identifies a metalness channel, so Metallic remains zero.
+packed green remains disconnected. Packed alpha masks all four channels in
+the strictly gated standard detail-map graph; meanings outside that graph
+remain unproven. R3 uses a legacy specular/gloss workflow; no source or corpus
+evidence identifies a metalness channel, so Metallic remains zero.
 
 Packed blue is a scalar emission mask. Low material-control-byte bit `0x08`
 disables it, as verified by exact on/off shader pairs sharing the same packed
@@ -176,10 +177,14 @@ texture. Enabled R3 emission uses authored albedo and the valid base-color
 factor for its color. No separate source strength scalar has been identified;
 the normalized blue mask drives intensity at Principled strength `1.0`.
 
-Detail maps are often signed multi-channel data and likely use values from the
-material parameter block for scale and blending. Their exact composition is
-not yet proven. Bound maps are preserved as unconnected Non-Color image nodes
-instead of being blended speculatively.
+Standard R3 detail maps are composed only when the detail flag, active slot,
+biased signed-remap sampler bit, finite vector-4-Z scale, packed-alpha mask,
+and absence of a custom material program all agree. R/G perturb the tangent
+normal, B modulates diffuse, and A modulates gloss. Custom-program, unsigned,
+flag-disabled, and incomplete records remain unconnected Non-Color data. The
+original vertex program also supplies a distance fade that is absent from the
+serialized material; Blender uses unit fade rather than guessing a
+camera-distance curve.
 
 R3 Tie primitives select their shader group with byte `+0x26`. With that
 game-specific selector, the source-authored
@@ -312,12 +317,13 @@ RGB under zero-alpha texels for opaque materials while still exposing the
 same alpha channel to authored mask and blend modes.
 
 Packed green remains disconnected because the public `useSpecular` bit is
-absent from every shader in the whole-disc corpus. Detail maps are
-multi-channel in most tested cases; their exact blend and scale semantics are
-not proven, so their imported Non-Color image nodes remain disconnected.
-Foliage uses a distinct material-vector family. Its shader textures remain
-available, but the unsafe family-specific vectors are not interpreted as
-ordinary surface color controls.
+absent from every shader in the whole-disc corpus. Standard R2 detail maps
+compose only when flag `0x10`, an active signed-remap sampler, finite
+vector-4-Z scale, and a packed-alpha mask are all present. Slot-only and
+incomplete records remain unconnected Non-Color data. Foliage uses a distinct
+material-vector family. Its shader textures remain available, but the unsafe
+family-specific vectors are not interpreted as ordinary surface color
+controls.
 
 The source of any additional emission tint and intensity within the six
 `0x5000` material vectors is not yet proven. Emissive color therefore uses the

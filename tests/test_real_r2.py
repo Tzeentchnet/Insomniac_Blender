@@ -12,6 +12,7 @@ from insomniac_asset_io.games.resistance_2.formats import AssetKind
 from insomniac_asset_io.games.resistance_2.reader import Resistance2Reader
 
 REAL_SOURCE = os.environ.get("R2_LEVEL_SOURCE")
+DETAIL_SOURCE = os.environ.get("R2_DETAIL_SOURCE")
 
 
 @unittest.skipUnless(REAL_SOURCE, "R2_LEVEL_SOURCE is not set")
@@ -134,6 +135,49 @@ class RealResistance2Tests(unittest.TestCase):
                 0,
             )
             self.assertTrue(reader.read_gameplay_regions())
+
+
+@unittest.skipUnless(DETAIL_SOURCE, "R2_DETAIL_SOURCE is not set")
+class RealResistance2DetailTests(unittest.TestCase):
+    def test_decodes_shotgun_signed_detail_material(self) -> None:
+        with GameSource.open(Path(DETAIL_SOURCE)) as source:
+            reader = Resistance2Reader(source)
+            shader = reader.read_shader(0x40A1_0458_0F82_28C8)
+
+            self.assertEqual(shader.lookup_path, "shotgun_r2/shotgun_r2")
+            self.assertTrue(shader.use_detail_map)
+            self.assertTrue(shader.detail_uses_signed_remap)
+            self.assertEqual(shader.detail_sampler_address, 0x0003_1101)
+            self.assertAlmostEqual(shader.detail_uv_scale, 7.944, places=3)
+            self.assertEqual(shader.detail_texture_id, 0x557B_8826)
+            self.assertEqual(
+                shader.texture_lookup_paths[3],
+                "artdepartment/detailtextures/brushed1_d",
+            )
+
+            packed = reader.read_texture(
+                shader.specular_texture_id,
+                lookup_path=shader.texture_lookup_paths[2],
+            )
+            detail = reader.read_texture(
+                shader.detail_texture_id,
+                lookup_path=shader.texture_lookup_paths[3],
+            )
+
+        self.assertEqual((packed.info.width, packed.info.height), (512, 512))
+        self.assertEqual(
+            (int(packed.rgba[..., 3].min()), int(packed.rgba[..., 3].max())),
+            (0, 255),
+        )
+        self.assertEqual((detail.info.width, detail.info.height), (256, 256))
+        self.assertEqual(
+            tuple(int(value) for value in detail.rgba.min(axis=(0, 1))),
+            (126, 107, 0, 136),
+        )
+        self.assertEqual(
+            tuple(int(value) for value in detail.rgba.max(axis=(0, 1))),
+            (128, 149, 248, 136),
+        )
 
 
 if __name__ == "__main__":
