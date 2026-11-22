@@ -69,6 +69,10 @@ class RealRatchetTodIsoTests(unittest.TestCase):
                     {"MASK": 10, "OPAQUE": 4, "BLEND": 1},
                 )
 
+                vine = reader.read_shrub(0x017EB070).meshes[0]
+                np.testing.assert_allclose(vine.uvs.min(axis=0), (0.0, -1.0))
+                np.testing.assert_allclose(vine.uvs.max(axis=0), (1.0, 0.0))
+
                 zone = reader.read_zones()[0]
                 self.assertEqual(len(zone.shrub_instances), 11857)
                 self.assertEqual(zone.unsupported_shrub_instances, 0)

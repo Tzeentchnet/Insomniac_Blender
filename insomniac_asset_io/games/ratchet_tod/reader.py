@@ -719,7 +719,7 @@ class RatchetTodReader(Resistance2Reader):
             shape=(vertex_count, 2),
             dtype=self.vertices.endian + "f2",
             buffer=vertices,
-            offset=0x0A,
+            offset=0x08,
             strides=(SHRUB_VERTEX_STRIDE, 2),
         ).astype(np.float32)
         if not np.isfinite(uvs).all():

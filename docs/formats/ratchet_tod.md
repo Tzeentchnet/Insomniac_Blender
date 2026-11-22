@@ -207,8 +207,9 @@ TOD Shrub vertices have stride `0x0E`, unlike RFoM's `0x10`-byte format:
 | Offset | Type | Meaning |
 |---:|---|---|
 | `0x00` | `i16[3]` | local position |
-| `0x06` | `u8[4]` | packed vertex metadata, retained as unverified |
-| `0x0A` | `f16[2]` | UV |
+| `0x06` | `u16` | opaque runtime word |
+| `0x08` | `f16[2]` | UV |
+| `0x0C` | `u16` | opaque runtime word |
 
 Positions use the same fixed-point yard scale as TOD UFrags:
 `raw * 0.9144 / 256`. The USA v02.00 disc contains 34 descriptors across

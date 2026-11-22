@@ -300,18 +300,16 @@ def _write_fixture(root: Path) -> None:
         )
     ):
         struct.pack_into(
-            ">3h4B2e",
+            ">4h2eH",
             vertices,
             0x240 + index * 0x0E,
             x,
             y,
             z,
-            64,
-            128,
-            192,
-            255,
+            0x2000,
             u,
             v,
+            0x3555,
         )
     struct.pack_into(
         ">12H",

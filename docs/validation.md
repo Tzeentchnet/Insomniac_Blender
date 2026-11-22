@@ -714,8 +714,9 @@ The current implementation was validated in Blender 5.2.2 LTS with:
   and one Action, plus a separately saved/reopened standalone TOD Material;
 - a saved TOD Metropolis level containing 6,228 objects and 313 mesh
   datablocks, plus separate saved Moby and Tie material imports;
-- a saved/reopened isolated Kerchu City Shrub with two objects, one shared
-  mesh, one game Material, and one packed game image;
+- a saved/reopened isolated Kerchu City Shrub `0x017EB070` with two objects,
+  one shared mesh, one game Material, one packed game image, corrected
+  `+0x08` UV decoding, and controlled Eevee material previews;
 - a saved/reopened Kerchu City level with 23,683 objects, 349 mesh
   datablocks, 620 game Materials, and 1,321 game images, including exactly
   11,857 finite Shrub placements sharing 15 mesh datablocks;
