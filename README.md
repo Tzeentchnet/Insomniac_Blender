@@ -49,7 +49,8 @@ both fields from `PARAM.SFO`.
 | Retail names | Gameplay records named from `ps3debug.dat` on single-group levels; assets keep deterministic `Moby_XXXX`, `Tie_XXXXXXXX`, and `Material_XXXX` names |
 | Level collision | Optional world, Tie, and collision-only placed triangle meshes from `ps3levelcoll.dat`; disabled by default |
 | Level lighting | Ambient colour and two directional lights as Sun lamps and a World |
-| Lightmaps, light volumes, renderable VFX, cubemaps, and embedded gameplay payload semantics | Not yet implemented |
+| Environment cubemaps | Decoded to equirectangular images on the level World (HDR exponent kept in alpha) |
+| Lightmaps, light volumes, renderable VFX, and embedded gameplay payload semantics | Not yet implemented |
 
 See [Resistance: Fall of Man formats](docs/formats/resistance_fom.md) and
 [known issues](docs/known_issues.md) for the verified layouts and remaining
@@ -79,7 +80,9 @@ fields from `PARAM.SFO` before extraction.
 | Retail names | Prototypes, placements, gameplay Mobys, and shaders named from each level's `DEBUG.DAT`; numeric fallbacks otherwise. The bundled catalog lists the retail prototype and shader names |
 | Level collision | Optional world and Tie triangle collision from the separate raw `collision.dat`, with per-face retail collision-material names and a "no wall jump" flag; disabled by default |
 | Level lighting and fog | Ambient colour, two directional lights, fog range, and bloom settings as Sun lamps and a World |
-| Moby collision, light volumes, VFX, and cubemaps | Not yet implemented |
+| Baked lightmaps | Per-placement Tie lightmaps (packed into one atlas) and shared UFrag lightmaps, multiplied into the albedo |
+| Environment cubemaps | Decoded to equirectangular images on the level World (HDR exponent kept in alpha) |
+| Moby collision, light volumes, and VFX | Not yet implemented |
 
 See [Tools of Destruction formats](docs/formats/ratchet_tod.md) and
 [known issues](docs/known_issues.md) for the verified old-engine layouts and

@@ -325,6 +325,8 @@ class PlacedInstance:
     group: int = 0
     lightmap_index: int | None = None
     lightmap_zone_tuid: int | None = None
+    # Authored per-placement baked-light scale, where a game stores one.
+    lightmap_scale: float | None = None
     source_guid: str | None = None
     # Old-engine gameplay class number and its kVTGenEnums name.
     class_id: int | None = None

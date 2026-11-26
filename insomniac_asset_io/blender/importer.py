@@ -22,6 +22,10 @@ from ..core.collision import (
 )
 from ..core.errors import InsomniacError
 from ..games.level_environment import LevelEnvironment
+from ..games.old_engine_cubemaps import (
+    EnvironmentCubemap,
+    sample_directions,
+)
 from ..games.resistance_2.formats import (
     AssetKind,
     CollisionMesh,
@@ -263,6 +267,15 @@ class _MaterialFactory:
             )
         ):
             return
+        # R3 zone lightmaps are large and reduced 4x; TOD's per-placement
+        # bakes are 32-256 texels and keep their resolution.
+        downsample = int(
+            getattr(
+                self.reader,
+                "tie_lightmap_atlas_downsample",
+                _TIE_LIGHTMAP_ATLAS_DOWNSAMPLE,
+            )
+        )
         references = {
             (instance.lightmap_zone_tuid, instance.lightmap_index)
             for zone in zones
@@ -325,14 +338,8 @@ class _MaterialFactory:
                 LOGGER.warning(message)
                 self.warnings.append(message)
                 continue
-            width = max(
-                1,
-                info.width // _TIE_LIGHTMAP_ATLAS_DOWNSAMPLE,
-            )
-            height = max(
-                1,
-                info.height // _TIE_LIGHTMAP_ATLAS_DOWNSAMPLE,
-            )
+            width = max(1, info.width // downsample)
+            height = max(1, info.height // downsample)
             if directional_enabled:
                 directional_infos = directional_infos_by_zone.get(zone_tuid)
                 if directional_infos is None:
@@ -532,8 +539,12 @@ class _MaterialFactory:
         image["insomniac_texture_role"] = texture_role
         image["insomniac_asset_scope"] = scope
         image["insomniac_lightmap_count"] = len(placements)
-        image["insomniac_lightmap_downsample"] = (
-            _TIE_LIGHTMAP_ATLAS_DOWNSAMPLE
+        image["insomniac_lightmap_downsample"] = int(
+            getattr(
+                self.reader,
+                "tie_lightmap_atlas_downsample",
+                _TIE_LIGHTMAP_ATLAS_DOWNSAMPLE,
+            )
         )
         image[_IMAGE_HAS_ALPHA_KEY] = False
         return image
@@ -907,33 +918,39 @@ class _MaterialFactory:
         *,
         variant_kind: str,
         lightmapped: bool = False,
+        vertex_colors: bool = True,
     ) -> bpy.types.Material:
         base_material = self.material(shader_tuid)
-        if not self.enabled:
+        if not self.enabled or not (vertex_colors or lightmapped):
             return base_material
-        key = (variant_kind, shader_tuid, lightmapped)
+        key = (variant_kind, shader_tuid, lightmapped, vertex_colors)
         cached = self.vertex_lit_materials.get(key)
         if cached is not None:
             return cached
         material = base_material.copy()
-        suffix = "_Lightmap" if lightmapped else ""
-        material.name = (
-            f"{base_material.name}_{variant_kind}_Vertex_Lighting{suffix}"
-        )
-        material["insomniac_vertex_lit_material"] = True
+        if vertex_colors:
+            suffix = "_Lightmap" if lightmapped else ""
+            material.name = (
+                f"{base_material.name}_{variant_kind}_Vertex_Lighting"
+                f"{suffix}"
+            )
+        else:
+            material.name = f"{base_material.name}_{variant_kind}_Lightmap"
+        material["insomniac_vertex_lit_material"] = vertex_colors
         material["insomniac_vertex_lit_kind"] = variant_kind
         material["insomniac_tie_lightmap_material"] = lightmapped
         principled = material.node_tree.nodes.get("Principled BSDF")
         if principled is not None:
             color_socket = principled.inputs["Base Color"]
             color_output = self._disconnect_color_input(material, color_socket)
-            color_output = self._multiply_vertex_color(
-                material,
-                principled,
-                color_output,
-                prefix=f"R3_{variant_kind}",
-                node_label=f"R3 {variant_kind.lower()}",
-            )
+            if vertex_colors:
+                color_output = self._multiply_vertex_color(
+                    material,
+                    principled,
+                    color_output,
+                    prefix=f"R3_{variant_kind}",
+                    node_label=f"R3 {variant_kind.lower()}",
+                )
             if (
                 variant_kind == "TIE"
                 and lightmapped
@@ -3750,7 +3767,12 @@ def _static_asset_geometry_and_materials(
     variant_kind: str,
 ) -> tuple[list[MeshGeometry], list[bpy.types.Material]]:
     vertex_lit = any(mesh.colors is not None for mesh in asset.meshes)
-    if not vertex_lit or not asset.shader_tuids:
+    lightmappable = (
+        variant_kind == "TIE"
+        and materials.tie_lightmap_atlas is not None
+        and any(mesh.secondary_uvs is not None for mesh in asset.meshes)
+    )
+    if not (vertex_lit or lightmappable) or not asset.shader_tuids:
         return (
             asset.meshes,
             [
@@ -3783,6 +3805,7 @@ def _static_asset_geometry_and_materials(
                     asset.shader_tuids[shader_index],
                     variant_kind=variant_kind,
                     lightmapped=lightmapped,
+                    vertex_colors=vertex_lit,
                 )
             )
         geometries.append(replace(mesh, shader_index=material_slot))
@@ -4443,6 +4466,19 @@ def import_level(
             except InsomniacError as exc:
                 warnings.append(f"Level lighting and fog skipped: {exc}")
             else:
+                cubemaps: list[EnvironmentCubemap] = []
+                read_cubemaps = getattr(
+                    reader,
+                    "read_environment_cubemaps",
+                    None,
+                )
+                if environment is not None and callable(read_cubemaps):
+                    try:
+                        cubemaps = read_cubemaps()
+                    except InsomniacError as exc:
+                        warnings.append(
+                            f"Environment cubemaps skipped: {exc}"
+                        )
                 if environment is not None:
                     result.objects += _import_level_environment(
                         context,
@@ -4450,7 +4486,14 @@ def import_level(
                         root,
                         environment,
                         f"{_reader_asset_prefix(reader)}_{level_name}",
+                        cubemaps=cubemaps,
+                        axis_conversion_degrees=(
+                            _reader_axis_conversion_x_degrees(reader)
+                            if options.convert_axes
+                            else 0.0
+                        ),
                     )
+                    result.images += len(cubemaps)
 
     # Level materials are built lazily while terrain, ties and mobys are
     # placed, so release only after the last one.
@@ -4468,6 +4511,9 @@ def _import_level_environment(
     root: bpy.types.Object,
     environment: LevelEnvironment,
     name: str,
+    *,
+    cubemaps: Iterable[EnvironmentCubemap] = (),
+    axis_conversion_degrees: float = 0.0,
 ) -> int:
     """Create the level's directional lights and an ambient/fog World.
 
@@ -4540,9 +4586,74 @@ def _import_level_environment(
             sort_keys=True,
             separators=(",", ":"),
         )
+    for slot, cubemap in enumerate(cubemaps):
+        image = _equirectangular_cubemap_image(
+            f"{name}_Cubemap_{cubemap.index}",
+            cubemap,
+            axis_conversion_degrees,
+        )
+        if world.node_tree is not None:
+            node = world.node_tree.nodes.new("ShaderNodeTexEnvironment")
+            node.name = f"Insomniac_Cubemap_{cubemap.index}"
+            node.label = f"Environment cubemap {cubemap.index} (unlinked)"
+            node.image = image
+            node.location = (-600.0, 300.0 - slot * 280.0)
     root["insomniac_world"] = world.name
     context.scene.world = world
     return len(environment.lights)
+
+
+def _equirectangular_cubemap_image(
+    name: str,
+    cubemap: EnvironmentCubemap,
+    axis_conversion_degrees: float,
+) -> bpy.types.Image:
+    """Resample a source-space cube into a Blender equirectangular image.
+
+    Pixels map through Blender's Environment Texture convention, then back
+    through the level root's axis conversion into the cube's source space.
+    """
+
+    width = cubemap.size * 4
+    height = cubemap.size * 2
+    u = (np.arange(width) + 0.5) / width
+    v = (np.arange(height) + 0.5) / height
+    theta = (0.5 - u) * 2.0 * np.pi
+    latitude = (v - 0.5) * np.pi
+    lat, lon = np.meshgrid(latitude, theta, indexing="ij")
+    blender = np.stack(
+        (
+            np.cos(lat) * np.cos(lon),
+            np.cos(lat) * np.sin(lon),
+            np.sin(lat),
+        ),
+        axis=-1,
+    ).reshape(-1, 3)
+    angle = math.radians(axis_conversion_degrees)
+    cosine, sine = math.cos(angle), math.sin(angle)
+    # Inverse of the root's rotation about X.
+    source = np.column_stack(
+        (
+            blender[:, 0],
+            cosine * blender[:, 1] + sine * blender[:, 2],
+            -sine * blender[:, 1] + cosine * blender[:, 2],
+        )
+    )
+    rgba = sample_directions(cubemap.faces, source)
+    # Old-engine cubes are HDR: RGB is a tint and alpha a shared exponent
+    # (colour ~ rgb * exp2(alpha * scale + bias), scale and bias unknown),
+    # so alpha is kept as a packed data channel, not as transparency.
+    image = bpy.data.images.new(name, width, height, alpha=True)
+    image.alpha_mode = "CHANNEL_PACKED"
+    pixels = rgba.astype(np.float32) / 255.0
+    image.pixels.foreach_set(pixels.ravel())
+    image.pack()
+    image["insomniac_texture_role"] = "environment_cubemap"
+    image["insomniac_cubemap_index"] = cubemap.index
+    image["insomniac_cubemap_face_size"] = cubemap.size
+    image["insomniac_texture_format"] = f"0x{cubemap.format_code:02X}"
+    image["insomniac_cubemap_alpha"] = "HDR exponent (scale and bias unknown)"
+    return image
 
 
 def _new_collection(
@@ -5428,6 +5539,9 @@ def _create_instance_object(
         obj["insomniac_group"] = instance.group
     if instance.lightmap_index is not None:
         obj["insomniac_lightmap_index"] = instance.lightmap_index
+    lightmap_scale = getattr(instance, "lightmap_scale", None)
+    if lightmap_scale is not None:
+        obj["insomniac_lightmap_scale"] = lightmap_scale
     source_guid = getattr(instance, "source_guid", None)
     if source_guid:
         obj["insomniac_source_guid"] = source_guid

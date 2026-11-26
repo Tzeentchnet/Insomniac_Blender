@@ -40,7 +40,11 @@ byte, and the volume half-extent were corrected or established on our disc.
 
 The old-engine fog, bloom, and lighting-root offsets (TOD `0x7100` and
 `0x8B00`, RFoM `0x8A00`) follow ReLunacy's research and were checked on our
-discs.
+discs. The TOD baked-lightmap pools (`0x5400`/`0x5410`), the Tie and UFrag
+lightmap indices, and the Tie lightmap-UV stream also follow ReLunacy; the
+stream's start offset was corrected on our disc. The old-engine cubemap
+layout (`0x5920` with `0x9650`/`0x9950` payloads) and its HDR alpha encoding
+also follow ReLunacy.
 
 Tools of Destruction animation behavior was additionally checked through
 bounded static control-flow analysis using the MIT-licensed **Qwark's

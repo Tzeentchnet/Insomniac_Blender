@@ -387,12 +387,25 @@ light volume. The importer creates the two Sun lamps and an ambient World,
 as for Tools of Destruction. RFoM has no `0x7100` fog record, and the light
 volumes are not decoded. ReLunacy published this layout.
 
+### Environment cubemaps
+
+Section `0x5920` holds `0x20` texture descriptors with the cube bit set.
+Payloads are in MAIN memory, relative to section ``0x9950``: six faces in
+`+X, -X, +Y, -Y, +Z, -Z` order, each with its full mip chain padded to 128
+bytes. RFoM cubes are 64x64 R5G6B5 six-mip cubes (`0x2B00` per face). Face orientation follows the OpenGL cube-map convention:
+texels on either side of every cube edge match exactly under it, and differ
+under flipped alternatives. The importer decodes mip 0 and adds each cube to
+the level World as an unlinked Environment Texture node, resampled to an
+equirectangular image in Blender's axes. The cubes are HDR: RGB is a tint
+and alpha a shared exponent whose scale and bias are unknown, so alpha is
+kept as a channel-packed data channel. ReLunacy published this layout.
+
 ## Current limitations
 
 - The family-3 `ps3levelcoll.dat` source table has not been correlated with a
   proven gameplay owner.
 - Directional lightmap textures in section `0x5500` are not imported.
-- Light volumes, renderable VFX, cubemaps, audio payloads, and the opaque
+- Light volumes, renderable VFX, audio payloads, and the opaque
   bodies of embedded gameplay effect/marker payloads are not decoded.
 - Shrub vertex colors, vegetation wind, foliage custom normals, and
   camera-facing billboard behavior are not reproduced.

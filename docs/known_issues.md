@@ -31,8 +31,9 @@ and collision-only placed triangle geometry. The rare placed family does not
 correlate with the proven render placement tables, so its packed source index
 is preserved without assigning an unverified gameplay asset identity.
 The global ambient and two directional lights are imported as Sun lamps and
-a World. Directional lightmaps, light volumes, VFX, cubemaps, audio payloads,
-and renderable effect payloads are not decoded.
+a World, and environment cubemaps as World images. Directional lightmaps,
+light volumes, VFX, audio payloads, and renderable effect payloads are not
+decoded.
 
 Shrub meshes and clustered placements are imported. Foliage branch geometry
 and sprite cards are imported from the first authored LOD. Runtime vegetation
@@ -89,10 +90,16 @@ imported from the first authored LOD with masked, double-sided materials.
 Shrub meshes and clustered placements are imported from the embedded
 old-engine layout. Runtime vegetation wind, packed Shrub vertex metadata,
 Foliage custom normals, and camera-facing billboarding are not reproduced.
+Baked light-colour lightmaps are applied to lit Tie placements and UFrags
+(albedo × lightmap). The per-placement light scales, the light-direction
+pool, and the 11 Metropolis Tie meshes whose lightmap UVs are out of range
+are not used, and Blender lamps add to the baked light.
 Level fog, bloom, ambient colour, and the two directional lights are imported
 as Sun lamps and a World (the "Lighting and fog" level option, on by
-default); the fog is an authored range, not a visual match. Light volumes,
-VFX, cubemaps, and audio remain outside the current level importer.
+default); the fog is an authored range, not a visual match. Environment
+cubemaps are added to the World as unlinked equirectangular images; their
+HDR exponent (alpha) has an unknown scale. Light volumes, VFX, and audio
+remain outside the current level importer.
 
 ## Resistance: Burning Skies (experimental)
 

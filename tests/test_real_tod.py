@@ -396,8 +396,38 @@ class RealRatchetTodTests(unittest.TestCase):
             zone = reader.read_zones()[0]
             self.assertTrue(zone.terrain_meshes)
             self.assertTrue(zone.tie_instances)
+            lit_ties = [
+                instance
+                for instance in zone.tie_instances
+                if instance.lightmap_index is not None
+            ]
+            self.assertEqual(len(lit_ties), 1728)
+            self.assertEqual(
+                len({instance.lightmap_index for instance in lit_ties}),
+                1728,
+            )
+            self.assertTrue(
+                all(instance.lightmap_scale for instance in lit_ties)
+            )
+            self.assertEqual(
+                sum(
+                    mesh.lightmap_index is not None
+                    for mesh in zone.terrain_meshes
+                ),
+                1377,
+            )
+            self.assertEqual(len(zone.lightmaps), 23)
+            lit_tie = reader.read_tie(lit_ties[0].asset_tuid)
+            self.assertTrue(
+                any(mesh.secondary_uvs is not None for mesh in lit_tie.meshes)
+            )
             self.assertEqual(len(zone.foliage_instances), 757)
             self.assertEqual(zone.unsupported_foliage_instances, 0)
+
+            cubemaps = reader.read_environment_cubemaps()
+            self.assertEqual(len(cubemaps), 1)
+            self.assertEqual(cubemaps[0].faces.shape, (6, 32, 32, 4))
+            self.assertEqual(cubemaps[0].format_code, 0x85)
 
             environment = reader.read_level_environment()
             self.assertEqual(environment.version, 2)

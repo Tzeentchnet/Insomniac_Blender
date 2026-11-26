@@ -119,6 +119,10 @@ class ResistanceFomReader(RatchetTodReader):
     material_emission_uses_albedo = False
     # RFoM has no proven prototype name table; only instances are named.
     provides_source_names = False
+    # RFoM lightmaps (0x5500) are not decoded yet.
+    terrain_lightmaps = False
+    tie_instance_lightmaps = False
+    cubemap_resident_section = 0x9950
 
     def __init__(
         self,

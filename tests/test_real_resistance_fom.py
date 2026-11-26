@@ -114,6 +114,15 @@ class RealResistanceFomDebugNameTests(unittest.TestCase):
             self.assertTrue((prepared / "game_ps3debug.dat").is_file())
             with GameSource.open(prepared) as source:
                 reader = ResistanceFomReader(source)
+                cubemaps = reader.read_environment_cubemaps()
+                self.assertTrue(cubemaps)
+                self.assertTrue(
+                    all(
+                        cubemap.faces.shape == (6, 64, 64, 4)
+                        and cubemap.format_code == 0x84
+                        for cubemap in cubemaps
+                    )
+                )
                 environment = reader.read_level_environment()
                 self.assertEqual(environment.version, 1)
                 self.assertEqual(len(environment.lights), 2)

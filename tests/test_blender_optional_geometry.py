@@ -39,6 +39,9 @@ if bpy is not None:
     from insomniac_asset_io.core.collision import (
         CollisionMesh as LevelCollisionMesh,
     )
+    from insomniac_asset_io.games.old_engine_cubemaps import (
+        EnvironmentCubemap,
+    )
     from insomniac_asset_io.games.level_environment import (
         LevelBloom,
         LevelEnvironment,
@@ -1197,6 +1200,12 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
             ),
             source="fixture",
         )
+        faces = np.zeros((6, 2, 2, 4), dtype=np.uint8)
+        faces[2, ..., :3] = (10, 20, 250)
+        faces[..., 3] = 255
+        reader.read_environment_cubemaps = lambda: [
+            EnvironmentCubemap(index=0, size=2, format_code=0x85, faces=faces)
+        ]
 
         result = import_level(
             bpy.context,
@@ -1231,6 +1240,21 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
         self.assertEqual(
             json.loads(world["insomniac_bloom"])["extract_exponent"],
             2.2,
+        )
+        cube_node = world.node_tree.nodes["Insomniac_Cubemap_0"]
+        self.assertFalse(cube_node.outputs["Color"].is_linked)
+        self.assertEqual(tuple(cube_node.image.size), (8, 4))
+        self.assertEqual(
+            cube_node.image["insomniac_texture_role"],
+            "environment_cubemap",
+        )
+        # With axes unconverted, source +Y (face 2) is Blender +Y; the
+        # equirectangular column for +Y sits at u = 0.25, mid-height.
+        pixels = np.asarray(cube_node.image.pixels[:]).reshape(4, 8, 4)
+        np.testing.assert_allclose(
+            pixels[1, 2, :3],
+            (10 / 255, 20 / 255, 250 / 255),
+            atol=1e-3,
         )
 
         disabled = import_level(

@@ -170,6 +170,9 @@ or evidence-blocked work and are not represented as implemented features.
   and scents (extension.md item 5).
 - [x] TOD/RFoM level lighting and fog: ambient, two directional lights, fog
   range, and bloom settings (extension.md item 8).
+- [x] TOD baked lightmaps on Ties and UFrags (extension.md item 6).
+- [x] TOD/RFoM environment cubemaps (extension.md item 7).
+- [ ] RFoM baked lightmaps (`0x5500`) and the TOD light-direction pool.
 - [ ] R2/R3 gameplay class names: the `BUILT/GAME/DEBUG.DAT` enum table is
   present, but the class number has not been located in their Moby records.
 - [ ] Global R3 effect-slot wiring: the slots contain unrelated runtime

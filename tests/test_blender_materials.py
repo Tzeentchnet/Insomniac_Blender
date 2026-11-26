@@ -675,6 +675,100 @@ class BlenderMaterialTests(unittest.TestCase):
             .node_tree.nodes.get("R3_TIE_Lightmap_Atlas")
         )
 
+    def test_tod_tie_lightmap_without_vertex_colors(self) -> None:
+        shader_tuid = 0x1234
+        albedo_id = 0x200
+        shader = ShaderInfo(
+            shader_tuid,
+            albedo_id,
+            None,
+            None,
+            None,
+            material_word=0,
+        )
+        reader = _MaterialReader(
+            "RATCHET_TOD",
+            shader,
+            {albedo_id: self._decoded_texture(albedo_id)},
+        )
+        lightmap = self._decoded_texture(0x5400, format_code=0x86, value=96)
+        reader.tie_instance_lightmaps = True
+        reader.tie_lightmap_atlas_downsample = 1
+        reader.zone_lightmap_infos = lambda _zone_tuid: {3: lightmap.info}
+        reader.read_zone_lightmap = lambda _zone, _index: lightmap
+        factory = _MaterialFactory(reader, True, [])
+        factory.prepare_tie_lightmap_atlas(
+            (
+                Zone(
+                    tuid=0,
+                    tie_instances=[
+                        PlacedInstance(
+                            asset_tuid=1,
+                            instance_tuid=2,
+                            name="Tie",
+                            matrix=np.eye(4, dtype=np.float32),
+                            lightmap_index=3,
+                            lightmap_zone_tuid=0,
+                            lightmap_scale=1.5,
+                        )
+                    ],
+                    terrain_meshes=[],
+                    shader_tuids=(),
+                ),
+            )
+        )
+        self.assertEqual(
+            factory.tie_lightmap_atlas["insomniac_lightmap_downsample"],
+            1,
+        )
+
+        positions = np.asarray(
+            ((0, 0, 0), (1, 0, 0), (0, 1, 0)),
+            dtype=np.float32,
+        )
+        uvs = np.zeros((3, 2), dtype=np.float32)
+        indices = np.asarray((0, 1, 2), dtype=np.int32)
+        geometries, routed_materials = (
+            _static_asset_geometry_and_materials(
+                factory,
+                TieAsset(
+                    tuid=1,
+                    meshes=[
+                        MeshGeometry(
+                            shader_index=0,
+                            positions=positions,
+                            uvs=uvs,
+                            indices=indices,
+                        ),
+                        MeshGeometry(
+                            shader_index=0,
+                            positions=positions,
+                            uvs=uvs,
+                            indices=indices,
+                            secondary_uvs=uvs,
+                        ),
+                    ],
+                    shader_tuids=(shader_tuid,),
+                ),
+                variant_kind="TIE",
+            )
+        )
+        unlit = routed_materials[geometries[0].shader_index]
+        lit = routed_materials[geometries[1].shader_index]
+        self.assertIs(unlit, factory.material(shader_tuid))
+        self.assertTrue(lit.name.endswith("_TIE_Lightmap"))
+        self.assertFalse(lit["insomniac_vertex_lit_material"])
+        nodes = lit.node_tree.nodes
+        self.assertIsNone(nodes.get("R3_TIE_Vertex_Color"))
+        self.assertIsNotNone(nodes.get("R3_TIE_Lightmap_Atlas"))
+        self.assertEqual(
+            nodes["Principled BSDF"]
+            .inputs["Base Color"]
+            .links[0]
+            .from_node,
+            nodes["R3_TIE_Lightmap_Multiply"],
+        )
+
     def test_all_supported_games_import_verified_data_maps(self) -> None:
         texture_ids = {
             "albedo": 0x710,

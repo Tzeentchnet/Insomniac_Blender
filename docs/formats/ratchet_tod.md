@@ -377,6 +377,41 @@ ReLunacy (`docs/reverse/tod_volumes_clues_paths.md`) published the section
 IDs and most layouts. The Clue and area record layouts, the shape byte, and
 the volume half-extent were corrected or settled on our disc.
 
+## Baked lightmaps
+
+`main.dat` section `0x5400` is a pool of baked light-colour textures and
+`0x5410` a parallel pool of light-direction textures. Both use the `0x20`
+texture descriptor of `0x5200`; the low two bits of the format word give the
+GCM location (1 = LOCAL, relative to `textures.dat`). On Metropolis each
+pool has 1,751 entries, nearly all LOCAL DXT1, A8R8G8B8, or R5G6B5.
+
+- A Tie placement's `u16` at `0x5A` indexes the pool (`0xFFFF` = unlit). On
+  Metropolis 1,728 of 4,848 placements are lit, each with its own entry.
+  Its `f32` at `0x60` (equal to `0x64`) is a per-placement light scale that
+  ReLunacy rates STRONG but unproven; the importer keeps it as
+  `insomniac_lightmap_scale` and does not apply it.
+- Tie lightmap UVs are a per-mesh Half2 stream that follows the Tie's
+  vertex block: at `vertex start + max((vertex index + count) * 0x14) +
+  index * 4`, where the mesh's `+0x0E` byte gates the stream and `+0x06`
+  is the index. The header's `+0x18` is not this offset. 2,071 of the 2,082
+  gated Metropolis meshes decode inside 0..1; the rest stay unlit. All
+  placements of a Tie share one unwrap and each lit placement has its own
+  texture, so lit placements sample one packed atlas through per-object UV
+  scale and offset attributes.
+- A UFrag's `u16` at `0x4E` indexes the pool, and vertex `+0x0C` holds its
+  Half2 lightmap UV. The textures are shared atlases: 1,377 of Metropolis's
+  1,987 UFrags use 23 of them. The UFrag's packed scales at `0x7C`/`0x7E`
+  are not applied.
+
+Across all 20 levels, 36,946 Tie placements and 36,825 UFrags are lit, and
+every index resolves to a LOCAL pool entry.
+
+Lit materials multiply the albedo by the baked light colour, as for R3. The
+direction pool is not composited. In game the bake replaces dynamic
+lighting, but Blender also applies the scene's lamps, including the
+imported Sun lamps. ReLunacy published the pool sections, the instance and
+UFrag indices, and the Tie UV stream.
+
 ## Fog, bloom, and global lighting
 
 `main.dat` holds one `0xF0` fog record in section `0x7100` and one `0x80`
@@ -406,6 +441,19 @@ makes it the scene World. Fog and bloom values are also kept as World custom
 properties. How the fog coordinate reaches the GPU is unknown, so the fog is
 an authored setting, not a visual match. The `0x8C00` light volumes and
 `0x8D00` voxel data are not decoded. ReLunacy published these offsets.
+
+### Environment cubemaps
+
+Section `0x5920` holds `0x20` texture descriptors with the cube bit set.
+Payloads are in MAIN memory, relative to section ``0x9650``: six faces in
+`+X, -X, +Y, -Y, +Z, -Z` order, each with its full mip chain padded to 128
+bytes. Every TOD cube is a swizzled 32x32 A8R8G8B8 six-mip cube (`0x1580` per face); levels have one to seven, and UFrag `0x59` selects one. Face orientation follows the OpenGL cube-map convention:
+texels on either side of every cube edge match exactly under it, and differ
+under flipped alternatives. The importer decodes mip 0 and adds each cube to
+the level World as an unlinked Environment Texture node, resampled to an
+equirectangular image in Blender's axes. The cubes are HDR: RGB is a tint
+and alpha a shared exponent whose scale and bias are unknown, so alpha is
+kept as a channel-packed data channel. ReLunacy published this layout.
 
 ## Level collision
 

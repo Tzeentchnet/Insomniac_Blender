@@ -9,7 +9,7 @@ import numpy as np
 
 from ...core.binary import IghwFile, Section
 from ...core.collision import CollisionScene as LevelCollisionScene
-from ...core.errors import FormatError, MissingResourceError
+from ...core.errors import FormatError, InsomniacError, MissingResourceError
 from ...core.source import GameSource
 from ..resistance_2.animations import (
     AnimationProfile,
@@ -47,6 +47,7 @@ from ..class_names import (
 )
 from .gameplay_context import read_tod_gameplay_context
 from ..level_environment import LevelEnvironment, parse_tod_environment
+from ..old_engine_cubemaps import EnvironmentCubemap, read_cubemaps
 from .debug_names import (
     GAME_DEBUG_CACHE_NAME,
     MAX_DEBUG_DAT_SIZE,
@@ -72,6 +73,12 @@ SECT_SHRUB = 0xB100
 SECT_SHRUB_INSTANCES = 0x9540
 SECT_FOLIAGE_INSTANCES = 0x9340
 SECT_GAMEPLAY_MOBYS = 0x7340
+# Baked light-colour pool, indexed by Tie instance +0x5A and UFrag +0x4E;
+# 0x5410 is the parallel light-direction pool (not composited).
+SECT_LIGHTMAPS = 0x5400
+NO_LIGHTMAP = 0xFFFF
+# Texture descriptor location bits (CELL_GCM): 1 = LOCAL (textures.dat).
+TEXTURE_LOCATION_LOCAL = 1
 
 MOBY_STRIDE = 0xC0
 MOBY_BANGLE_STRIDE = 0x08
@@ -136,6 +143,12 @@ class RatchetTodReader(Resistance2Reader):
     material_base_color_factor_supported = False
     material_emission_uses_albedo = False
     provides_source_names = True
+    # Baked lighting from main.dat 0x5400: one texture per lit Tie
+    # placement (sampled through the Tie's Half2 lightmap-UV stream) and
+    # shared atlases for UFrags (sampled through vertex +0x0C).
+    terrain_lightmaps = True
+    tie_instance_lightmaps = True
+    tie_lightmap_atlas_downsample = 1
 
     def __init__(self, source: GameSource) -> None:
         self.source = source
@@ -848,6 +861,7 @@ class RatchetTodReader(Resistance2Reader):
         vertex_section = self.vertices.require_section(SECT_LEVEL_VERTICES)
         index_section = self.vertices.require_section(SECT_LEVEL_INDICES)
         descriptors: list[tuple[int, int, int, int, int]] = []
+        lightmap_uv_index: list[int | None] = []
         max_vertex_end = 0
         for mesh_index in range(mesh_count):
             mesh = mesh_table + mesh_index * TIE_MESH_STRIDE
@@ -859,6 +873,11 @@ class RatchetTodReader(Resistance2Reader):
                 self.main.u16(mesh + 0x28),
             )
             descriptors.append(descriptor)
+            # +0x0E gates the Half2 lightmap-UV stream and +0x06 indexes
+            # it in Half2 elements.
+            lightmap_uv_index.append(
+                self.main.u16(mesh + 6) if self.main.u8(mesh + 0x0E) else None
+            )
             max_vertex_end = max(
                 max_vertex_end,
                 (descriptor[2] + descriptor[3]) * 0x14,
@@ -881,7 +900,7 @@ class RatchetTodReader(Resistance2Reader):
             vertex_index,
             vertex_count,
             shader_index,
-        ) in descriptors:
+        ), uv_index in zip(descriptors, lightmap_uv_index):
             index_offset = index_index * 2
             index_length = index_count * 2
             if index_offset + index_length > index_section.length:
@@ -910,6 +929,12 @@ class RatchetTodReader(Resistance2Reader):
                     f"Tie_{tuid:08X}: shader index {shader_index} is "
                     f"outside the shader table"
                 )
+            if uv_index is not None:
+                mesh.secondary_uvs = self._tie_lightmap_uvs(
+                    vertex_section,
+                    vertex_start + max_vertex_end + uv_index * 4,
+                    vertex_count,
+                )
             meshes.append(mesh)
             shader_tuids.append(shader_index)
         return TieAsset(
@@ -917,6 +942,39 @@ class RatchetTodReader(Resistance2Reader):
             meshes=meshes,
             shader_tuids=tuple(shader_tuids),
         )
+
+    def _tie_lightmap_uvs(
+        self,
+        vertex_section,
+        offset: int,
+        vertex_count: int,
+    ) -> np.ndarray | None:
+        """Read a Tie mesh's Half2 lightmap UVs, or None if implausible.
+
+        The stream follows the Tie's 0x14-stride vertex block. On Metropolis
+        2,071 of 2,082 gated meshes decode inside 0..1; the rest are left
+        unlit, as ReLunacy also validates per mesh.
+        """
+
+        length = vertex_count * 4
+        if offset + length > vertex_section.length:
+            return None
+        uvs = np.frombuffer(
+            self.source.read_slice(
+                self.vertices_path,
+                vertex_section.offset + offset,
+                length,
+            ),
+            dtype=self.main.endian + "f2",
+            count=vertex_count * 2,
+        ).astype(np.float32).reshape((vertex_count, 2))
+        if (
+            not np.isfinite(uvs).all()
+            or uvs.min() < -0.01
+            or uvs.max() > 1.01
+        ):
+            return None
+        return uvs
 
     def read_shrub(self, tuid: int) -> TieAsset:
         base = self._pointer(AssetKind.SHRUB, tuid).offset
@@ -1316,6 +1374,77 @@ class RatchetTodReader(Resistance2Reader):
             )
         return locations
 
+    @cached_property
+    def _lightmap_infos(self) -> dict[int, TextureInfo]:
+        """The ``0x5400`` baked light-colour pool, keyed by pool index."""
+
+        section = self.main.section(SECT_LIGHTMAPS)
+        if section is None:
+            return {}
+        if section.length != TEXTURE_STRIDE:
+            raise FormatError(
+                f"{self.main_path}: lightmap record stride is "
+                f"{section.length:#x}; expected {TEXTURE_STRIDE:#x}"
+            )
+        textures_size = self.source.size(self.textures_path)
+        infos: dict[int, TextureInfo] = {}
+        for index in range(section.count):
+            base = section.offset + index * TEXTURE_STRIDE
+            format_word = self.main.u16(base + 6)
+            if format_word & 3 != TEXTURE_LOCATION_LOCAL:
+                # MAIN-memory payloads are not located yet.
+                continue
+            # The full GCM format byte keeps the linear (0x20) bit.
+            format_code = (format_word >> 8) & ~0x40
+            width = self.main.u16(base + 0x18)
+            height = self.main.u16(base + 0x1A)
+            offset = self.main.u32(base) & 0x7FFF_FFFF
+            try:
+                length = texture_mip_size(width, height, format_code)
+            except InsomniacError:
+                continue
+            if offset + length > textures_size:
+                raise FormatError(
+                    f"{self.textures_path}: lightmap {index} payload "
+                    "overruns the resource"
+                )
+            infos[index] = TextureInfo(
+                id=base,
+                tuid=base,
+                format_code=format_code,
+                mip_count=self.main.u16(base + 4),
+                width=width,
+                height=height,
+                offset=offset,
+                length=length,
+            )
+        return infos
+
+    def zone_lightmap_infos(self, zone_tuid: int) -> dict[int, TextureInfo]:
+        del zone_tuid
+        return self._lightmap_infos
+
+    def read_zone_lightmap(
+        self,
+        zone_tuid: int,
+        lightmap_index: int,
+    ) -> DecodedTexture:
+        del zone_tuid
+        info = self._lightmap_infos.get(lightmap_index)
+        if info is None:
+            raise MissingResourceError(
+                f"{self.main_path}: lightmap {lightmap_index} is not a "
+                "decodable textures.dat entry"
+            )
+        return decode_texture(
+            info,
+            self.source.read_slice(
+                self.textures_path,
+                info.offset,
+                info.length,
+            ),
+        )
+
     @property
     def texture_infos(self) -> dict[int, TextureInfo]:
         return {
@@ -1388,12 +1517,20 @@ class RatchetTodReader(Resistance2Reader):
                 base = tie_section.offset + index * TIE_INSTANCE_STRIDE
                 matrix = self._read_single_matrix(self.main, base)
                 matrix[:3, 3] *= YARD_TO_METERS
+                lightmap_index = self.main.u16(base + 0x5A)
+                lit = lightmap_index != NO_LIGHTMAP
                 tie_instances.append(
                     PlacedInstance(
                         asset_tuid=self.main.u32(base + 0x50),
                         instance_tuid=index,
                         name=f"TieInstance_{index:04X}",
                         matrix=matrix,
+                        lightmap_index=lightmap_index if lit else None,
+                        lightmap_zone_tuid=0 if lit else None,
+                        # Unproven per-placement light scale; kept only.
+                        lightmap_scale=(
+                            self.main.f32(base + 0x60) if lit else None
+                        ),
                     )
                 )
 
@@ -1442,6 +1579,24 @@ class RatchetTodReader(Resistance2Reader):
         self._apply_instance_names("shrub", shrub_instances)
         terrain = self._read_terrain()
         shader_tuids = self._localized_shaders(terrain)
+        lightmaps: dict[int, DecodedTexture] = {}
+        for lightmap_index in sorted(
+            {
+                mesh.lightmap_index
+                for mesh in terrain
+                if mesh.lightmap_index is not None
+            }
+        ):
+            try:
+                lightmaps[lightmap_index] = self.read_zone_lightmap(
+                    0,
+                    lightmap_index,
+                )
+            except InsomniacError as exc:
+                self._warn_once(
+                    "terrain lightmap",
+                    f"UFrag lightmaps skipped: {exc}",
+                )
         if (
             not tie_instances
             and not foliage_instances
@@ -1455,6 +1610,7 @@ class RatchetTodReader(Resistance2Reader):
                 tie_instances=tie_instances,
                 terrain_meshes=terrain,
                 shader_tuids=shader_tuids,
+                lightmaps=lightmaps,
                 shrub_instances=shrub_instances,
                 foliage_instances=foliage_instances,
             )
@@ -1693,6 +1849,21 @@ class RatchetTodReader(Resistance2Reader):
                 offset=8,
                 strides=(UFRAG_VERTEX_STRIDE, 2),
             ).astype(np.float32)
+            lightmap_index = self.main.u16(base + 0x4E)
+            secondary_uvs = None
+            if (
+                lightmap_index != NO_LIGHTMAP
+                and lightmap_index in self._lightmap_infos
+            ):
+                secondary_uvs = np.ndarray(
+                    shape=(vertex_count, 2),
+                    dtype=self.main.endian + "f2",
+                    buffer=vertices,
+                    offset=0x0C,
+                    strides=(UFRAG_VERTEX_STRIDE, 2),
+                ).astype(np.float32)
+                if not np.isfinite(secondary_uvs).all():
+                    secondary_uvs = None
             indices = np.frombuffer(
                 self.source.read_slice(
                     self.vertices_path,
@@ -1709,6 +1880,12 @@ class RatchetTodReader(Resistance2Reader):
                     positions=positions,
                     uvs=uvs,
                     indices=indices,
+                    secondary_uvs=secondary_uvs,
+                    lightmap_index=(
+                        lightmap_index
+                        if secondary_uvs is not None
+                        else None
+                    ),
                 )
             )
         return terrain
@@ -1717,6 +1894,23 @@ class RatchetTodReader(Resistance2Reader):
         """Level fog, bloom, ambient, and directional lights, if present."""
 
         return parse_tod_environment(self.main)
+
+    # main.dat section holding MAIN-memory cubemap payloads.
+    cubemap_resident_section = 0x9650
+
+    def read_environment_cubemaps(self) -> list[EnvironmentCubemap]:
+        """The level's ``0x5920`` environment cubemaps, decoded to RGBA."""
+
+        return read_cubemaps(
+            self.main,
+            resident_section=self.cubemap_resident_section,
+            read_local=lambda offset, length: self.source.read_slice(
+                self.textures_path,
+                offset,
+                length,
+            ),
+            warn=lambda message: self._warn_once("cubemap", message),
+        )
 
     def read_gameplay_regions(self) -> list[GameplayRegion]:
         if self.gameplay_path is None:

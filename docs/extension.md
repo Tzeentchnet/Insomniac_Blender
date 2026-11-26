@@ -41,7 +41,9 @@ Source paths name files in the ReLunacy repository. Paths under `Loading/`,
 | 13 | Corroborated | Our TOD reader already reads the bangle count at `+0x18` and the table at `+0x28`; no change needed. |
 | 5 | Done for TOD | All seven families on all 20 levels. The Clue and area layouts were corrected, and the volume half-extent settled at 1.0 (see below). |
 | 8 | Done for TOD and RFoM | Fog and bloom (TOD) and the ambient and two directional lights (both). Light volumes are not decoded. |
-| 6–7, 9–11, 15–16 | Not started | |
+| 6 | Done for TOD | Baked colour on Ties and UFrags. The light-direction pool, the light scales, and RFoM (`0x5500`) remain. |
+| 7 | Done for TOD and RFoM | Decoded to equirectangular World images; the HDR exponent scale is unknown. |
+| 9–11, 15–16 | Not started | |
 
 The sections below keep the original review text. Where the work above has
 overtaken it, a **Status** line says so, and the corrections that follow
@@ -187,8 +189,8 @@ Corrections to the review below, from our `BCUS98127` and `BCUS98107` discs:
 | 3 | Gameplay class names (kVTGenEnums) | TOD, RFoM | **Done** for Mobys and RFoM markers | Low–Med | High |
 | 4 | Complete rendering-mode table | TOD (old engine) | **Done** for TOD; other games use the generic mapping | Low | High |
 | 5 | Gameplay context: volumes, paths, Clues, controllers, areas, pods, scents | TOD | **Done** | Medium | High |
-| 6 | Old-engine baked lightmaps and lightmap UVs | TOD, RFoM | Lightmaps only on R2/R3 | Med–High | High |
-| 7 | Environment cubemaps | TOD, RFoM | Not decoded | Medium | Medium |
+| 6 | Old-engine baked lightmaps and lightmap UVs | TOD, RFoM | **Done** for TOD colour; RFoM remains | Med–High | High |
+| 7 | Environment cubemaps | TOD, RFoM | **Done**; HDR scale unknown | Medium | Medium |
 | 8 | Level fog, bloom, and lighting environment | TOD, RFoM | **Done**, except light volumes | Low–Med | Medium |
 | 9 | UV scroll/rotate animation (`0x5C00`) | TOD?, new engine | Not decoded | Medium | Medium |
 | 10 | Sky definitions and shell mesh | TOD | Not decoded | Medium | Medium |
@@ -200,8 +202,8 @@ Corrections to the review below, from our `BCUS98127` and `BCUS98107` discs:
 | 16 | Newer-engine Ratchet adapters | ACiT, QForce, A4O, ITN | Unsupported | High | Medium |
 
 The original recommended order was 14, 1, 2, 4, 3, 5, 8, 6, 7, 9, 10.
-With items 1–5, 8, and 12–14 finished, the remaining order is 6, 7, 9, 10,
-then 11. Item 4 can also be extended to RFoM, R2, and R3 after a visual
+With items 1–8 and 12–14 finished, the remaining order is 9, 10, then
+11. Item 4 can also be extended to RFoM, R2, and R3 after a visual
 review, and item 3 to R2/R3 once their class number is located. Item 6
 needs the most new data.
 
@@ -391,6 +393,15 @@ pointers are absolute offsets in `gameplay.dat`.
 
 ## 6. Old-engine baked lighting
 
+**Status:** done for TOD baked colour; see the baked lightmaps section of
+[ratchet_tod.md](formats/ratchet_tod.md). Corrections from our disc:
+
+- The Tie lightmap-UV stream starts at the end of the vertex block computed
+  from the meshes, `vertex start + max((index + count) * 0x14)`, not at the
+  header's `+0x18` value, which overruns on 1,074 Metropolis meshes.
+- The light scales are kept as metadata only. The direction pool and RFoM
+  (`0x5500`) are not decoded yet.
+
 ReLunacy sources: `Loading/Vertices/TieLightmapUV.cs`,
 `Loading/Meshes/OldTiePrimitiveSemantics.cs`,
 `Loading/Objects/Instances/TieInstance.cs`,
@@ -437,6 +448,11 @@ a tenth of lit Ties 4.4× too bright. Check whether our R3 compact-atlas
 Tie lighting reads an equivalent field.
 
 ## 7. Environment cubemaps
+
+**Status:** done for TOD and RFoM. The layout held on all 20 TOD levels and
+the RFoM levels checked; face orientation was confirmed by edge
+continuity. The faces are HDR (alpha is a shared exponent, per ReLunacy's
+`Assets/Cubemaps/Cubemap.cs`), and its scale and bias are still unknown.
 
 ReLunacy source: `Loading/Readers/CubemapReader.cs`.
 
