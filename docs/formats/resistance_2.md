@@ -462,7 +462,7 @@ Descriptor formats reinforce the slot interpretation:
 | diffuse | 2,487 BC1; 850 BC3; 18 uncompressed |
 | tangent normal | 2,829 BC3; 35 RG8 |
 | packed material | 2,793 BC1; 118 BC3; 12 uncompressed |
-| detail | 824 RGBA8; 83 BC3; 28 BC1; 1 RGBA4 |
+| detail | 824 RGBA8; 83 BC3; 28 BC1; 1 A4R4G4B4 |
 
 The most common material map-index patterns are `(0,1,2,-1)` (1,856),
 `(0,1,2,3)` (885), `(0,-1,-1,-1)` (300), `(0,-1,1,-1)` (162), and
@@ -705,7 +705,7 @@ R2 texture format bytes:
 |---:|---|
 | `0x01` / `0x81` | R8 |
 | `0x02` / `0x82` | RGB5A1 |
-| `0x03` / `0x83` | RGBA4 |
+| `0x03` / `0x83` | A4R4G4B4 (alpha in the high nibble) |
 | `0x04` / `0x84` | R5G6B5 |
 | `0x05` / `0x85` | A8R8G8B8 |
 | `0x06` / `0x86` | DXT1 |

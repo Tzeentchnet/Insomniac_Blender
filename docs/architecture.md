@@ -200,8 +200,8 @@ creation. Each group receives a deterministic non-rendering child Collection,
 and every instance of one collision prototype references the same Blender
 mesh datablock. Surface and material IDs become face-domain integer
 attributes; source IDs and JSON-encoded adapter metadata remain available as
-custom properties. Collision objects are wire helpers and never participate
-in renders.
+custom properties. Collision objects are solid viewport helpers with wire
+overlays and never participate in renders.
 
 Materials retain their shader lookup paths, raw material control word,
 material-program identity, parameter vectors, texture IDs, texture paths, and

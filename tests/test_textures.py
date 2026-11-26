@@ -169,7 +169,7 @@ class TextureTests(unittest.TestCase):
         self.assertTrue(np.all(rgba[..., 3] == 255))
 
     def test_decodes_r2_low_format_codes(self):
-        rgba4 = TextureInfo(
+        a4r4g4b4 = TextureInfo(
             id=5,
             tuid=5,
             format_code=0x03,
@@ -179,8 +179,11 @@ class TextureTests(unittest.TestCase):
             offset=0,
             length=2,
         )
-        rgba = decode_texture(rgba4, bytes([0xF1, 0x2A])).rgba
-        np.testing.assert_array_equal(rgba[0, 0], [255, 17, 34, 170])
+        rgba = decode_texture(a4r4g4b4, bytes([0xF1, 0x2A])).rgba
+        np.testing.assert_array_equal(rgba[0, 0], [17, 34, 170, 255])
+        # Retail TOD armorpadglass_c texel: translucent grey-blue glass.
+        rgba = decode_texture(a4r4g4b4, bytes([0x69, 0x9B])).rgba
+        np.testing.assert_array_equal(rgba[0, 0], [153, 153, 187, 102])
 
         r5g6b5 = TextureInfo(
             id=6,

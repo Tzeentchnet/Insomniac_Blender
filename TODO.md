@@ -159,7 +159,9 @@ or evidence-blocked work and are not represented as implemented features.
 - [ ] R2 root motion: sampled animation root-motion pointers are zero.
 - [ ] Automatic Capelli body/head pairing: no embedded relationship is known,
   and the skeletons are incompatible.
-- [ ] TOD/RFoM retail names: no proven retail name database is available.
+- [x] TOD/RFoM retail names: TOD level `DEBUG.DAT` and RFoM `ps3debug.dat`
+  tables are decoded (see [extension.md](docs/extension.md)).
+- [x] Regenerate the bundled TOD catalog with `DEBUG.DAT` prototype names.
 - [ ] Global R3 effect-slot wiring: the slots contain unrelated runtime
   families and must be handled individually.
 - [ ] Runtime vegetation wind: lower priority than static geometry,

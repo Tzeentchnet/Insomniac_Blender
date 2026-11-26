@@ -293,6 +293,50 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
         self.assertEqual(result.objects, 3)
         self.assertEqual(result.meshes, 2)
 
+    def test_level_source_names_and_guids_persist(self) -> None:
+        reader = _LevelReader()
+        reader.provides_source_names = True
+        reader.read_asset_name = lambda kind, tuid: (
+            "object/plant/test_shrub" if kind.name == "SHRUB" else None
+        )
+        shrub = reader.zones[0].shrub_instances[0]
+        shrub.name = "grass_7"
+        shrub.source_guid = "48577f73-3e0a-43e8-b5be-5608b1c28779"
+        import_level(
+            bpy.context,
+            reader,
+            LevelImportOptions(
+                materials=False,
+                terrain=False,
+                ties=False,
+                vegetation=True,
+                gameplay=False,
+                convert_axes=False,
+            ),
+            source_path="fixture",
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "source_names.blend"
+            bpy.ops.wm.save_as_mainfile(filepath=str(path))
+            bpy.ops.wm.open_mainfile(filepath=str(path))
+            obj = bpy.data.objects["grass_7"]
+            self.assertEqual(
+                obj["insomniac_source_guid"],
+                "48577f73-3e0a-43e8-b5be-5608b1c28779",
+            )
+            self.assertEqual(obj["insomniac_instance_tuid"], f"0x{10:016X}")
+            self.assertEqual(
+                obj.data["insomniac_source_name"],
+                "object/plant/test_shrub",
+            )
+            foliage = next(
+                item
+                for item in bpy.data.objects
+                if item.get("insomniac_asset_kind") == "FOLIAGE"
+            )
+            self.assertNotIn("insomniac_source_guid", foliage)
+            self.assertNotIn("insomniac_source_name", foliage.data)
+
     def test_mesh_preserves_secondary_uvs_and_point_colors(self) -> None:
         material = bpy.data.materials.new("Terrain")
         geometry = MeshGeometry(
@@ -622,7 +666,13 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
         self.assertTrue(all(obj.hide_render for obj in objects.values()))
         self.assertTrue(all(obj.show_in_front for obj in objects.values()))
         self.assertTrue(
-            all(obj.display_type == "WIRE" for obj in objects.values())
+            all(obj.display_type == "SOLID" for obj in objects.values())
+        )
+        self.assertTrue(
+            all(obj.show_wire for obj in objects.values())
+        )
+        self.assertTrue(
+            all(obj.show_all_edges for obj in objects.values())
         )
         self.assertAlmostEqual(objects["0xB"].location.x, 3.0)
 
@@ -677,6 +727,14 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
         self.assertEqual(len(persisted_instances), 2)
         self.assertTrue(
             all(obj.data is persisted for obj in persisted_instances)
+        )
+        self.assertTrue(
+            all(
+                obj.display_type == "SOLID"
+                and obj.show_wire
+                and obj.show_all_edges
+                for obj in persisted_instances
+            )
         )
         self.assertEqual(
             tuple(
@@ -1013,8 +1071,10 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
             {"BOX", "SPHERE", "CAPSULE", "TRIANGLE_MESH"},
         )
         self.assertTrue(
-            all(obj.display_type == "WIRE" for obj in collision_objects)
+            all(obj.display_type == "SOLID" for obj in collision_objects)
         )
+        self.assertTrue(all(obj.show_wire for obj in collision_objects))
+        self.assertTrue(all(obj.show_all_edges for obj in collision_objects))
         self.assertTrue(all(obj.show_in_front for obj in collision_objects))
         self.assertTrue(all(obj.hide_render for obj in collision_objects))
         self.assertEqual(result.meshes, 10)

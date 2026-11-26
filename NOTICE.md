@@ -12,8 +12,15 @@ GPL-licensed projects, primarily:
   <https://github.com/PredatorCZ/InsomniaToolset>
 - **ReChimera**, ReChimera contributors  
   <https://github.com/Mrroboto9819/ReChimera>
-- **ReLunacy**, ReLunacy contributors
-  <https://github.com/Mrroboto9819/ReLunacy>
+- **ReLunacy**, VELD-Dev, NefariousTechSupport, and ReLunacy contributors
+  <https://github.com/VELD-Dev/ReLunacy>
+
+The Tools of Destruction `DEBUG.DAT` and Resistance: Fall of Man
+`ps3debug.dat` name-table section IDs and record layouts, and the old-engine
+shader rendering-mode names, follow research published by ReLunacy
+(@VELD-Dev, @NefariousTechSupport, and @Neigy / Fianshoo). Counts, index
+pairing, GUID encoding, and the RFoM kind-to-family mapping were re-verified
+against our own disc builds before adoption.
 
 Tools of Destruction animation behavior was additionally checked through
 bounded static control-flow analysis using the MIT-licensed **Qwark's

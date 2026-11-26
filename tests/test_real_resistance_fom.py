@@ -32,6 +32,109 @@ class RealResistanceFomIsoTests(unittest.TestCase):
         self.assertIn("level20", levels)
 
 
+@unittest.skipUnless(REAL_ISO, "RFOM_ISO_PATH is not set")
+class RealResistanceFomDebugNameTests(unittest.TestCase):
+    def test_debug_names_match_single_group_gameplay(self) -> None:
+        from insomniac_asset_io.core.binary import IghwFile
+        from insomniac_asset_io.core.iso import _Iso9660Image
+        from insomniac_asset_io.core.psarc import PsarcArchive
+        from insomniac_asset_io.games.resistance_fom.debug_names import (
+            parse_debug_names,
+        )
+
+        descriptors = {
+            "moby": 0x40,
+            "path": 0x50,
+            "trigger": 0x60,
+            "effect": 0x70,
+            "marker": 0x80,
+            "moby_group": 0x90,
+            "area": 0xA0,
+        }
+        adapter = get_game_adapter("RESISTANCE_FOM")
+        single = multi = named = 0
+        with _Iso9660Image(Path(REAL_ISO)) as image:
+            with PsarcArchive.from_stream(
+                image.open_member(adapter.iso_container_member),
+                label="GAME.PSARC",
+            ) as archive:
+                levels = sorted(
+                    {
+                        entry.name.split("/")[2]
+                        for entry in archive.entries
+                        if entry.name.casefold().endswith(
+                            "/ps3levelmain.dat"
+                        )
+                    }
+                )
+                for level in levels:
+                    with self.subTest(level=level):
+                        names = parse_debug_names(
+                            archive.read(
+                                f"packed/levels/{level}/ps3debug.dat"
+                            ),
+                            label=level,
+                        )
+                        gameplay = IghwFile(
+                            archive.read(
+                                f"packed/levels/{level}/ps3gameplay.dat"
+                            ),
+                            label=level,
+                        )
+                        section = gameplay.require_section(0x25000)
+                        if gameplay.u32(section.offset + 0x24) != 1:
+                            multi += 1
+                            continue
+                        single += 1
+                        instances = gameplay.u32(section.offset + 0x20)
+                        for family, offset in descriptors.items():
+                            count = gameplay.u32(instances + offset + 4)
+                            self.assertEqual(
+                                len(names.get(family, ())),
+                                count,
+                                family,
+                            )
+                            named += count
+        self.assertEqual(len(levels), 41)
+        self.assertEqual(multi, 4)
+        self.assertEqual(single, 37)
+        self.assertGreater(named, 0)
+
+    def test_level20_names_gameplay_records(self) -> None:
+        import tempfile
+
+        adapter = get_game_adapter("RESISTANCE_FOM")
+        with tempfile.TemporaryDirectory() as temporary:
+            prepared = adapter.prepare_level(
+                Path(REAL_ISO),
+                "level20",
+                temporary,
+            )
+            self.assertTrue((prepared / "ps3debug.dat").is_file())
+            with GameSource.open(prepared) as source:
+                reader = ResistanceFomReader(source)
+                region = reader.read_gameplay_regions()[0]
+                self.assertEqual(
+                    region.moby_instances[0].name,
+                    "1A_Hyb_FirstOnslaught_1",
+                )
+                self.assertEqual(
+                    region.moby_instances[0].source_guid,
+                    "2ba161ab-87cb-41e5-a591-103772389c54",
+                )
+                self.assertEqual(
+                    region.paths[0].source_name,
+                    "1A_FlyAwayVTOL_PATH_1",
+                )
+                # Areas carry their own authored name: an independent
+                # check that the debug table is aligned.
+                self.assertTrue(
+                    all(area.source_name == area.name for area in region.areas)
+                )
+                self.assertEqual(len(region.areas), 93)
+                self.assertEqual(reader.consume_import_warnings(), ())
+
+
 @unittest.skipUnless(REAL_SOURCE, "RFOM_LEVEL_SOURCE is not set")
 class RealResistanceFomTests(unittest.TestCase):
     def test_decodes_representative_level20_chains(self) -> None:

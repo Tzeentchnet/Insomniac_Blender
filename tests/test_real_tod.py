@@ -31,6 +31,145 @@ class RealRatchetTodIsoTests(unittest.TestCase):
         self.assertEqual(len(levels), 20)
         self.assertIn("metropolis", levels)
 
+    def test_debug_names_cover_every_level(self) -> None:
+        from insomniac_asset_io.core.binary import IghwFile
+        from insomniac_asset_io.core.iso import _Iso9660Image
+        from insomniac_asset_io.core.psarc import PsarcArchive
+        from insomniac_asset_io.games.ratchet_tod.debug_names import (
+            INSTANCE_SECTIONS,
+            PROTOTYPE_SECTIONS,
+            debug_dat_iso_member,
+            parse_debug_names,
+        )
+
+        main_sections = {
+            AssetKind.MOBY: 0xD100,
+            AssetKind.TIE: 0x3400,
+            AssetKind.FOLIAGE: 0xA200,
+            AssetKind.SHRUB: 0xB100,
+        }
+        gameplay_sections = {
+            "moby": 0x7340,
+            "path": 0x7700,
+            "volume": 0x7740,
+            "clue": 0x7780,
+            "controller": 0x77C0,
+            "pod": 0x7900,
+            "area": 0x7940,
+            "scent": 0x7980,
+        }
+        adapter = get_game_adapter("RATCHET_TOD")
+        levels = list_game_levels(Path(REAL_ISO), game_label=adapter.label)
+        totals: Counter[str] = Counter()
+        with _Iso9660Image(Path(REAL_ISO)) as image:
+            for level in levels:
+                with self.subTest(level=level):
+                    names = parse_debug_names(
+                        image.read(
+                            debug_dat_iso_member(level),
+                            max_size=64 * 1024 * 1024,
+                        ),
+                        label=level,
+                    )
+                    with PsarcArchive.from_stream(
+                        image.open_member(
+                            "PS3_GAME/USRDIR/PACKED/LEVELS/"
+                            f"{level}/LEVEL_CACHED.PSARC"
+                        ),
+                        label=level,
+                    ) as archive:
+                        # Archive paths spell level folders with spaces.
+                        entries = {
+                            entry.name.casefold().rsplit("/", 1)[-1]: entry
+                            for entry in archive.entries
+                            if entry.name.casefold().startswith("built/levels/")
+                        }
+                        main = IghwFile(
+                            archive.read(entries["main.dat"]),
+                            label=f"{level}/main.dat",
+                        )
+                        gameplay = IghwFile(
+                            archive.read(entries["gameplay.dat"]),
+                            label=f"{level}/gameplay.dat",
+                        )
+                    for kind in PROTOTYPE_SECTIONS:
+                        section = main.section(main_sections[kind])
+                        self.assertEqual(
+                            len(names.prototypes.get(kind, ())),
+                            section.count if section else 0,
+                        )
+                        totals[kind.name] += section.count if section else 0
+                    for family, section_id in gameplay_sections.items():
+                        section = gameplay.section(section_id)
+                        self.assertEqual(
+                            len(names.instances.get(family, ())),
+                            section.count if section else 0,
+                        )
+                        totals[family] += section.count if section else 0
+                    self.assertEqual(
+                        len(names.shaders),
+                        main.require_section(0x5000).count,
+                    )
+                    self.assertEqual(
+                        len(names.instances["tie"]),
+                        main.require_section(0x9240).count,
+                    )
+                    self.assertLessEqual(
+                        set(names.instances),
+                        set(INSTANCE_SECTIONS),
+                    )
+        self.assertEqual(totals["moby"], 18_251)
+        self.assertEqual(totals["MOBY"], 3_012)
+        self.assertEqual(totals["TIE"], 2_048)
+
+    def test_names_kerchu_city_from_debug_dat(self) -> None:
+        from insomniac_asset_io.games.ratchet_tod.debug_names import (
+            prepare_debug_dat,
+        )
+
+        adapter = get_game_adapter("RATCHET_TOD")
+        with tempfile.TemporaryDirectory() as temporary:
+            prepared = adapter.prepare_catalog_level(
+                Path(REAL_ISO),
+                "kerchu_city",
+                temporary,
+                validate_iso=False,
+            )
+            debug_dat = prepare_debug_dat(
+                Path(REAL_ISO),
+                "kerchu_city",
+                prepared,
+                game_label=adapter.label,
+            )
+            self.assertIsNotNone(debug_dat)
+            with GameSource.open(prepared) as source:
+                reader = RatchetTodReader(source)
+                tie = reader.asset_pointers(AssetKind.TIE)[0].tuid
+                self.assertEqual(
+                    reader.read_asset_name(AssetKind.TIE, tie),
+                    "object/plant/tree/palmtree",
+                )
+                self.assertEqual(
+                    reader.read_asset_name(AssetKind.MOBY, 0),
+                    "object/celestial/galactic_map/gmp_12",
+                )
+                zone = reader.read_zones()[0]
+                self.assertEqual(
+                    zone.shrub_instances[0].name,
+                    "rockgrass_3_SHRUB8",
+                )
+                self.assertEqual(
+                    zone.tie_instances[0].source_guid,
+                    "48577f73-3e0a-43e8-b5be-5608b1c28779",
+                )
+                gameplay = reader.read_gameplay_regions()[0]
+                self.assertEqual(
+                    gameplay.moby_instances[0].name,
+                    "gmap_zordoom",
+                )
+                self.assertEqual(reader.read_shader(0).lookup_path, "gmp_12_surface")
+                self.assertEqual(reader.consume_import_warnings(), ())
+
     def test_decodes_kerchu_city_shrubs(self) -> None:
         adapter = get_game_adapter("RATCHET_TOD")
         with tempfile.TemporaryDirectory() as temporary:

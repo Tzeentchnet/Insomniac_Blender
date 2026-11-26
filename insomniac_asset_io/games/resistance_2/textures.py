@@ -17,7 +17,7 @@ from .formats import DecodedTexture, TextureInfo
 FORMAT_NAMES = {
     0x01: "R8",
     0x02: "RGB5A1",
-    0x03: "RGBA4",
+    0x03: "A4R4G4B4",
     0x04: "R5G6B5",
     0x05: "A8R8G8B8",
     0x06: "DXT1",
@@ -26,7 +26,7 @@ FORMAT_NAMES = {
     0x0B: "RG8",
     0x81: "R8",
     0x82: "RGB5A1",
-    0x83: "RGBA4",
+    0x83: "A4R4G4B4",
     0x84: "R5G6B5",
     0x85: "A8R8G8B8",
     0x86: "DXT1",
@@ -55,7 +55,7 @@ def texture_mip_size(width: int, height: int, format_code: int) -> int:
         return blocks_x * blocks_y * 16
     if name in {"A8R8G8B8", "A8R8G8B8_LINEAR"}:
         return width * height * 4
-    if name in {"R5G6B5", "RGB5A1", "RGBA4", "RG8"}:
+    if name in {"R5G6B5", "RGB5A1", "A4R4G4B4", "RG8"}:
         return width * height * 2
     if name == "R8":
         return width * height
@@ -86,8 +86,8 @@ def decode_texture(info: TextureInfo, raw: bytes) -> DecodedTexture:
         rgba = _decode_r5g6b5(raw, info.width, info.height)
     elif name == "RGB5A1":
         rgba = _decode_rgb5a1(raw, info.width, info.height)
-    elif name == "RGBA4":
-        rgba = _decode_rgba4(raw, info.width, info.height)
+    elif name == "A4R4G4B4":
+        rgba = _decode_a4r4g4b4(raw, info.width, info.height)
     elif name == "R8":
         rgba = _decode_r8(raw, info.width, info.height)
     elif name == "RG8":
@@ -187,11 +187,13 @@ def _decode_rgb5a1(raw: bytes, width: int, height: int) -> np.ndarray:
     return _unswizzle(rgba, width, height)
 
 
-def _decode_rgba4(raw: bytes, width: int, height: int) -> np.ndarray:
+def _decode_a4r4g4b4(raw: bytes, width: int, height: int) -> np.ndarray:
+    # RSX CELL_GCM_TEXTURE_A4R4G4B4: alpha occupies the high nibble of each
+    # big-endian texel. Retail descriptors use the identity remap (0xAAE4).
     pixels = _require_pixels(raw, width, height, 2)
     value = np.frombuffer(raw, dtype=">u2", count=pixels).astype(np.uint16)
     rgba = np.empty((pixels, 4), dtype=np.uint8)
-    for channel, shift in enumerate((12, 8, 4, 0)):
+    for channel, shift in ((3, 12), (0, 8), (1, 4), (2, 0)):
         nibble = (value >> shift) & 0xF
         rgba[:, channel] = (nibble << 4) | nibble
     return _unswizzle(rgba, width, height)

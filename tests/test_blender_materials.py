@@ -228,6 +228,67 @@ class BlenderMaterialTests(unittest.TestCase):
         self.assertEqual(alpha_link.from_node.operation, "GREATER_THAN")
         self.assertEqual(masked.surface_render_method, "DITHERED")
 
+    def test_tod_additive_shader_uses_emissive_add(self) -> None:
+        texture_id = 0x710
+        textures = {
+            texture_id: DecodedTexture(
+                TextureInfo(
+                    id=texture_id,
+                    tuid=texture_id,
+                    format_code=0x86,
+                    mip_count=1,
+                    width=2,
+                    height=2,
+                    offset=0,
+                    length=0,
+                ),
+                np.full((2, 2, 4), 200, dtype=np.uint8),
+            )
+        }
+        shader = ShaderInfo(
+            tuid=0x2A,
+            albedo_texture_id=texture_id,
+            normal_texture_id=None,
+            specular_texture_id=None,
+            detail_texture_id=None,
+            material_word=0x0002_0000,
+            alpha_mode_override="ADDITIVE",
+            lookup_path="glow_card",
+        )
+        reader = _MaterialReader("RATCHET_TOD", shader, textures)
+        material = _MaterialFactory(reader, True, []).material(shader.tuid)
+        nodes = material.node_tree.nodes
+        add = nodes["Additive_Blend_000000000000002A"]
+        emission = nodes["Additive_Emission_000000000000002A"]
+        output = next(
+            node for node in nodes if node.type == "OUTPUT_MATERIAL"
+        )
+
+        self.assertEqual(material.surface_render_method, "BLENDED")
+        self.assertEqual(material["insomniac_blend_equation"], "SRC_ALPHA_ONE")
+        self.assertEqual(material["insomniac_alpha_mode"], "ADDITIVE")
+        self.assertEqual(material["insomniac_blend_mode"], 2)
+        self.assertEqual(material["insomniac_shader_lookup_path"], "glow_card")
+        self.assertTrue(self._has_link(material, add, output, "Surface"))
+        self.assertTrue(emission.inputs["Color"].is_linked)
+        self.assertEqual(
+            emission.inputs["Strength"].links[0].from_socket.name,
+            "Alpha",
+        )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "additive.blend"
+            material.use_fake_user = True
+            material_name = material.name
+            bpy.ops.wm.save_as_mainfile(filepath=str(path))
+            bpy.ops.wm.open_mainfile(filepath=str(path))
+            reopened = bpy.data.materials[material_name]
+            self.assertEqual(reopened.surface_render_method, "BLENDED")
+            self.assertIn(
+                "Additive_Blend_000000000000002A",
+                reopened.node_tree.nodes,
+            )
+
     def test_color_textures_keep_rgb_independent_from_alpha(self) -> None:
         image = bpy.data.images.new(
             "Packed_Albedo",

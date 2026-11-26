@@ -254,7 +254,8 @@ class InsomniacAddonPreferences(bpy.types.AddonPreferences):
     level_import_collision_geometry: bpy.props.BoolProperty(
         name="Collision geometry",
         description=(
-            "Import supported level collision as non-rendering wire meshes"
+            "Import supported level collision as non-rendering solid meshes "
+            "with wire overlays"
         ),
         default=False,
     )

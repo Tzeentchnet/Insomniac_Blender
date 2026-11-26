@@ -46,7 +46,7 @@ both fields from `PARAM.SFO`.
 | Region terrain and Tie placement | Supported |
 | Shrub and foliage level geometry | Supported as linked static meshes and placements; foliage includes branch and sprite geometry |
 | Gameplay groups | Primary Mobys as linked static mesh instances; paths, trigger volumes, effects, typed markers, Moby groups, and named areas as non-rendering context |
-| Retail names | Deterministic `Moby_XXXX`, `Tie_XXXXXXXX`, and `Material_XXXX` names |
+| Retail names | Gameplay records named from `ps3debug.dat` on single-group levels; assets keep deterministic `Moby_XXXX`, `Tie_XXXXXXXX`, and `Material_XXXX` names |
 | Level collision | Optional world, Tie, and collision-only placed triangle meshes from `ps3levelcoll.dat`; disabled by default |
 | Lightmaps, lighting, renderable VFX, cubemaps, and embedded gameplay payload semantics | Not yet implemented |
 
@@ -74,7 +74,7 @@ fields from `PARAM.SFO` before extraction.
 | Level terrain (`UFrag`) and Tie placement | Supported |
 | Shrub and foliage level geometry | Supported as linked static meshes and placements; foliage includes first-LOD branch and sprite-card geometry |
 | Gameplay Moby placement | Supported as linked static mesh instances |
-| Retail names | Deterministic `Moby_XXXX`, `Tie_XXXXXXXX`, and `Shrub_XXXXXXXX` names; retail debug names are absent |
+| Retail names | Prototypes, placements, gameplay Mobys, and shaders named from each level's `DEBUG.DAT`; numeric fallbacks otherwise. The bundled catalog lists the retail prototype and shader names |
 | Level collision | Optional world and Tie triangle collision from the separate raw `collision.dat`; disabled by default |
 | Moby collision, lighting, VFX, and cubemaps | Not yet implemented |
 
@@ -95,7 +95,7 @@ both fields from `PARAM.SFO`.
 | Moby models | Supported |
 | Moby bangles/customizations | Each non-base segment imports into its own selectable Collection; authored source-default parts can optionally be shown |
 | Moby damage permutations | Optional; disabled by default and kept in a separate Collection |
-| Moby primitive and triangle collision | Optional wire helpers; disabled by default |
+| Moby primitive and triangle collision | Optional solid viewport helpers with wire overlays; disabled by default |
 | Moby skeletons and skin weights | Supported |
 | Moby animsets | Supported, including additive subset and blend masks; clips become Blender Actions |
 | Tie static meshes | Supported |
@@ -292,8 +292,8 @@ disabled by default. Enabling them in Add-on Preferences puts each damage
 segment in the asset's **Damage Permutations** child Collection, each authored
 lower-detail group in **Lower LODs**, and decoded box, sphere, capsule,
 triangle, or Burning Skies auxiliary helpers in **Collision Geometry**.
-Collision helpers display as in-front wire geometry and are excluded from
-renders.
+Collision helpers display as in-front solid viewport geometry with wire
+overlays and are excluded from renders.
 
 ### Import a level
 
@@ -312,8 +312,9 @@ Level collision has a separate default-off **Collision geometry** option.
 Adapters that implement it feed a game-neutral mesh/instance model into
 deterministic source-group Collections. Collision objects share prototype
 mesh datablocks, retain per-face surface/material IDs and source metadata,
-display as in-front wire geometry, and are excluded from renders. The
-R2 and R3 backends decode regional terrain and Tie collision, including
+display as in-front solid viewport geometry with wire overlays, and are
+excluded from renders. The R2 and R3 backends decode regional terrain and Tie
+collision, including
 quantized triangle prototypes and oriented box, sphere, capsule, and cylinder
 groups. TOD and RFoM decode their distinct raw level-collision resources.
 Enabling the option for a game without a decoder reports that limitation

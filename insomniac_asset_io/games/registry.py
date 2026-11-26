@@ -38,6 +38,9 @@ class GameAdapter:
         ]
         | None
     ) = None
+    prepare_catalog_level_dependencies: (
+        Callable[["GameAdapter", str | Path, str, Path], None] | None
+    ) = None
     supports_iso: bool = True
     supports_levels: bool = True
     experimental: bool = False
@@ -112,7 +115,7 @@ class GameAdapter:
             if self.level_primary_resource in self.catalog_level_archives
             else None
         )
-        return prepare_game_level(
+        cached_level = prepare_game_level(
             iso_path,
             level_name,
             cache_directory,
@@ -126,6 +129,14 @@ class GameAdapter:
             expected_version=self.iso_version,
             validate_iso_identity=validate_iso,
         )
+        if self.prepare_catalog_level_dependencies is not None:
+            self.prepare_catalog_level_dependencies(
+                self,
+                iso_path,
+                level_name,
+                cached_level,
+            )
+        return cached_level
 
     def validate_iso(self, iso_path: str | Path) -> dict[str, str]:
         if not self.supports_iso:
@@ -241,6 +252,25 @@ def _create_resistance_fom_catalog_reader(source: GameSource):
     return ResistanceFomReader(source, metadata_only=True)
 
 
+def _prepare_resistance_fom_level_dependencies(
+    adapter: GameAdapter,
+    iso_path: str | Path,
+    level_name: str,
+    cache_directory: str | Path,
+    cached_level: Path,
+) -> None:
+    del cache_directory
+    from .resistance_fom.debug_names import prepare_debug_dat
+
+    prepare_debug_dat(
+        iso_path,
+        level_name,
+        cached_level,
+        container_member=adapter.iso_container_member or "",
+        game_label=adapter.label,
+    )
+
+
 def _create_resistance_3_reader(source: GameSource):
     from .resistance_3.reader import Resistance3Reader
 
@@ -265,6 +295,38 @@ def _create_ratchet_tod_reader(source: GameSource):
     return RatchetTodReader(source)
 
 
+def _prepare_ratchet_tod_level_dependencies(
+    adapter: GameAdapter,
+    iso_path: str | Path,
+    level_name: str,
+    cache_directory: str | Path,
+    cached_level: Path,
+) -> None:
+    del cache_directory
+    _prepare_ratchet_tod_debug_names(
+        adapter,
+        iso_path,
+        level_name,
+        cached_level,
+    )
+
+
+def _prepare_ratchet_tod_debug_names(
+    adapter: GameAdapter,
+    iso_path: str | Path,
+    level_name: str,
+    cached_level: Path,
+) -> None:
+    from .ratchet_tod.debug_names import prepare_debug_dat
+
+    prepare_debug_dat(
+        iso_path,
+        level_name,
+        cached_level,
+        game_label=adapter.label,
+    )
+
+
 _GAMES_ROOT = Path(__file__).parent
 
 
@@ -284,6 +346,7 @@ GAME_ADAPTERS = {
         ),
         create_reader=_create_resistance_fom_reader,
         create_catalog_reader=_create_resistance_fom_catalog_reader,
+        prepare_level_dependencies=_prepare_resistance_fom_level_dependencies,
         level_archives=(
             "ps3levelmain.dat",
             "ps3levelverts.dat",
@@ -314,6 +377,8 @@ GAME_ADAPTERS = {
             / "ratchet_tod_us_v0200_catalog.json"
         ),
         create_reader=_create_ratchet_tod_reader,
+        prepare_level_dependencies=_prepare_ratchet_tod_level_dependencies,
+        prepare_catalog_level_dependencies=_prepare_ratchet_tod_debug_names,
         level_archives=(
             "level_cached.psarc",
             "level_uncached.psarc",

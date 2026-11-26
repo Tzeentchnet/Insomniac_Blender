@@ -99,9 +99,10 @@ resource with:
 
 The retained Kerchu City review file reopens with exactly 9,704 collision
 instances, 1,054 shared meshes, and 92,103 faces: 688 Terrain objects and
-9,016 Static Props. It retains non-rendering wire settings, metadata, and
-face-domain surface attributes. The Metropolis real-data regression validates
-15,150 instances, 1,565 meshes, 93,733 vertices, and 129,382 retained faces.
+9,016 Static Props. It retains non-rendering solid viewport settings with
+wire overlays, metadata, and face-domain surface attributes. The Metropolis
+real-data regression validates 15,150 instances, 1,565 meshes, 93,733
+vertices, and 129,382 retained faces.
 
 The RFoM smoke test reports resource counts and decodes one Moby, skeleton,
 animset, diffuse texture, Tie, zone, shrub and foliage placement counts,
@@ -157,6 +158,47 @@ false runtime-billboarding markers intact. Its matching PNG shows both
 custom-normal lighting and a review-only RGB visualization of the decoded
 source vectors. The JSON report records the exact vertex, triangle,
 attribute, normal-range, and persistence results.
+
+## Retail name tables and TOD rendering modes
+
+`test_ratchet_tod_debug_names.py` builds synthetic TOD `DEBUG.DAT` files with
+the retail prototype, instance, and shader layouts. It checks Moby, Tie,
+Shrub, and Foliage prototype names; instance names and little-endian GUIDs;
+shader names; numeric fallbacks when a table does not cover every record;
+optional malformed files; and the rendering-mode table, including ADDITIVE.
+`test_resistance_fom_debug_names.py` covers the RFoM `0x25500` parser, all
+seven gameplay families, rejection of duplicate or gapped local indices, and
+the single-group rule. `test_blender_materials.py` builds a TOD additive
+material, verifies its Transparent plus Emission output and Blended render
+method, then saves and reopens it. `test_blender_optional_geometry.py`
+verifies that instance GUIDs and mesh source names persist after save and
+reopen.
+
+The ISO-gated regressions sweep every level:
+
+```powershell
+$env:TOD_ISO_PATH = "C:\path\to\tod.dec.iso"
+python -m unittest tests.test_real_tod.RealRatchetTodIsoTests -v
+$env:RFOM_ISO_PATH = "C:\path\to\rfom.dec.iso"
+python -m unittest tests.test_real_resistance_fom.RealResistanceFomDebugNameTests -v
+```
+
+The TOD sweep checks all 20 levels. Every `DEBUG.DAT` table count equals its
+parallel `main.dat` or `gameplay.dat` count: 3,012 Moby and 2,048 Tie
+prototypes and 18,251 gameplay Mobys in total. It then names Kerchu City
+end to end. The RFoM sweep checks that all 37 single-group levels match
+every family count and that the four multi-group levels are skipped. It also
+prepares `level20` through the adapter hook. That test checks names and GUIDs
+and confirms that all 93 area debug names equal their authored area names.
+
+The retained
+`E:\Tests\InsomniacAssetIO\tod_debug_names_review\metropolis_named_level.blend`
+reopens with 6,983 named placements (4,848 Tie, 1,378 Moby, and 757 Foliage),
+each carrying `insomniac_source_guid`. It has 314 of 315 level meshes with a
+prototype `insomniac_source_name`, and 19 ADDITIVE materials using Blended
+rendering. The retained
+`E:\Tests\InsomniacAssetIO\rfom_debug_names_review\level20_named_gameplay.blend`
+reopens with all 2,346 `level20` gameplay objects renamed and GUID-tagged.
 
 Run the real R3 vegetation regression against `mine_traversal_train`:
 

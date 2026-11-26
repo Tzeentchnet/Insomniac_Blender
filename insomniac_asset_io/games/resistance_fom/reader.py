@@ -9,7 +9,7 @@ import numpy as np
 
 from ...core.binary import IghwFile
 from ...core.collision import CollisionScene as LevelCollisionScene
-from ...core.errors import FormatError, MissingResourceError
+from ...core.errors import FormatError, InsomniacError, MissingResourceError
 from ...core.source import GameSource
 from ..ratchet_tod.reader import RatchetTodReader
 from ..resistance_2.animations import AnimationProfile
@@ -35,6 +35,7 @@ from ..resistance_2.formats import (
 )
 from ..resistance_2.reader import MAX_BONES, MAX_MESHES, _matrix_from_zyx
 from ..resistance_2.textures import texture_mip_size
+from .debug_names import MAX_DEBUG_DAT_SIZE, parse_debug_names
 from .level_collision import decode_level_collision_resource
 
 LOGGER = logging.getLogger(__name__)
@@ -105,6 +106,8 @@ class ResistanceFomReader(RatchetTodReader):
     material_surface_channels_by_default = True
     material_base_color_factor_supported = False
     material_emission_uses_albedo = False
+    # RFoM has no proven prototype name table; only instances are named.
+    provides_source_names = False
 
     def __init__(
         self,
@@ -1340,6 +1343,18 @@ class ResistanceFomReader(RatchetTodReader):
             len(paths),
             len(triggers),
         )
+        self._apply_debug_names(
+            group_count=gameplay.u32(section.offset + 0x24),
+            families={
+                "moby": instances,
+                "path": paths,
+                "trigger": triggers,
+                "effect": effects,
+                "marker": markers,
+                "moby_group": moby_groups,
+                "area": areas,
+            },
+        )
         return [
             GameplayRegion(
                 name=name,
@@ -1352,6 +1367,62 @@ class ResistanceFomReader(RatchetTodReader):
                 areas=areas,
             )
         ]
+
+    def _apply_debug_names(
+        self,
+        *,
+        group_count: int,
+        families: dict[str, list],
+    ) -> None:
+        """Name gameplay records from the level's ``ps3debug.dat``.
+
+        The table indexes records per family across every gameplay group, so
+        it is applied only to single-group levels, where it is unambiguous,
+        and only to families whose name count equals the decoded count.
+        """
+
+        debug_path = self._optional_level_resource("ps3debug.dat")
+        if debug_path is None:
+            return
+        if group_count != 1:
+            message = (
+                f"{debug_path}: {group_count} gameplay groups share one "
+                "debug name table; using numeric names"
+            )
+            LOGGER.info(message)
+            return
+        try:
+            if self.source.size(debug_path) > MAX_DEBUG_DAT_SIZE:
+                raise FormatError(
+                    f"{debug_path}: ps3debug.dat is unreasonably large"
+                )
+            names = parse_debug_names(
+                self.source.read(debug_path),
+                label=debug_path,
+            )
+        except InsomniacError as exc:
+            warning = f"Gameplay debug names are unavailable: {exc}"
+            LOGGER.warning(warning)
+            self.warnings.append(warning)
+            return
+        for family, records in families.items():
+            family_names = names.get(family)
+            if family_names is None:
+                continue
+            if len(family_names) != len(records):
+                warning = (
+                    f"{debug_path}: {len(family_names)} {family} names for "
+                    f"{len(records)} decoded records; using numeric names"
+                )
+                LOGGER.warning(warning)
+                self.warnings.append(warning)
+                continue
+            for record, source in zip(records, family_names):
+                if family == "moby":
+                    record.name = source.name
+                else:
+                    record.source_name = source.name
+                record.source_guid = source.guid
 
     def _gameplay_group(
         self,

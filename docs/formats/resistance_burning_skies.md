@@ -233,7 +233,8 @@ Materials marked `WorldCollision`, `OnlyCastShadows`,
 `GE_Shadowcaster_*`, or explicitly non-renderable are auxiliary. A whole-model
 sweep finds 154 shadow-only packets and two `WorldCollision` packets across
 45 models. They are removed from the visible base mesh and exposed as
-default-off wire helpers through the top-level **Collision geometry** option.
+default-off solid viewport helpers with wire overlays through the top-level
+**Collision geometry** option.
 
 Five debug, marker, or environment models reference seven BMX identifiers
 that are absent from the tested archive. Their geometry still decodes, but

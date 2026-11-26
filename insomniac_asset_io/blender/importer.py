@@ -734,6 +734,12 @@ class _MaterialFactory:
                         principled,
                         shader,
                     )
+                    if shader.alpha_mode == "ADDITIVE":
+                        self._apply_additive_output(
+                            material,
+                            principled,
+                            shader,
+                        )
         material["insomniac_cycles_material"] = self.cycles_materials
         material["insomniac_surface_material_channels"] = (
             self.surface_material_channels
@@ -1575,6 +1581,64 @@ class _MaterialFactory:
             texture_node.outputs["Alpha"],
             principled.inputs["Alpha"],
         )
+
+    def _apply_additive_output(
+        self,
+        material: bpy.types.Material,
+        principled: bpy.types.Node,
+        shader: ShaderInfo,
+    ) -> None:
+        """Route an additive (SRC_ALPHA, ONE) shader to an emissive add.
+
+        The surface becomes fully transmissive plus emission of the authored
+        colour scaled by its alpha, which matches the hardware blend.
+        """
+
+        tree = material.node_tree
+        output = next(
+            (
+                node
+                for node in tree.nodes
+                if node.type == "OUTPUT_MATERIAL"
+            ),
+            None,
+        )
+        if output is None:
+            return
+        label = _reader_game_label(self.reader)
+        emission = tree.nodes.new("ShaderNodeEmission")
+        emission.name = f"Additive_Emission_{shader.tuid:016X}"
+        emission.label = f"{label} additive colour x alpha"
+        color_input = principled.inputs["Base Color"]
+        if color_input.is_linked:
+            tree.links.new(
+                color_input.links[0].from_socket,
+                emission.inputs["Color"],
+            )
+        else:
+            emission.inputs["Color"].default_value = (
+                color_input.default_value
+            )
+        alpha_input = principled.inputs["Alpha"]
+        if alpha_input.is_linked:
+            tree.links.new(
+                alpha_input.links[0].from_socket,
+                emission.inputs["Strength"],
+            )
+        else:
+            emission.inputs["Strength"].default_value = (
+                alpha_input.default_value
+            )
+        transparent = tree.nodes.new("ShaderNodeBsdfTransparent")
+        transparent.name = f"Additive_Transparent_{shader.tuid:016X}"
+        add = tree.nodes.new("ShaderNodeAddShader")
+        add.name = f"Additive_Blend_{shader.tuid:016X}"
+        add.label = f"{label} additive blend (SRC_ALPHA, ONE)"
+        tree.links.new(transparent.outputs["BSDF"], add.inputs[0])
+        tree.links.new(emission.outputs["Emission"], add.inputs[1])
+        tree.links.new(add.outputs["Shader"], output.inputs["Surface"])
+        material.surface_render_method = "BLENDED"
+        material["insomniac_blend_equation"] = "SRC_ALPHA_ONE"
 
     def _uses_luminance_alpha(self, shader: ShaderInfo) -> bool:
         shader_tuids = getattr(
@@ -3427,7 +3491,9 @@ def _new_collision_object(
     collision_object = bpy.data.objects.new(name, mesh)
     collection.objects.link(collision_object)
     collision_object["insomniac_collision_geometry"] = True
-    collision_object.display_type = "WIRE"
+    collision_object.display_type = "SOLID"
+    collision_object.show_wire = True
+    collision_object.show_all_edges = True
     collision_object.show_in_front = True
     collision_object.hide_render = True
     collision_object.color = (1.0, 0.18, 0.02, 1.0)
@@ -3833,6 +3899,13 @@ def _import_level_static_instances(
                     geometries,
                     asset_materials,
                 ).mesh
+                if asset_kind in AssetKind.__members__:
+                    _store_mesh_source_name(
+                        mesh,
+                        materials.reader,
+                        AssetKind[asset_kind],
+                        instance.asset_tuid,
+                    )
                 meshes[instance.asset_tuid] = mesh
                 result.meshes += 1
             except InsomniacError as exc:
@@ -4228,6 +4301,12 @@ def import_level(
                                 f"0x{moby.default_draw_mask:016X}"
                             )
                         mesh["insomniac_source_default_parts"] = True
+                        _store_mesh_source_name(
+                            mesh,
+                            reader,
+                            AssetKind.MOBY,
+                            instance.asset_tuid,
+                        )
                         moby_meshes[instance.asset_tuid] = mesh
                         result.meshes += 1
                     except InsomniacError as exc:
@@ -5170,7 +5249,28 @@ def _create_instance_object(
         obj["insomniac_group"] = instance.group
     if instance.lightmap_index is not None:
         obj["insomniac_lightmap_index"] = instance.lightmap_index
+    source_guid = getattr(instance, "source_guid", None)
+    if source_guid:
+        obj["insomniac_source_guid"] = source_guid
     return obj
+
+
+def _store_mesh_source_name(
+    mesh: bpy.types.Mesh,
+    reader,
+    kind: AssetKind,
+    tuid: int,
+) -> None:
+    """Record a retail prototype path on a level mesh when one is proven."""
+
+    if not getattr(reader, "provides_source_names", False):
+        return
+    try:
+        name = reader.read_asset_name(kind, tuid)
+    except InsomniacError:
+        return
+    if name and "/" in name:
+        mesh["insomniac_source_name"] = name
 
 
 def _import_gameplay_context(
@@ -5183,7 +5283,8 @@ def _import_gameplay_context(
         path_collection = _child_collection(region_collection, "Paths")
         path_collection.hide_render = True
         for path in region.paths:
-            _create_gameplay_path(path_collection, path, root)
+            obj = _create_gameplay_path(path_collection, path, root)
+            _apply_gameplay_source_name(obj, path)
             object_count += 1
 
     if region.triggers:
@@ -5217,6 +5318,7 @@ def _import_gameplay_context(
             )
             obj["insomniac_shape_kind"] = shape_names[trigger.shape_kind]
             obj["insomniac_shape_kind_id"] = trigger.shape_kind
+            _apply_gameplay_source_name(obj, trigger)
             object_count += 1
 
     if region.effects:
@@ -5228,6 +5330,7 @@ def _import_gameplay_context(
                 effect,
                 root,
             )
+            _apply_gameplay_source_name(obj, effect)
             object_count += 1
 
     if region.markers:
@@ -5239,6 +5342,7 @@ def _import_gameplay_context(
                 marker,
                 root,
             )
+            _apply_gameplay_source_name(obj, marker)
             object_count += 1
 
     if region.moby_groups:
@@ -5254,6 +5358,7 @@ def _import_gameplay_context(
                 region,
                 root,
             )
+            _apply_gameplay_source_name(obj, group)
             object_count += 1
 
     if region.areas:
@@ -5266,8 +5371,23 @@ def _import_gameplay_context(
                 region,
                 root,
             )
+            _apply_gameplay_source_name(obj, area)
             object_count += 1
     return object_count
+
+
+def _apply_gameplay_source_name(obj: bpy.types.Object, item) -> None:
+    """Rename a gameplay context object to its proven retail name."""
+
+    source_name = getattr(item, "source_name", None)
+    if source_name:
+        obj.name = _safe_name(source_name)
+        if obj.data is not None:
+            obj.data.name = obj.name
+        obj["insomniac_source_name"] = source_name
+    source_guid = getattr(item, "source_guid", None)
+    if source_guid:
+        obj["insomniac_source_guid"] = source_guid
 
 
 def _tag_gameplay_object(

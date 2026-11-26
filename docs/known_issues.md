@@ -8,8 +8,12 @@ disc validation instead of reusing unverified V1 offsets.
 Moby class IDs, Tie header offsets, Material indices, and Texture record
 offsets are level-local. Catalog identifiers and Blender material/image names
 include the level scope so equal numeric values from unrelated levels do not
-alias. The disc chain does not expose a proven retail name table; deterministic
-numeric names are used.
+alias. Gameplay Mobys, paths, trigger volumes, effects, markers, Moby groups,
+and areas take retail names and GUIDs from the level's `ps3debug.dat` on the
+37 single-group levels. The four multiplayer levels with several gameplay
+groups (`level200`, `level210`, `level220`, `level230`) share one ambiguous
+table across groups and keep numeric names. No prototype name table is known,
+so Moby, Tie, and Material assets keep deterministic numeric names.
 
 The primary gameplay Moby group is imported as linked static geometry. The
 six following groups are imported as non-rendering paths, trigger volumes,
@@ -35,11 +39,16 @@ Support is intentionally restricted to the USA `BCUS98127` v02.00 disc.
 Other regions or revisions fail disc validation rather than being parsed with
 unverified offsets.
 
-The retail disc's `DEBUG.PSARC` has no usable name database. Catalog and
-Blender names therefore use stable level-local fallbacks (`Moby_XXXX` and
-`Tie_XXXXXXXX`, and `Shrub_XXXXXXXX`). Numeric identities can collide between
-levels; catalog identifiers include the owner level to keep those assets
-distinct.
+Each level's loose `BUILT/LEVELS/<LEVEL>/DEBUG.DAT` supplies retail names for
+Moby, Tie, Shrub, and Foliage prototypes, their placements, gameplay Mobys,
+and shaders. Level extraction copies it beside `level_cached.psarc`. Existing
+caches gain it on the next import with a configured ISO. Without it, or when
+a table does not cover every decoded record, the stable level-local fallbacks
+remain (`Moby_XXXX`, `Tie_XXXXXXXX`, `Shrub_XXXXXXXX`). The bundled asset
+catalog lists the retail prototype and shader names. Numeric
+identities can collide between levels; catalog identifiers include the owner
+level to keep those assets distinct. Some retail instance names are bare
+numbers such as `1` or `10`; they are imported as authored.
 
 Inline animations are decoded in both observed forms. Complex clips apply
 the runtime's signed 8-bit delta scaling, while simple clips discard paired

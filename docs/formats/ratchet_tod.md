@@ -4,10 +4,16 @@ This adapter targets the USA `BCUS98127` v02.00 retail disc. It validates
 `TITLE_ID` and `VERSION` from a bounded `PARAM.SFO` parse before extracting
 any level.
 
-No game payloads are distributed. The bundled catalog contains only numeric
-asset metadata and deterministic fallback names: 15,629 level-scoped
-references across 20 levels, comprising 3,012 Mobys, 2,048 Ties, 34 Shrubs,
-14 Foliage assets, and 10,521 Materials.
+No game payloads are distributed. The bundled catalog contains numeric
+asset metadata and source names: 15,629 level-scoped references across 20
+levels, comprising 3,012 Mobys, 2,048 Ties, 34 Shrubs, 14 Foliage assets, and
+10,521 Materials. All 5,108 Moby, Tie, Shrub, and Foliage entries carry their
+`DEBUG.DAT` prototype path, and all Materials carry their `0x5D00` shader
+name. Shader names are unique within each level; across levels, 3,443
+distinct names cover the 10,521 Materials. Regenerate it
+with `python tools\build_tod_catalog.py <iso> <output.json>`. Catalog
+extraction fetches each level's loose `DEBUG.DAT` through the adapter's
+catalog dependency hook.
 
 ## Archive topology
 
@@ -38,9 +44,51 @@ Most metadata is stored directly in a big-endian IGHW 1.1 `main.dat`.
 These values repeat in different levels. Catalog identifiers therefore use
 `KIND:level:VALUE`; existing R2/R3 catalog identifiers remain unchanged.
 
-The retail debug archive exposes no usable Moby, Tie, or Material names. The
-reader uses `Moby_XXXX`, `Tie_XXXXXXXX`, `Shrub_XXXXXXXX`, and level-scoped
-shader identities.
+### Retail names (`DEBUG.DAT`)
+
+The packed `DEBUG.PSARC` holds only a table of contents. Retail names are
+in a loose big-endian IGHW 1.1 file beside each level's archives,
+`PS3_GAME/USRDIR/BUILT/LEVELS/<LEVEL>/DEBUG.DAT`, present for all 20 levels.
+Its tables are index-parallel to `main.dat` and `gameplay.dat`:
+
+| Section | Stride | Names | Parallel to |
+|---|---:|---|---|
+| `0x9480` | `0x10` | Moby prototypes | `main.dat` `0xD100` |
+| `0x9280` | `0x10` | Tie prototypes | `main.dat` `0x3400` |
+| `0x9580` | `0x10` | Shrub prototypes | `main.dat` `0xB100` |
+| `0x9380` | `0x10` | Foliage prototypes | `main.dat` `0xA200` |
+| `0x72C0` | `0x18` | Tie instances | `main.dat` `0x9240` |
+| `0x7560` | `0x18` | Shrub instances | decoded `0x9540` cluster order |
+| `0x74C0` | `0x18` | Foliage instances | `main.dat` `0x9340` |
+| `0x6202` | `0x14` | UFrags (no names) | `main.dat` `0x6200` |
+| `0x5D00` | `0x30` | shaders; four texture source paths at `+0x20` | `main.dat` `0x5000` |
+| `0x73C0` | `0x18` | gameplay Mobys | `gameplay.dat` `0x7340` |
+| `0x7720`, `0x7760`, `0x77A0`, `0x77D0` | `0x18` | paths, volumes, Clues, controllers | `0x7700`, `0x7740`, `0x7780`, `0x77C0` |
+| `0x7920`, `0x7960`, `0x79A0` | `0x18` | pods, areas, scents | `0x7900`, `0x7940`, `0x7980` |
+
+Prototype records are `{u64 tuid, u32 name, u32 0}`. Their names are source
+paths such as `object/architecture/m_ambientbuildings/m_lamppost_low_1`. The
+64-bit TUIDs do not occur in `main.dat`, so the join is by record index.
+Instance records are `{u8 guid[16], u32 name, u16 zone, u16 0}`. The GUID is
+printed as a little-endian (Microsoft) UUID; it equals the GUID comment in
+`built/levels/<level>/instances.lua` inside `global_cached.psarc`.
+
+Verification on all 20 levels: every table count equals its parallel
+`main.dat` or `gameplay.dat` count. All 8 gameplay families agree with
+`instances.lua` in name and GUID for every record. Index pairing was also
+checked semantically: instance names match their referenced prototype (for
+example `lampPost207` maps to `m_lamppost_low_1`). Shrub instances keep the
+prototype of their decoded class on every record of Kerchu City (11,857
+records, 15 classes). The rule offered elsewhere, name section = gameplay
+section + `0x20`, does not hold for Mobys (`0x7340` to `0x73C0`) or
+controllers (`0x77C0` to `0x77D0`).
+
+The reader uses a table only when its count equals the decoded record count.
+Otherwise it warns and keeps `Moby_XXXX`, `Tie_XXXXXXXX`, `Shrub_XXXXXXXX`,
+`Foliage_XXXXXXXX`, and numeric instance names. Imported placements keep
+their numeric `insomniac_instance_tuid` and add `insomniac_source_guid`.
+Level meshes record the prototype path as `insomniac_source_name`. Shader
+names become `insomniac_shader_lookup_path`.
 
 ## Mobys
 
@@ -132,8 +180,22 @@ Section `0x5000` contains `0x80`-byte shaders:
 | `0x12` | `u8[2]` | unknown material controls |
 | `0x20` | `vec4[6]` | raw material parameter vectors |
 
-The adapter maps rendering modes `0`-`2` to opaque, `4`-`5` to masked, and
-`6` to blended. It retains the complete flag/control word and all six vectors
+Rendering modes follow ReLunacy's `RenderingMode` names. Counts are across
+the 10,521 shaders of all 20 levels:
+
+| Byte | Name | Import | Shaders |
+|---:|---|---|---:|
+| `0` | Opaque | opaque | 7,544 |
+| `1` | Overlay | alpha blend | 239 |
+| `2` | Additive | additive (`SRC_ALPHA, ONE`) | 601 |
+| `3` | Scunge | alpha blend | 3 |
+| `4` | Cutout | alpha clip | 285 |
+| `5` | SoftEdge | alpha clip (drawn in the opaque pass) | 915 |
+| `6` | Blended | alpha blend | 934 |
+
+Additive materials replace the surface output with Transparent plus Emission
+(colour times alpha) and use Blended rendering. Bytes `7` and `8` do not
+occur; any other byte warns and imports opaque. It retains the complete flag/control word and all six vectors
 as material metadata. Verified normal and flagged packed channels use the
 shared Blender material path. Bound detail images are imported as unconnected
 Non-Color nodes because their ToD composition is not yet proven; the raw
@@ -149,8 +211,15 @@ Section `0x5200` contains `0x20`-byte texture records:
 | `0x18` | `u16` | width |
 | `0x1A` | `u16` | height |
 
-The format code is `(bitfield >> 8) & 0xF`. Supported observed values cover
-R8, R5G6B5, A8R8G8B8, DXT1, DXT3, DXT5, and RG8.
+The bitfield's high byte is the RSX `CELL_GCM_TEXTURE_*` format byte, and the
+word at `0x10` is the GCM remap (`0xAAE4`, identity, on every checked
+record). The reader uses the low nibble, `(bitfield >> 8) & 0xF`. Observed
+values are `1` B8, `3` A4R4G4B4, `4` R5G6B5, `5` A8R8G8B8, `6` to `8`
+DXT1/3/5, and `11` G8B8. Code `3` (eight levels, always
+`armorpadglass_c.tga`) stores alpha in the high nibble; it previously decoded
+with alpha in the low nibble. Code `4` (two `_e` maps on cragmite_ruins and
+metropolis) is R5G6B5. ReLunacy's old-engine table, which lists `3` as
+R5G6B5 and `4` as A1R5G5B5, does not match these descriptor bytes.
 
 Optional section `0x9800` contains `0x10`-byte streamed references. A record's
 texture index is at `0x06` and its `texstream.dat` pixel offset is at `0x00`.

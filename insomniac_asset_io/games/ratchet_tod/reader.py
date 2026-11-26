@@ -38,6 +38,12 @@ from ..resistance_2.reader import (
     _matrix_from_zyx,
 )
 from ..resistance_2.textures import decode_texture, texture_mip_size
+from .debug_names import (
+    MAX_DEBUG_DAT_SIZE,
+    DebugInstanceName,
+    TodDebugNames,
+    parse_debug_names,
+)
 from .level_collision import decode_level_collision_resource
 
 LOGGER = logging.getLogger(__name__)
@@ -77,6 +83,21 @@ SHRUB_INSTANCE_STRIDE = 0x40
 SHRUB_VERTEX_STRIDE = 0x0E
 GAMEPLAY_MOBY_STRIDE = 0x48
 
+# Shader record +0x11 rendering-mode byte. Byte names follow ReLunacy's
+# RenderingMode enum. Overlay (1) and Scunge (3) use an unsorted alpha-blend
+# pass and Additive (2) uses SRC_ALPHA, ONE. Cutout (4) and SoftEdge (5) draw
+# in the opaque pass and are clipped. Bytes 7 and 8 (BakedOnly/LitOnly) never
+# occur in the retail TOD shader tables.
+TOD_RENDERING_MODES = {
+    0: "OPAQUE",
+    1: "BLEND",
+    2: "ADDITIVE",
+    3: "BLEND",
+    4: "MASK",
+    5: "MASK",
+    6: "BLEND",
+}
+
 USE_VERTICES_DAT = 0x8000_0000
 YARD_TO_METERS = np.float32(0.9144)
 UFRAG_SCALE = np.float32(YARD_TO_METERS / 256.0)
@@ -104,6 +125,7 @@ class RatchetTodReader(Resistance2Reader):
     material_surface_channels_by_default = True
     material_base_color_factor_supported = False
     material_emission_uses_albedo = False
+    provides_source_names = True
 
     def __init__(self, source: GameSource) -> None:
         self.source = source
@@ -133,12 +155,148 @@ class RatchetTodReader(Resistance2Reader):
         self._texture_cache: dict[int, DecodedTexture] = {}
         self._animation_offsets: dict[int, tuple[int, ...]] = {}
         self.warnings: list[str] = []
+        self._debug_names_loaded = False
+        self._debug_names_value: TodDebugNames | None = None
+        self._debug_rejected_tables: set[str] = set()
 
     def _optional_level_resource(self, filename: str) -> str | None:
         try:
             return self._find_level_resource(filename)
         except MissingResourceError:
             return None
+
+    def _read_debug_dat(self) -> tuple[str, bytes] | None:
+        """Return the level's loose retail DEBUG.DAT, when available.
+
+        The disc stores it outside the level PSARCs; extraction places it
+        beside ``level_cached.psarc``. Directory sources may also contain
+        it under ``levels/<level>/``. The game-wide ``built/game/debug.dat``
+        is a different file and is never matched.
+        """
+
+        level_paths = [
+            path
+            for path in self.source.paths
+            if path.casefold().endswith("/debug.dat")
+            and "/levels/" in path.casefold()
+        ]
+        if len(level_paths) == 1:
+            path = level_paths[0]
+            if self.source.size(path) > MAX_DEBUG_DAT_SIZE:
+                raise FormatError(f"{path}: DEBUG.DAT is unreasonably large")
+            return path, self.source.read(path)
+        if len(level_paths) > 1:
+            return None
+        selected = self.source.selected_path
+        if selected is None:
+            return None
+        folder = selected if selected.is_dir() else selected.parent
+        try:
+            candidates = [
+                item
+                for item in folder.iterdir()
+                if item.is_file() and item.name.casefold() == "debug.dat"
+            ]
+        except OSError:
+            return None
+        if len(candidates) != 1:
+            return None
+        candidate = candidates[0]
+        if candidate.stat().st_size > MAX_DEBUG_DAT_SIZE:
+            raise FormatError(f"{candidate}: DEBUG.DAT is unreasonably large")
+        return str(candidate), candidate.read_bytes()
+
+    @property
+    def debug_names(self) -> TodDebugNames | None:
+        if not self._debug_names_loaded:
+            self._debug_names_loaded = True
+            try:
+                located = self._read_debug_dat()
+                if located is not None:
+                    path, data = located
+                    self._debug_names_value = parse_debug_names(
+                        data,
+                        label=path,
+                    )
+            except (FormatError, MissingResourceError, OSError) as exc:
+                self._warn_once(
+                    "debug.dat",
+                    f"Level DEBUG.DAT names are unavailable: {exc}",
+                )
+        return self._debug_names_value
+
+    def _warn_once(self, key: str, message: str) -> None:
+        if key in self._debug_rejected_tables:
+            return
+        self._debug_rejected_tables.add(key)
+        LOGGER.warning(message)
+        self.warnings.append(message)
+
+    def _checked_names(self, key: str, names, expected: int):
+        """Return a debug table only when it covers every decoded record."""
+
+        if names is None:
+            return None
+        if len(names) != expected:
+            self._warn_once(
+                key,
+                f"DEBUG.DAT {key} names cover {len(names)} records but the "
+                f"level decodes {expected}; using numeric names",
+            )
+            return None
+        return names
+
+    def _prototype_source_name(
+        self,
+        kind: AssetKind,
+        tuid: int,
+    ) -> str | None:
+        names = self.debug_names
+        if names is None:
+            return None
+        pointers = self.asset_pointers(kind)
+        table = self._checked_names(
+            f"{kind.name.lower()} prototype",
+            names.prototypes.get(kind),
+            len(pointers),
+        )
+        if table is None:
+            return None
+        if kind is AssetKind.MOBY:
+            index = tuid
+        else:
+            # Tie, Foliage, and Shrub identities are main.dat record offsets.
+            first = pointers[0].offset if pointers else 0
+            index = (tuid - first) // pointers[0].length if pointers else -1
+        if not 0 <= index < len(table):
+            return None
+        return table[index]
+
+    def _instance_source_names(
+        self,
+        family: str,
+        expected: int,
+    ) -> tuple[DebugInstanceName, ...] | None:
+        names = self.debug_names
+        if names is None:
+            return None
+        return self._checked_names(
+            f"{family} instance",
+            names.instances.get(family),
+            expected,
+        )
+
+    def _apply_instance_names(
+        self,
+        family: str,
+        instances: list[PlacedInstance],
+    ) -> None:
+        names = self._instance_source_names(family, len(instances))
+        if names is None:
+            return
+        for instance, source in zip(instances, names):
+            instance.name = source.name
+            instance.source_guid = source.guid
 
     def _read_ighw_index(self, path: str) -> IghwFile:
         header = self.source.read_slice(path, 0, 16)
@@ -308,6 +466,13 @@ class RatchetTodReader(Resistance2Reader):
         tuid: int,
     ) -> str | None:
         self._pointer(kind, tuid)
+        if kind is AssetKind.SHADER:
+            # Shader identities are 0x5000 record indices, parallel to
+            # DEBUG.DAT 0x5D00. Without the table they stay unnamed.
+            return self._shader_source_name(tuid)
+        source_name = self._prototype_source_name(kind, tuid)
+        if source_name is not None:
+            return source_name
         if kind is AssetKind.MOBY:
             return f"Moby_{tuid:04X}"
         if kind is AssetKind.TIE:
@@ -545,7 +710,7 @@ class RatchetTodReader(Resistance2Reader):
         self._animation_offsets[tuid] = animation_offsets
         return MobyAsset(
             tuid=tuid,
-            name=f"Moby_{tuid:04X}",
+            name=self.read_asset_name(AssetKind.MOBY, tuid) or f"Moby_{tuid:04X}",
             meshes=meshes,
             bounding_sphere=bounding_sphere,
             shader_tuids=shader_tuids,
@@ -934,14 +1099,7 @@ class RatchetTodReader(Resistance2Reader):
         )
         material_word = self.main.u32(base + 0x10)
         rendering_mode = self.main.u8(base + 0x11)
-        alpha_mode = {
-            0: "OPAQUE",
-            1: "OPAQUE",
-            2: "OPAQUE",
-            4: "MASK",
-            5: "MASK",
-            6: "BLEND",
-        }.get(rendering_mode)
+        alpha_mode = TOD_RENDERING_MODES.get(rendering_mode)
         if alpha_mode is None:
             warning = (
                 f"Shader {tuid} uses unknown TOD rendering mode "
@@ -970,9 +1128,23 @@ class RatchetTodReader(Resistance2Reader):
                 for vector_index in range(6)
             ),
             alpha_mode_override=alpha_mode,
+            lookup_path=self._shader_source_name(tuid),
         )
         self._shader_cache[tuid] = shader
         return shader
+
+    def _shader_source_name(self, index: int) -> str | None:
+        names = self.debug_names
+        if names is None or not names.shaders:
+            return None
+        table = self._checked_names(
+            "shader",
+            names.shaders,
+            self._shader_count,
+        )
+        if table is None or not 0 <= index < len(table):
+            return None
+        return table[index]
 
     @cached_property
     def _texture_locations(self) -> dict[int, _TextureLocation]:
@@ -1156,6 +1328,9 @@ class RatchetTodReader(Resistance2Reader):
                 )
 
         shrub_instances = self._read_shrub_instances()
+        self._apply_instance_names("tie", tie_instances)
+        self._apply_instance_names("foliage", foliage_instances)
+        self._apply_instance_names("shrub", shrub_instances)
         terrain = self._read_terrain()
         shader_tuids = self._localized_shaders(terrain)
         if (
@@ -1462,6 +1637,7 @@ class RatchetTodReader(Resistance2Reader):
                     ),
                 )
             )
+        self._apply_instance_names("moby", instances)
         return [GameplayRegion(name="art", moby_instances=instances)]
 
     def consume_import_warnings(self) -> tuple[str, ...]:

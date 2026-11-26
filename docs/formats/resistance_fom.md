@@ -45,9 +45,41 @@ IGHW 0.2 file with buffer-mode sections.
 The values repeat between levels. Catalog identifiers therefore use
 `KIND:level:VALUE`.
 
-Retail names are not present in a proven in-disc table for this chain. The
-reader uses deterministic `Moby_XXXX`, `Tie_XXXXXXXX`, and `Material_XXXX`
-names.
+No prototype name table is known. The reader uses deterministic
+`Moby_XXXX`, `Tie_XXXXXXXX`, and `Material_XXXX` asset names.
+
+### Gameplay names (`ps3debug.dat`)
+
+Every level ships `packed/levels/<level>/ps3debug.dat` (IGHW 0.2) in
+`GAME.PSARC`. Section `0x25500` holds `{u32 start, u32 count}`. Each `0x10`
+record at `start` is `{u32 name, u32 guid string, u32 local index, u32 kind}`.
+The kinds map to the `GameplayInstances` descriptors:
+
+| Kind | Descriptor | Family |
+|---:|---|---|
+| `0` | `+0x40` | gameplay Mobys |
+| `1` | `+0x50` | paths |
+| `2` | `+0x60` | trigger volumes |
+| `3` | `+0x70` | effects |
+| `6` | `+0x80` | markers |
+| `4` | `+0x90` | Moby groups |
+| `5` | `+0xA0` | areas |
+
+Kinds `7` and `8` occur twice each on `level112` and `level110` and have no
+decoded family. On all 37 single-group levels, every family's count equals
+its descriptor count and the local indices are exactly `0..n-1`. Alignment
+was checked three ways. Each area's debug name equals the name stored in its
+own record (for example 206 of 206 on `level40`). Name tokens predict the
+referenced Moby class: `fast` gives class 1674 in 91% of records and
+`health` gives 1761 in 83%, falling to 17% and 23% when the alignment is
+shifted by ten records. Paths are named `..._PATH_n`.
+
+The four levels with several gameplay groups (`level200`, `level210`,
+`level220`, `level230`) have one table for all groups, so local indices
+repeat. The reader decodes only the first group there and keeps numeric
+names. Elsewhere it renames gameplay objects and stores
+`insomniac_source_guid`; the numeric identity and `insomniac_gameplay_index`
+are unchanged.
 
 ## Mobys
 
@@ -345,8 +377,8 @@ Tie meshes, and five collision-only placed meshes. The retained geometry has
   embedded gameplay effect/marker payloads are not decoded.
 - Shrub vertex colors, vegetation wind, foliage custom normals, and
   camera-facing billboard behavior are not reproduced.
-- Deterministic numeric names are used until retail names can be recovered
-  from a proven source.
+- Prototype assets keep deterministic numeric names; only gameplay records
+  carry retail names.
 
 The layouts were checked against the USA v01.00 disc and independently
 corroborated with the GPL-3.0 InsomniaToolset and ReChimera implementations.

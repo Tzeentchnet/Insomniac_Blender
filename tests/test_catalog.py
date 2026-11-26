@@ -475,6 +475,51 @@ class Resistance2CatalogTests(unittest.TestCase):
         self.assertTrue(
             all(len(asset.levels) == 1 for asset in catalog.assets)
         )
+        named_kinds = {
+            AssetKind.MOBY,
+            AssetKind.TIE,
+            AssetKind.SHRUB,
+            AssetKind.FOLIAGE,
+        }
+        named = [
+            asset for asset in catalog.assets if asset.kind in named_kinds
+        ]
+        # Every prototype carries its retail DEBUG.DAT name, not a
+        # Moby_XXXX-style fallback.
+        self.assertEqual(len(named), 5108)
+        self.assertTrue(all(asset.source_name for asset in named))
+        self.assertFalse(
+            any(
+                asset.source_name.startswith(
+                    ("Moby_", "Tie_", "Shrub_", "Foliage_")
+                )
+                for asset in named
+            )
+        )
+        lamppost = next(
+            asset
+            for asset in named
+            if asset.source_name == "object/architecture/cobalia_lamppost_tb"
+        )
+        self.assertEqual(lamppost.display_name, "Cobalia Lamppost Tb")
+        self.assertEqual(lamppost.levels, ("cobalia",))
+        materials = [
+            asset
+            for asset in catalog.assets
+            if asset.kind is AssetKind.SHADER
+        ]
+        # Shader names come from DEBUG.DAT 0x5D00.
+        self.assertTrue(all(asset.source_name for asset in materials))
+        self.assertEqual(
+            len({(asset.levels, asset.source_name) for asset in materials}),
+            10521,
+        )
+        glass = [
+            asset
+            for asset in materials
+            if asset.source_name == "armorpadglass_shader"
+        ]
+        self.assertIn("cobalia", {asset.levels[0] for asset in glass})
 
     def test_loads_bundled_resistance_3_usa_catalog(self):
         with tempfile.TemporaryDirectory() as temporary:

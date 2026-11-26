@@ -89,8 +89,16 @@ def _validate_blend(
             f"{len(meshes)}"
         )
     for obj in objects:
-        if obj.display_type != "WIRE" or not obj.hide_render:
-            raise RuntimeError(f"{obj.name} is not a non-rendering wire helper")
+        if (
+            obj.display_type != "SOLID"
+            or not obj.show_wire
+            or not obj.show_all_edges
+            or not obj.hide_render
+        ):
+            raise RuntimeError(
+                f"{obj.name} is not a non-rendering solid collision "
+                "helper with a wire overlay"
+            )
         if "insomniac_collision_metadata" not in obj:
             raise RuntimeError(f"{obj.name} has no collision metadata")
     for mesh in meshes:
