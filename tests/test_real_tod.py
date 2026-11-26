@@ -417,6 +417,15 @@ class RealRatchetTodTests(unittest.TestCase):
                 1377,
             )
             self.assertEqual(len(zone.lightmaps), 23)
+            uv_animations = reader._uv_animations
+            self.assertEqual(
+                (
+                    len(uv_animations.ufrags),
+                    len(uv_animations.ties),
+                    len(uv_animations.mobys),
+                ),
+                (0, 91, 48),
+            )
             lit_tie = reader.read_tie(lit_ties[0].asset_tuid)
             self.assertTrue(
                 any(mesh.secondary_uvs is not None for mesh in lit_tie.meshes)

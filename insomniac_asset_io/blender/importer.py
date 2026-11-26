@@ -47,6 +47,7 @@ from ..games.resistance_2.formats import (
     Skeleton,
     TextureInfo,
     TieAsset,
+    UvAnimation,
     Zone,
 )
 from ..games.resistance_2.materials import (
@@ -4258,6 +4259,7 @@ def import_level(
                         indices=terrain.indices,
                         secondary_uvs=terrain.secondary_uvs,
                         colors=terrain.colors,
+                        uv_animation=terrain.uv_animation,
                     )
                 )
             if not zone_materials:
@@ -4693,12 +4695,154 @@ def _create_root(
     return root
 
 
+_UV_ANIMATED_MATERIALS: dict[
+    tuple[str, UvAnimation],
+    bpy.types.Material,
+] = {}
+
+
+def _route_uv_animations(
+    geometries: list[MeshGeometry],
+    materials: list[bpy.types.Material],
+) -> tuple[list[MeshGeometry], list[bpy.types.Material]]:
+    """Give animated-UV meshes their own driven material variant."""
+
+    if not any(
+        geometry.uv_animation is not None
+        and 0 <= geometry.shader_index < len(materials)
+        for geometry in geometries
+    ):
+        return geometries, materials
+    routed_materials = list(materials)
+    slots: dict[tuple[int, UvAnimation], int] = {}
+    routed: list[MeshGeometry] = []
+    for geometry in geometries:
+        animation = geometry.uv_animation
+        if animation is None or not (
+            0 <= geometry.shader_index < len(materials)
+        ):
+            routed.append(geometry)
+            continue
+        key = (geometry.shader_index, animation)
+        slot = slots.get(key)
+        if slot is None:
+            slot = len(routed_materials)
+            slots[key] = slot
+            routed_materials.append(
+                _uv_animated_material(
+                    materials[geometry.shader_index],
+                    animation,
+                )
+            )
+        routed.append(replace(geometry, shader_index=slot))
+    return routed, routed_materials
+
+
+def _uv_animated_material(
+    material: bpy.types.Material,
+    animation: UvAnimation,
+) -> bpy.types.Material:
+    """Copy a material and drive its primary UVs by the scene clock.
+
+    The source transform is ``R(a) uv + scroll * t`` about UV (0, 0) with
+    ``a = rotation * t``. Imported UVs have V flipped (``v' = 1 - v``), so
+    in Blender's UV space the same motion is a rotation by ``-a`` plus the
+    location ``(scroll_u t - sin a, 1 - cos a - scroll_v t)``.
+    """
+
+    key = (material.name_full, animation)
+    cached = _UV_ANIMATED_MATERIALS.get(key)
+    if cached is not None:
+        try:
+            cached.name
+        except ReferenceError:
+            del _UV_ANIMATED_MATERIALS[key]
+        else:
+            return cached
+    variant = material.copy()
+    variant.name = f"{material.name}_UVAnim"
+    variant["insomniac_uv_animation"] = json.dumps(
+        {
+            "scroll_u": animation.scroll_u,
+            "scroll_v": animation.scroll_v,
+            "rotation": animation.rotation,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    if variant.node_tree is None:
+        _UV_ANIMATED_MATERIALS[key] = variant
+        return variant
+    nodes = variant.node_tree.nodes
+    links = variant.node_tree.links
+    coordinates = nodes.new("ShaderNodeTexCoord")
+    coordinates.name = "Insomniac_UV_Animation_Coordinates"
+    coordinates.location = (-1500.0, 600.0)
+    mapping = nodes.new("ShaderNodeMapping")
+    mapping.name = "Insomniac_UV_Animation"
+    mapping.label = "Animated UV (scene time)"
+    mapping.vector_type = "POINT"
+    mapping.location = (-1300.0, 600.0)
+    links.new(coordinates.outputs["UV"], mapping.inputs["Vector"])
+
+    time = "(frame * fps_base / fps)"
+    angle = f"(({animation.rotation!r}) * {time})"
+    expressions = (
+        ("Location", 0, f"({animation.scroll_u!r}) * {time} - sin({angle})"),
+        (
+            "Location",
+            1,
+            f"1.0 - cos({angle}) - ({animation.scroll_v!r}) * {time}",
+        ),
+        ("Rotation", 2, f"-{angle}"),
+    )
+    for socket_name, index, expression in expressions:
+        curve = mapping.inputs[socket_name].driver_add("default_value", index)
+        driver = curve.driver
+        driver.type = "SCRIPTED"
+        for variable_name, path in (
+            ("fps", "render.fps"),
+            ("fps_base", "render.fps_base"),
+        ):
+            variable = driver.variables.new()
+            variable.name = variable_name
+            variable.type = "SINGLE_PROP"
+            variable.targets[0].id_type = "SCENE"
+            variable.targets[0].id = bpy.context.scene
+            variable.targets[0].data_path = path
+        driver.expression = expression
+
+    # Primary-UV image nodes: unlinked vectors use the active UV map, and
+    # authored chains start at a Texture Coordinate UV output. Lightmap
+    # nodes read the "LightmapUV" map through a UV Map node and are kept.
+    for node in list(nodes):
+        if node.bl_idname != "ShaderNodeTexImage":
+            continue
+        vector = node.inputs["Vector"]
+        if not vector.is_linked:
+            links.new(mapping.outputs["Vector"], vector)
+    for link in list(links):
+        if (
+            link.from_node.bl_idname == "ShaderNodeTexCoord"
+            and link.from_node is not coordinates
+            and link.from_socket.name == "UV"
+        ):
+            target = link.to_socket
+            links.remove(link)
+            links.new(mapping.outputs["Vector"], target)
+    _UV_ANIMATED_MATERIALS[key] = variant
+    return variant
+
+
 def _build_mesh(
     name: str,
     geometries: Iterable[MeshGeometry],
     materials: list[bpy.types.Material],
 ) -> _CombinedMesh:
-    geometry_list = list(geometries)
+    geometry_list, materials = _route_uv_animations(
+        list(geometries),
+        materials,
+    )
     positions_parts: list[np.ndarray] = []
     uv_parts: list[np.ndarray] = []
     secondary_uv_parts: list[np.ndarray] = []

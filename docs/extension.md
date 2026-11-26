@@ -43,7 +43,8 @@ Source paths name files in the ReLunacy repository. Paths under `Loading/`,
 | 8 | Done for TOD and RFoM | Fog and bloom (TOD) and the ambient and two directional lights (both). Light volumes are not decoded. |
 | 6 | Done for TOD | Baked colour on Ties and UFrags. The light-direction pool, the light scales, and RFoM (`0x5500`) remain. |
 | 7 | Done for TOD and RFoM | Decoded to equirectangular World images; the HDR exponent scale is unknown. |
-| 9–11, 15–16 | Not started | |
+| 9 | Done for TOD | All three owner families; frame rate and rotation sign as ReLunacy read them. |
+| 10–11, 15–16 | Not started | |
 
 The sections below keep the original review text. Where the work above has
 overtaken it, a **Status** line says so, and the corrections that follow
@@ -192,7 +193,7 @@ Corrections to the review below, from our `BCUS98127` and `BCUS98107` discs:
 | 6 | Old-engine baked lightmaps and lightmap UVs | TOD, RFoM | **Done** for TOD colour; RFoM remains | Med–High | High |
 | 7 | Environment cubemaps | TOD, RFoM | **Done**; HDR scale unknown | Medium | Medium |
 | 8 | Level fog, bloom, and lighting environment | TOD, RFoM | **Done**, except light volumes | Low–Med | Medium |
-| 9 | UV scroll/rotate animation (`0x5C00`) | TOD?, new engine | Not decoded | Medium | Medium |
+| 9 | UV scroll/rotate animation (`0x5C00`) | TOD?, new engine | **Done** for TOD | Medium | Medium |
 | 10 | Sky definitions and shell mesh | TOD | Not decoded | Medium | Medium |
 | 11 | Tie shader feature bits and material vectors | TOD | Partial | Medium | Medium |
 | 12 | Collision "no wall jump" triangle flag | TOD | **Done**, with material names and vertex order | Low | Low |
@@ -202,8 +203,7 @@ Corrections to the review below, from our `BCUS98127` and `BCUS98107` discs:
 | 16 | Newer-engine Ratchet adapters | ACiT, QForce, A4O, ITN | Unsupported | High | Medium |
 
 The original recommended order was 14, 1, 2, 4, 3, 5, 8, 6, 7, 9, 10.
-With items 1–8 and 12–14 finished, the remaining order is 9, 10, then
-11. Item 4 can also be extended to RFoM, R2, and R3 after a visual
+With items 1–9 and 12–14 finished, the remaining order is 10, then 11. Item 4 can also be extended to RFoM, R2, and R3 after a visual
 review, and item 3 to R2/R3 once their class number is located. Item 6
 needs the most new data.
 
@@ -499,6 +499,13 @@ ReLunacy sources: `Assets/Lighting/LevelFog.cs`,
   voxel grid as metadata only.
 
 ## 9. UV animation
+
+**Status:** done for TOD. TOD does not use the `0x60` record quoted below:
+its `0x5C00` is a `0x20`-byte header of UFrag, Tie, and Moby counts
+followed by `0x40`-byte records, with scroll at `+0x10`/`+0x14` and the
+rotation per frame at `+0x18`, about UV (0, 0) with no pivot. ReLunacy's
+`UvAnimation.ReadOldEngine` documents this; the owner and frag pairing was
+verified on all 20 levels (see [ratchet_tod.md](formats/ratchet_tod.md)).
 
 ReLunacy source: `Assets/Geometry/UvAnimation.cs`.
 

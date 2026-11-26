@@ -123,6 +123,7 @@ class ResistanceFomReader(RatchetTodReader):
     terrain_lightmaps = False
     tie_instance_lightmaps = False
     cubemap_resident_section = 0x9950
+    old_engine_uv_animations = False
 
     def __init__(
         self,

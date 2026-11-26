@@ -90,6 +90,19 @@ class Skeleton:
         return len(self.bones)
 
 
+@dataclass(frozen=True, slots=True)
+class UvAnimation:
+    """Scrolling and rotating UVs, in source UV space.
+
+    ``u' = R(angle) (u, v) + scroll * t`` with ``angle = rotation * t`` and
+    ``t`` in seconds; the rotation is about UV (0, 0).
+    """
+
+    scroll_u: float
+    scroll_v: float
+    rotation: float
+
+
 @dataclass(slots=True)
 class MeshGeometry:
     shader_index: int
@@ -110,6 +123,7 @@ class MeshGeometry:
     segment_index: int = 0
     is_damage_permutation: bool = False
     lod_level: int = 0
+    uv_animation: UvAnimation | None = None
 
 
 @dataclass(slots=True)
@@ -343,6 +357,7 @@ class TerrainMesh:
     secondary_uvs: FloatArray | None = None
     colors: FloatArray | None = None
     lightmap_index: int | None = None
+    uv_animation: UvAnimation | None = None
 
 
 @dataclass(slots=True)

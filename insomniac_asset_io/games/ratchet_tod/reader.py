@@ -46,6 +46,7 @@ from ..class_names import (
     read_class_id,
 )
 from .gameplay_context import read_tod_gameplay_context
+from .uv_animations import TodUvAnimations, parse_uv_animations
 from ..level_environment import LevelEnvironment, parse_tod_environment
 from ..old_engine_cubemaps import EnvironmentCubemap, read_cubemaps
 from .debug_names import (
@@ -149,6 +150,8 @@ class RatchetTodReader(Resistance2Reader):
     terrain_lightmaps = True
     tie_instance_lightmaps = True
     tie_lightmap_atlas_downsample = 1
+    # main.dat 0x5C00 animated UVs (scroll and rotation).
+    old_engine_uv_animations = True
 
     def __init__(self, source: GameSource) -> None:
         self.source = source
@@ -766,24 +769,26 @@ class RatchetTodReader(Resistance2Reader):
                     bone_map,
                 ) = descriptors[descriptor_index]
                 descriptor_index += 1
-                meshes.append(
-                    self._decode_moby_mesh(
-                        index_buffer=index_buffer,
-                        vertex_buffer=vertex_buffer,
-                        index_index=index_index,
-                        index_count=index_count,
-                        vertex_offset=local_vertex_offset,
-                        vertex_count=vertex_count,
-                        stride=0x1C if vertex_type == 1 else 0x14,
-                        shader_index=shader_index,
-                        scale=mesh_scale,
-                        bone_map=bone_map,
-                        endian=self.main.endian,
-                        label=f"Moby_{tuid:04X}",
-                        segment_index=bangle_index,
-                        is_damage_permutation=False,
-                    )
+                mesh = self._decode_moby_mesh(
+                    index_buffer=index_buffer,
+                    vertex_buffer=vertex_buffer,
+                    index_index=index_index,
+                    index_count=index_count,
+                    vertex_offset=local_vertex_offset,
+                    vertex_count=vertex_count,
+                    stride=0x1C if vertex_type == 1 else 0x14,
+                    shader_index=shader_index,
+                    scale=mesh_scale,
+                    bone_map=bone_map,
+                    endian=self.main.endian,
+                    label=f"Moby_{tuid:04X}",
+                    segment_index=bangle_index,
+                    is_damage_permutation=False,
                 )
+                mesh.uv_animation = self._uv_animations.mobys.get(
+                    (tuid, local_vertex_offset)
+                )
+                meshes.append(mesh)
         shader_tuids = self._localized_shaders(meshes)
 
         skeleton = (
@@ -846,6 +851,8 @@ class RatchetTodReader(Resistance2Reader):
     def read_tie(self, tuid: int) -> TieAsset:
         pointer = self._pointer(AssetKind.TIE, tuid)
         base = pointer.offset
+        tie_section = self.main.require_section(SECT_TIE)
+        tie_class = (base - tie_section.offset) // TIE_STRIDE
         mesh_table = self.main.u32(base)
         mesh_count = self.main.u8(base + 0x0F)
         vertex_start = self.main.u32(base + 0x14)
@@ -929,6 +936,9 @@ class RatchetTodReader(Resistance2Reader):
                     f"Tie_{tuid:08X}: shader index {shader_index} is "
                     f"outside the shader table"
                 )
+            mesh.uv_animation = self._uv_animations.ties.get(
+                (tie_class, vertex_index)
+            )
             if uv_index is not None:
                 mesh.secondary_uvs = self._tie_lightmap_uvs(
                     vertex_section,
@@ -1420,6 +1430,16 @@ class RatchetTodReader(Resistance2Reader):
             )
         return infos
 
+    @cached_property
+    def _uv_animations(self) -> TodUvAnimations:
+        if not self.old_engine_uv_animations:
+            return TodUvAnimations()
+        try:
+            return parse_uv_animations(self.main)
+        except FormatError as exc:
+            self._warn_once("uv animation", f"UV animations skipped: {exc}")
+            return TodUvAnimations()
+
     def zone_lightmap_infos(self, zone_tuid: int) -> dict[int, TextureInfo]:
         del zone_tuid
         return self._lightmap_infos
@@ -1886,6 +1906,7 @@ class RatchetTodReader(Resistance2Reader):
                         if secondary_uvs is not None
                         else None
                     ),
+                    uv_animation=self._uv_animations.ufrags.get(index),
                 )
             )
         return terrain

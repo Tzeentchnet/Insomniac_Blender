@@ -65,6 +65,7 @@ if bpy is not None:
         MobyAsset,
         PlacedInstance,
         TieAsset,
+        UvAnimation,
         Zone,
     )
 
@@ -1275,6 +1276,114 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
             "Environment",
             disabled.root.users_collection[0].children,
         )
+
+    def test_uv_animation_drives_a_material_variant(self) -> None:
+        import math
+
+        material = bpy.data.materials.new("UVAnimFixture")
+        material.use_nodes = True
+        image_node = material.node_tree.nodes.new("ShaderNodeTexImage")
+        lightmap_uv = material.node_tree.nodes.new("ShaderNodeUVMap")
+        lightmap_uv.uv_map = "LightmapUV"
+        lightmap_node = material.node_tree.nodes.new("ShaderNodeTexImage")
+        material.node_tree.links.new(
+            lightmap_uv.outputs["UV"],
+            lightmap_node.inputs["Vector"],
+        )
+        positions = np.asarray(
+            ((0, 0, 0), (1, 0, 0), (0, 1, 0)),
+            dtype=np.float32,
+        )
+        uvs = np.zeros((3, 2), dtype=np.float32)
+        indices = np.asarray((0, 1, 2), dtype=np.int32)
+        animation = UvAnimation(scroll_u=0.5, scroll_v=-0.25, rotation=0.3)
+        combined = _build_mesh(
+            "UVAnimMesh",
+            [
+                MeshGeometry(0, positions, uvs, indices),
+                MeshGeometry(
+                    0,
+                    positions,
+                    uvs,
+                    indices,
+                    uv_animation=animation,
+                ),
+            ],
+            [material],
+        )
+        mesh = combined.mesh
+        self.assertEqual(len(mesh.materials), 2)
+        self.assertIs(mesh.materials[0], material)
+        variant = mesh.materials[1]
+        self.assertEqual(
+            [polygon.material_index for polygon in mesh.polygons],
+            [0, 1],
+        )
+        self.assertEqual(
+            json.loads(variant["insomniac_uv_animation"])["scroll_u"],
+            0.5,
+        )
+        nodes = variant.node_tree.nodes
+        mapping = nodes["Insomniac_UV_Animation"]
+        animated = [
+            node
+            for node in nodes
+            if node.bl_idname == "ShaderNodeTexImage"
+            and node.inputs["Vector"].links
+            and node.inputs["Vector"].links[0].from_node == mapping
+        ]
+        self.assertEqual(len(animated), 1)
+        fcurves = variant.node_tree.animation_data.drivers
+        self.assertEqual(len(fcurves), 3)
+        self.assertTrue(
+            all(curve.driver.is_simple_expression for curve in fcurves)
+        )
+
+        scene = bpy.context.scene
+        holder = bpy.data.objects.new("UVAnimHolder", mesh)
+        scene.collection.objects.link(holder)
+        previous = (scene.render.fps, scene.render.fps_base, scene.frame_current)
+        try:
+            scene.render.fps = 30
+            scene.render.fps_base = 1.0
+            scene.frame_set(60)
+            t = 2.0
+            angle = 0.3 * t
+            location = mapping.inputs["Location"].default_value
+            self.assertAlmostEqual(
+                location[0],
+                0.5 * t - math.sin(angle),
+                5,
+            )
+            self.assertAlmostEqual(
+                location[1],
+                1.0 - math.cos(angle) + 0.25 * t,
+                5,
+            )
+            self.assertAlmostEqual(
+                mapping.inputs["Rotation"].default_value[2],
+                -angle,
+                5,
+            )
+        finally:
+            scene.render.fps, scene.render.fps_base = previous[:2]
+            scene.frame_set(previous[2])
+            bpy.data.objects.remove(holder)
+
+        again = _build_mesh(
+            "UVAnimMesh2",
+            [
+                MeshGeometry(
+                    0,
+                    positions,
+                    uvs,
+                    indices,
+                    uv_animation=animation,
+                )
+            ],
+            [material],
+        )
+        self.assertIs(again.mesh.materials[1], variant)
 
     def test_optional_geometry_uses_dedicated_collections(self) -> None:
         result = import_moby(

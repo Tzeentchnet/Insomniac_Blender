@@ -90,6 +90,9 @@ imported from the first authored LOD with masked, double-sided materials.
 Shrub meshes and clustered placements are imported from the embedded
 old-engine layout. Runtime vegetation wind, packed Shrub vertex metadata,
 Foliage custom normals, and camera-facing billboarding are not reproduced.
+Animated UVs (`0x5C00`) scroll and rotate through driven Mapping nodes on
+material variants. Their 60 Hz rotation rate and rotation sign have not been
+compared with gameplay footage.
 Baked light-colour lightmaps are applied to lit Tie placements and UFrags
 (albedo × lightmap). The per-placement light scales, the light-direction
 pool, and the 11 Metropolis Tie meshes whose lightmap UVs are out of range

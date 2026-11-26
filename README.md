@@ -81,6 +81,7 @@ fields from `PARAM.SFO` before extraction.
 | Level collision | Optional world and Tie triangle collision from the separate raw `collision.dat`, with per-face retail collision-material names and a "no wall jump" flag; disabled by default |
 | Level lighting and fog | Ambient colour, two directional lights, fog range, and bloom settings as Sun lamps and a World |
 | Baked lightmaps | Per-placement Tie lightmaps (packed into one atlas) and shared UFrag lightmaps, multiplied into the albedo |
+| Animated UVs | Scrolling and rotating textures on Ties, UFrags, and Mobys, driven by the scene clock |
 | Environment cubemaps | Decoded to equirectangular images on the level World (HDR exponent kept in alpha) |
 | Moby collision, light volumes, and VFX | Not yet implemented |
 

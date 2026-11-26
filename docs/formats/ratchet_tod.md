@@ -412,6 +412,35 @@ lighting, but Blender also applies the scene's lamps, including the
 imported Sun lamps. ReLunacy published the pool sections, the instance and
 UFrag indices, and the Tie UV stream.
 
+## Animated UVs
+
+`main.dat` section `0x5C00` starts with a `0x20`-byte header of three
+counts (UFrag, Tie, and Moby records), followed by `0x40`-byte records in
+that order:
+
+| Offset | Type | Meaning |
+|---|---|---|
+| `0x00` | `u16` | tag; high nibble 1 UFrag, 0 Tie, 2 Moby, 3 skinned Moby |
+| `0x02` | `u16` | vertex count rounded up to 4 |
+| `0x04` | `u16` | owner: UFrag ordinal, or Tie/Moby class index |
+| `0x08` | `u32` | Tie mesh first vertex index, or Moby mesh local vertex offset |
+| `0x10`, `0x14` | `f32` | scroll, UV units per second |
+| `0x18` | `f32` | rotation, radians per 60 Hz frame |
+
+The rest of the record is runtime state. Each frame the game adds the
+rotation to an angle, applies the rows `(cos, sin)` / `(-sin, cos)` about UV
+(0, 0), and adds the accumulated scroll. On all 20 levels every Tie record
+matches one mesh's first vertex and rounded count (1,313), every UFrag
+record its UFrag's rounded count (95), and every Moby record one mesh's
+local vertex offset and rounded count (1,075).
+
+The importer gives each animated mesh a material variant whose primary-UV
+image nodes read through a Mapping node. Drivers evaluate the motion from
+the scene frame and frame rate; they are simple expressions, so they run
+without Python auto-run. The 60 Hz frame rate is ReLunacy's STRONG reading,
+and the rotation sign follows the game's row order; neither has been
+compared with gameplay footage. ReLunacy published this layout.
+
 ## Fog, bloom, and global lighting
 
 `main.dat` holds one `0xF0` fog record in section `0x7100` and one `0x80`
