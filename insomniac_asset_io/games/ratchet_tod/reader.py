@@ -45,6 +45,7 @@ from ..class_names import (
     parse_tod_collision_material_names,
     read_class_id,
 )
+from .gameplay_context import read_tod_gameplay_context
 from .debug_names import (
     GAME_DEBUG_CACHE_NAME,
     MAX_DEBUG_DAT_SIZE,
@@ -381,6 +382,16 @@ class RatchetTodReader(Resistance2Reader):
         for instance, source in zip(instances, names):
             instance.name = source.name
             instance.source_guid = source.guid
+
+    def _apply_source_names(self, family: str, items: list) -> None:
+        """Attach DEBUG.DAT names to gameplay context records."""
+
+        names = self._instance_source_names(family, len(items))
+        if names is None:
+            return
+        for item, source in zip(items, names):
+            item.source_name = source.name
+            item.source_guid = source.guid
 
     def _read_ighw_index(self, path: str) -> IghwFile:
         header = self.source.read_slice(path, 0, 16)
@@ -1709,15 +1720,14 @@ class RatchetTodReader(Resistance2Reader):
             label=self.gameplay_path,
         )
         section = gameplay.section(SECT_GAMEPLAY_MOBYS)
-        if section is None:
-            return [GameplayRegion(name="art", moby_instances=[])]
-        self._validate_stride(
-            section,
-            GAMEPLAY_MOBY_STRIDE,
-            "gameplay Moby",
-        )
+        if section is not None:
+            self._validate_stride(
+                section,
+                GAMEPLAY_MOBY_STRIDE,
+                "gameplay Moby",
+            )
         instances: list[PlacedInstance] = []
-        for index in range(section.count):
+        for index in range(section.count if section is not None else 0):
             base = section.offset + index * GAMEPLAY_MOBY_STRIDE
             moby_index = gameplay.u16(base + 0x3C)
             try:
@@ -1745,11 +1755,55 @@ class RatchetTodReader(Resistance2Reader):
                 )
             )
         self._apply_instance_names("moby", instances)
+        region = GameplayRegion(name="art", moby_instances=instances)
+        try:
+            context = read_tod_gameplay_context(
+                gameplay,
+                moby_count=len(instances),
+                label=self.gameplay_path,
+            )
+        except FormatError as exc:
+            self._warn_once(
+                "gameplay context",
+                f"Gameplay volumes, paths, and Clues were skipped: {exc}",
+            )
+        else:
+            for family, items in (
+                ("path", context.paths),
+                ("volume", context.volumes),
+                ("clue", context.clues),
+                ("controller", context.controllers),
+                ("pod", context.pods),
+                ("area", context.areas),
+                ("scent", context.scents),
+            ):
+                self._apply_source_names(family, items)
+            for area in context.areas:
+                area.name = area.source_name or ""
+            region.paths = context.paths
+            region.triggers = context.volumes
+            region.clues = context.clues
+            region.controllers = context.controllers
+            region.moby_groups = context.pods
+            region.areas = context.areas
+            region.clue_groups = context.scents
+            class_ids = [item.class_id for item in instances]
+            class_ids += [clue.class_id for clue in context.clues]
+            class_ids += context.controller_class_ids
+            if any(class_id is not None for class_id in class_ids):
+                names = self.class_names
+                for clue in context.clues:
+                    clue.class_name = class_name(names, clue.class_id)
+                for controller, class_id in zip(
+                    context.controllers,
+                    context.controller_class_ids,
+                ):
+                    controller.class_name = class_name(names, class_id)
         if any(item.class_id is not None for item in instances):
             names = self.class_names
             for item in instances:
                 item.class_name = class_name(names, item.class_id)
-        return [GameplayRegion(name="art", moby_instances=instances)]
+        return [region]
 
     def consume_import_warnings(self) -> tuple[str, ...]:
         warnings = tuple(self.warnings)

@@ -402,6 +402,42 @@ class RealRatchetTodTests(unittest.TestCase):
             gameplay = reader.read_gameplay_regions()[0]
             self.assertEqual(gameplay.name, "art")
             self.assertTrue(gameplay.moby_instances)
+            self.assertEqual(
+                {
+                    "paths": len(gameplay.paths),
+                    "volumes": len(gameplay.triggers),
+                    "clues": len(gameplay.clues),
+                    "controllers": len(gameplay.controllers),
+                    "pods": len(gameplay.moby_groups),
+                    "areas": len(gameplay.areas),
+                    "scents": len(gameplay.clue_groups),
+                },
+                {
+                    "paths": 505,
+                    "volumes": 902,
+                    "clues": 77,
+                    "controllers": 465,
+                    "pods": 123,
+                    "areas": 70,
+                    "scents": 1,
+                },
+            )
+            first_clue = gameplay.clues[0]
+            self.assertEqual(first_clue.source_name, "gmap_data")
+            self.assertEqual(first_clue.class_name, "ClueGalacticMap_CLASS")
+            self.assertEqual(gameplay.clues[2].source_name, "volume197")
+            self.assertEqual(
+                gameplay.clues[2].class_name,
+                "ClueFallToDeath_CLASS",
+            )
+            controller_classes = Counter(
+                controller.class_name for controller in gameplay.controllers
+            )
+            self.assertEqual(controller_classes["CarSpawner_CLASS"], 189)
+            self.assertEqual(controller_classes["FxController_CLASS"], 168)
+            self.assertTrue(
+                all(volume.source_name for volume in gameplay.triggers)
+            )
 
             collision = reader.read_level_collision()
             validate_collision_scene(

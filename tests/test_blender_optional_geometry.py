@@ -43,6 +43,8 @@ if bpy is not None:
         CollisionMesh,
         CollisionPrimitive,
         GameplayArea,
+        GameplayClue,
+        GameplayClueGroup,
         GameplayEffect,
         GameplayMarker,
         GameplayMobyGroup,
@@ -1050,6 +1052,116 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
                 for obj in child.objects
             )
         )
+
+    def test_level_gameplay_imports_tod_clues_and_controllers(self) -> None:
+        reader = _LevelReader()
+        volume_matrix = np.diag((2.0, 1.0, 3.0, 1.0)).astype(np.float32)
+        volume_matrix[:3, 3] = (1.0, 2.0, 3.0)
+        controller_matrix = np.eye(4, dtype=np.float32)
+        controller_matrix[:3, 3] = (4.0, 5.0, 6.0)
+        reader.read_gameplay_regions = lambda: [
+            GameplayRegion(
+                name="art",
+                moby_instances=[],
+                paths=[
+                    GameplayPath(
+                        index=0,
+                        points=np.asarray(
+                            ((0.0, 0.0, 0.0), (3.0, 4.0, 0.0)),
+                            dtype=np.float32,
+                        ),
+                        flags=0x100,
+                        length=5.0,
+                    )
+                ],
+                triggers=[
+                    GameplayTrigger(
+                        index=0,
+                        shape_kind=0,
+                        matrix=volume_matrix,
+                        source_name="volume197",
+                        half_extent=1.0,
+                    )
+                ],
+                clues=[
+                    GameplayClue(
+                        index=0,
+                        class_id=0x371,
+                        trigger_index=0,
+                        payload_size=16,
+                        class_name="ClueFallToDeath_CLASS",
+                        source_name="fall_zone",
+                    )
+                ],
+                controllers=[
+                    GameplayMarker(
+                        index=0,
+                        marker_class=0x2A,
+                        matrix=controller_matrix,
+                        scale=(1.0, 1.0, 1.0),
+                        payload_size=0xA0,
+                        class_name="SoundEmitter_CLASS",
+                        source_name="emitter_a",
+                    )
+                ],
+                clue_groups=[
+                    GameplayClueGroup(
+                        index=0,
+                        clue_indices=(0,),
+                        source_name="scent_a",
+                    )
+                ],
+            )
+        ]
+
+        result = import_level(
+            bpy.context,
+            reader,
+            LevelImportOptions(
+                materials=False,
+                terrain=False,
+                ties=False,
+                vegetation=False,
+                gameplay=True,
+                convert_axes=False,
+            ),
+            source_path="fixture",
+        )
+        region = result.root.users_collection[0].children[
+            "Gameplay Instances"
+        ].children["art"]
+        self.assertEqual(
+            {child.name for child in region.children},
+            {"Paths", "Trigger Volumes", "Clues", "Controllers", "Scents"},
+        )
+
+        path = next(iter(region.children["Paths"].objects))
+        self.assertEqual(path["insomniac_path_flags"], 0x100)
+        self.assertAlmostEqual(path["insomniac_path_length"], 5.0)
+
+        volume = next(iter(region.children["Trigger Volumes"].objects))
+        self.assertEqual(volume.name, "volume197")
+        self.assertEqual(volume.empty_display_size, 1.0)
+
+        clue = next(iter(region.children["Clues"].objects))
+        self.assertEqual(clue.name, "fall_zone")
+        self.assertEqual(clue["insomniac_gameplay_kind"], "CLUE")
+        self.assertEqual(clue["insomniac_class_name"], "ClueFallToDeath_CLASS")
+        self.assertEqual(clue["insomniac_trigger_name"], "volume197")
+        self.assertEqual(clue.empty_display_type, "PLAIN_AXES")
+        self.assertAlmostEqual(clue.location.z, 3.0)
+
+        controller = next(iter(region.children["Controllers"].objects))
+        self.assertEqual(controller.name, "emitter_a")
+        self.assertEqual(controller["insomniac_gameplay_kind"], "CONTROLLER")
+        self.assertEqual(
+            controller["insomniac_class_name"],
+            "SoundEmitter_CLASS",
+        )
+
+        scent = next(iter(region.children["Scents"].objects))
+        self.assertEqual(scent.name, "scent_a")
+        self.assertEqual(json.loads(scent["insomniac_clue_indices"]), [0])
 
     def test_optional_geometry_uses_dedicated_collections(self) -> None:
         result = import_moby(

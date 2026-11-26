@@ -33,6 +33,11 @@ and the interleaved vertex slot order of TOD collision. Naming those
 material bytes from the `kMaterialID` enum table was established and
 checked on our disc.
 
+The Tools of Destruction gameplay context section IDs and record layouts
+(volumes, paths, Clues, controllers, pods, areas, and scents) follow
+ReLunacy's research. The Clue and area record layouts, the volume shape
+byte, and the volume half-extent were corrected or established on our disc.
+
 Tools of Destruction animation behavior was additionally checked through
 bounded static control-flow analysis using the MIT-licensed **Qwark's
 Awakening** recompilation framework:

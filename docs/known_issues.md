@@ -59,8 +59,10 @@ Gameplay Mobys carry their gameplay class number and name
 (`insomniac_class_id`, `insomniac_class_name`) from the game-wide
 `BUILT/GAME/DEBUG.DAT`, which level extraction copies beside the level as
 `game_debug.dat`. 453 of the 18,251 retail gameplay Mobys have no class
-block and carry neither property. Volumes, paths, Clues, controllers, and
-the other gameplay context families are not imported yet.
+block and carry neither property. Volumes, paths, Clues, controllers, pods,
+areas, and scents are imported as named, non-rendering context objects.
+Clue payloads are not decoded, and the axis of the 323 cylinder and capsule
+volumes is unverified, so they are drawn approximately.
 
 Inline animations are decoded in both observed forms. Complex clips apply
 the runtime's signed 8-bit delta scaling, while simple clips discard paired

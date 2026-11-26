@@ -166,6 +166,8 @@ or evidence-blocked work and are not represented as implemented features.
   TOD collision "no wall jump" flag (extension.md items 3 and 12).
 - [x] TOD collision material names from `kMaterialID`, and the interleaved
   collision vertex slot order.
+- [x] TOD gameplay context: volumes, paths, Clues, controllers, pods, areas,
+  and scents (extension.md item 5).
 - [ ] R2/R3 gameplay class names: the `BUILT/GAME/DEBUG.DAT` enum table is
   present, but the class number has not been located in their Moby records.
 - [ ] Global R3 effect-slot wiring: the slots contain unrelated runtime

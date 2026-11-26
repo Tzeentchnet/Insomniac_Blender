@@ -39,7 +39,8 @@ Source paths name files in the ReLunacy repository. Paths under `Loading/`,
 | 3 | Done for TOD and RFoM | Gameplay Mobys, and RFoM markers, get `insomniac_class_id` and `insomniac_class_name`. R2/R3 still need the class number located. |
 | 12 | Done, and extended | `insomniac_no_wall_jump` boolean face attribute on TOD level collision. Collision material bytes are now named from `kMaterialID`, and the collision vertex slot order was corrected. |
 | 13 | Corroborated | Our TOD reader already reads the bangle count at `+0x18` and the table at `+0x28`; no change needed. |
-| 5–11, 15–16 | Not started | |
+| 5 | Done for TOD | All seven families on all 20 levels. The Clue and area layouts were corrected, and the volume half-extent settled at 1.0 (see below). |
+| 6–11, 15–16 | Not started | |
 
 The sections below keep the original review text. Where the work above has
 overtaken it, a **Status** line says so, and the corrections that follow
@@ -184,7 +185,7 @@ Corrections to the review below, from our `BCUS98127` and `BCUS98107` discs:
 | 2 | Instance names from `ps3debug.dat` `0x25500` | RFoM | **Done** on the 37 single-group levels | Low | High |
 | 3 | Gameplay class names (kVTGenEnums) | TOD, RFoM | **Done** for Mobys and RFoM markers | Low–Med | High |
 | 4 | Complete rendering-mode table | TOD (old engine) | **Done** for TOD; other games use the generic mapping | Low | High |
-| 5 | Gameplay context: volumes, paths, Clues, controllers, areas, pods, scents | TOD | Gameplay Mobys only | Medium | High |
+| 5 | Gameplay context: volumes, paths, Clues, controllers, areas, pods, scents | TOD | **Done** | Medium | High |
 | 6 | Old-engine baked lightmaps and lightmap UVs | TOD, RFoM | Lightmaps only on R2/R3 | Med–High | High |
 | 7 | Environment cubemaps | TOD, RFoM | Not decoded | Medium | Medium |
 | 8 | Level fog, bloom, and lighting environment | TOD, RFoM | Not decoded | Low–Med | Medium |
@@ -198,10 +199,10 @@ Corrections to the review below, from our `BCUS98127` and `BCUS98107` discs:
 | 16 | Newer-engine Ratchet adapters | ACiT, QForce, A4O, ITN | Unsupported | High | Medium |
 
 The original recommended order was 14, 1, 2, 4, 3, 5, 8, 6, 7, 9, 10.
-With items 1–4 and 12–14 finished, the remaining order is 5, 8, 6, 7, 9,
-10, then 11. Item 4 can also be extended to RFoM, R2, and R3 after a visual
-review, and item 3 to R2/R3 once their class number is located. Items 5 and
-6 need the most new data.
+With items 1–5 and 12–14 finished, the remaining order is 8, 6, 7, 9, 10,
+then 11. Item 4 can also be extended to RFoM, R2, and R3 after a visual
+review, and item 3 to R2/R3 once their class number is located. Item 6
+needs the most new data.
 
 ## 1. Tools of Destruction instance names
 
@@ -346,6 +347,20 @@ disc (10,521 in total).
   stratus_city).
 
 ## 5. TOD gameplay context families
+
+**Status:** done; see the gameplay context section of
+[ratchet_tod.md](formats/ratchet_tod.md). Corrections from our disc:
+
+- A Clue record is `{u32 volume pointer, u32 payload pointer, u32 payload
+  size, u32 class number}`. It holds a pointer to the volume record, not an
+  index.
+- An area record is `{u32 path-list pointer, u32 volume-list pointer, u16
+  path count, u16 volume count, u32 0}`.
+- The volume shape is the byte at `+0x80`; the other bytes to `+0x90` are 0.
+- The unit size is settled: stored axes are half-extents (the unit shape
+  spans -1..1). Hazard Clue volumes enclose 3,015 lava faces at 1.0 against
+  13 at 0.5. The cylinder and capsule axis is still unverified.
+- Path totals equal the open polyline length, with or without flag `0x100`.
 
 ReLunacy sources: `docs/reverse/tod_volumes_clues_paths.md` and
 `Loading/Readers/OldGameplayReader.cs`. All values are big-endian; record

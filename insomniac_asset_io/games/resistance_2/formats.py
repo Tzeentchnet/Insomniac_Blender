@@ -365,6 +365,9 @@ class GameplayPath:
     points: FloatArray
     source_name: str | None = None
     source_guid: str | None = None
+    # Raw record flags and stored total length, where the game keeps them.
+    flags: int | None = None
+    length: float | None = None
 
 
 @dataclass(slots=True)
@@ -374,6 +377,9 @@ class GameplayTrigger:
     matrix: FloatArray
     source_name: str | None = None
     source_guid: str | None = None
+    # Local half-size of the unit shape the matrix scales. TOD volumes span
+    # -1..1 (proven); 0.5 is the unverified RFoM display convention.
+    half_extent: float = 0.5
 
 
 @dataclass(slots=True)
@@ -397,6 +403,29 @@ class GameplayMarker:
     source_name: str | None = None
     source_guid: str | None = None
     class_name: str | None = None
+
+
+@dataclass(slots=True)
+class GameplayClue:
+    """A typed gameplay hint attached to one trigger volume (TOD)."""
+
+    index: int
+    class_id: int
+    trigger_index: int
+    payload_size: int
+    class_name: str | None = None
+    source_name: str | None = None
+    source_guid: str | None = None
+
+
+@dataclass(slots=True)
+class GameplayClueGroup:
+    """A TOD scent: a list of Clue indices."""
+
+    index: int
+    clue_indices: tuple[int, ...]
+    source_name: str | None = None
+    source_guid: str | None = None
 
 
 @dataclass(slots=True)
@@ -428,6 +457,9 @@ class GameplayRegion:
     markers: list[GameplayMarker] = field(default_factory=list)
     moby_groups: list[GameplayMobyGroup] = field(default_factory=list)
     areas: list[GameplayArea] = field(default_factory=list)
+    clues: list[GameplayClue] = field(default_factory=list)
+    controllers: list[GameplayMarker] = field(default_factory=list)
+    clue_groups: list[GameplayClueGroup] = field(default_factory=list)
 
 
 class TrackKind(Enum):

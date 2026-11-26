@@ -74,6 +74,7 @@ fields from `PARAM.SFO` before extraction.
 | Level terrain (`UFrag`) and Tie placement | Supported |
 | Shrub and foliage level geometry | Supported as linked static meshes and placements; foliage includes first-LOD branch and sprite-card geometry |
 | Gameplay Moby placement | Supported as linked static mesh instances, with their retail gameplay class names |
+| Gameplay context | Volumes, paths, Clues, controllers, pods, areas, and scents as named, non-rendering context objects; Clues and controllers carry their class names |
 | Retail names | Prototypes, placements, gameplay Mobys, and shaders named from each level's `DEBUG.DAT`; numeric fallbacks otherwise. The bundled catalog lists the retail prototype and shader names |
 | Level collision | Optional world and Tie triangle collision from the separate raw `collision.dat`, with per-face retail collision-material names and a "no wall jump" flag; disabled by default |
 | Moby collision, lighting, VFX, and cubemaps | Not yet implemented |

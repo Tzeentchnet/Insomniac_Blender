@@ -28,6 +28,8 @@ from ..games.resistance_2.formats import (
     DecodedClip,
     DecodedTexture,
     GameplayArea,
+    GameplayClue,
+    GameplayClueGroup,
     GameplayEffect,
     GameplayMarker,
     GameplayMobyGroup,
@@ -5396,10 +5398,50 @@ def _import_gameplay_context(
                 source_group="Trigger Volumes",
                 index=trigger.index,
                 display_type=display_types[trigger.shape_kind],
+                display_size=trigger.half_extent,
             )
             obj["insomniac_shape_kind"] = shape_names[trigger.shape_kind]
             obj["insomniac_shape_kind_id"] = trigger.shape_kind
             _apply_gameplay_source_name(obj, trigger)
+            object_count += 1
+
+    if region.clues:
+        clue_collection = _child_collection(region_collection, "Clues")
+        clue_collection.hide_render = True
+        for clue in region.clues:
+            obj = _create_gameplay_clue(clue_collection, clue, region, root)
+            _apply_gameplay_source_name(obj, clue)
+            object_count += 1
+
+    if region.controllers:
+        controller_collection = _child_collection(
+            region_collection,
+            "Controllers",
+        )
+        controller_collection.hide_render = True
+        for controller in region.controllers:
+            obj = _create_gameplay_marker(
+                controller_collection,
+                controller,
+                root,
+                kind="CONTROLLER",
+                source_group="Controllers",
+                prefix="Controller",
+            )
+            _apply_gameplay_source_name(obj, controller)
+            object_count += 1
+
+    if region.clue_groups:
+        scent_collection = _child_collection(region_collection, "Scents")
+        scent_collection.hide_render = True
+        for group in region.clue_groups:
+            obj = _create_gameplay_clue_group(
+                scent_collection,
+                group,
+                region,
+                root,
+            )
+            _apply_gameplay_source_name(obj, group)
             object_count += 1
 
     if region.effects:
@@ -5541,6 +5583,10 @@ def _create_gameplay_path(
         index=path.index,
     )
     obj["insomniac_point_count"] = len(path.points)
+    if path.flags is not None:
+        obj["insomniac_path_flags"] = path.flags
+    if path.length is not None:
+        obj["insomniac_path_length"] = path.length
     return obj
 
 
@@ -5569,14 +5615,18 @@ def _create_gameplay_marker(
     collection: bpy.types.Collection,
     marker: GameplayMarker,
     root: bpy.types.Object,
+    *,
+    kind: str = "MARKER",
+    source_group: str = "Markers",
+    prefix: str = "Marker",
 ) -> bpy.types.Object:
     obj = _create_gameplay_empty(
         collection,
-        f"Marker_{marker.index:04X}_{marker.marker_class:04X}",
+        f"{prefix}_{marker.index:04X}_{marker.marker_class:04X}",
         root,
         marker.matrix,
-        kind="MARKER",
-        source_group="Markers",
+        kind=kind,
+        source_group=source_group,
         index=marker.index,
         display_type="CUBE",
     )
@@ -5586,6 +5636,68 @@ def _create_gameplay_marker(
         obj["insomniac_class_name"] = marker_class_name
     obj["insomniac_payload_size"] = marker.payload_size
     obj["insomniac_source_scale"] = marker.scale
+    return obj
+
+
+def _create_gameplay_clue(
+    collection: bpy.types.Collection,
+    clue: GameplayClue,
+    region: GameplayRegion,
+    root: bpy.types.Object,
+) -> bpy.types.Object:
+    """A Clue sits on its volume; its axes span the volume's extents."""
+
+    volume = region.triggers[clue.trigger_index]
+    obj = _create_gameplay_empty(
+        collection,
+        f"Clue_{clue.index:04X}_{clue.class_id:04X}",
+        root,
+        volume.matrix,
+        kind="CLUE",
+        source_group="Clues",
+        index=clue.index,
+        display_type="PLAIN_AXES",
+        display_size=volume.half_extent,
+    )
+    obj["insomniac_class_id"] = clue.class_id
+    if clue.class_name:
+        obj["insomniac_class_name"] = clue.class_name
+    obj["insomniac_trigger_index"] = clue.trigger_index
+    if volume.source_name:
+        obj["insomniac_trigger_name"] = volume.source_name
+    obj["insomniac_payload_size"] = clue.payload_size
+    return obj
+
+
+def _create_gameplay_clue_group(
+    collection: bpy.types.Collection,
+    group: GameplayClueGroup,
+    region: GameplayRegion,
+    root: bpy.types.Object,
+) -> bpy.types.Object:
+    matrix = np.identity(4, dtype=np.float32)
+    if group.clue_indices:
+        matrix[:3, 3] = np.mean(
+            [
+                region.triggers[
+                    region.clues[index].trigger_index
+                ].matrix[:3, 3]
+                for index in group.clue_indices
+            ],
+            axis=0,
+        )
+    obj = _create_gameplay_empty(
+        collection,
+        f"Scent_{group.index:04X}",
+        root,
+        matrix,
+        kind="CLUE_GROUP",
+        source_group="Scents",
+        index=group.index,
+        display_type="PLAIN_AXES",
+    )
+    obj["insomniac_clue_indices"] = json.dumps(group.clue_indices)
+    obj["insomniac_member_count"] = len(group.clue_indices)
     return obj
 
 

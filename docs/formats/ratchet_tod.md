@@ -334,6 +334,49 @@ TOD has one logical zone per level.
   the table names. `kVTGenEnums` has 1,754 entries, 166 of them null, and
   every classed retail placement resolves to a name (254 distinct classes).
 
+### Gameplay context
+
+The remaining `gameplay.dat` families are imported as non-rendering context
+objects. Positions are in meters, like the Moby placements. Every family
+decodes on all 20 levels: 3,196 paths with 211,229 points, 6,807 volumes,
+415 Clues, 4,790 controllers, 967 pods, 966 areas, and 17 scents.
+
+| Section | Stride | Record |
+|---|---|---|
+| `0x7700` | `0x10` | path: `{u32 first-point pointer, u32 point count, f32 total length, u32 flags}` |
+| `0x7710` | blob | path points: `x, y, z, cumulative length` |
+| `0x7740` | `0x90` | volume: row-vector 4×4 at `0x00`, inverse 3×3 at `0x40`, shape byte at `0x80`, zero to `0x90` |
+| `0x7780` | `0x10` | Clue: `{u32 volume pointer, u32 payload pointer, u32 payload size, u32 class number}` |
+| `0x77C0` | `0x30` | controller: class-block pointer, position `0x04`, ZYX rotation `0x10`, scale `vec3` `0x1C`, payload size `0x28` |
+| `0x7900` / `0x7910` | `0x10` / blob | pod: `{u32 handle-list pointer, u32 count}`; Moby handles are `(i + 1) << 16 \| i` |
+| `0x7940` / `0x7950` | `0x10` / blob | area: `{u32 path-list pointer, u32 volume-list pointer, u16 path count, u16 volume count}`; `u16` indices |
+| `0x7980` / `0x7990` | `0x10` / blob | scent: `{u32 handle-list pointer, u32 count}`; Clue handles are `0x10000 \| i` |
+
+- Volume shapes are 0 box, 1 cylinder, 2 sphere, and 3 capsule (6,450,
+  320, 34, and 3 records). Shape 2 has three equal axis lengths on 31 of 34
+  records. The stored axes are half-extents: the unit shape spans -1..1.
+  Hazard Clue volumes prove this: 3,015 `LAVA_DEFAULT` collision faces lie
+  inside their `ClueLava` boxes at half-extent 1.0 but only 13 at 0.5, and
+  quicksand gives 860 against 0. The cylinder and capsule axis (local Y, per
+  ReLunacy) is not verified; cylinders and capsules are drawn as circle and
+  sphere empties.
+- Every Clue volume pointer lands on a volume record. Clues have 24 classes,
+  for example `ClueFallToDeath_CLASS` (111) and `ClueLedgeGrab_CLASS` (40).
+  Clue payloads are not decoded.
+- Controller class blocks use the Moby class-block layout. All but 30 of the
+  4,790 controllers name a class, such as `CarSpawner_CLASS`,
+  `FxController_CLASS`, and `SoundEmitter_CLASS`.
+- Every path's cumulative point lengths match its segment lengths, and the
+  stored total equals the open polyline length, also for the 0x100-flagged
+  paths. Paths are imported as open poly curves with the flags kept as
+  metadata.
+- Each family takes its retail names from the level `DEBUG.DAT`. Areas use
+  their retail name as the object name.
+
+ReLunacy (`docs/reverse/tod_volumes_clues_paths.md`) published the section
+IDs and most layouts. The Clue and area record layouts, the shape byte, and
+the volume half-extent were corrected or settled on our disc.
+
 ## Level collision
 
 `collision.dat` is a separate raw big-endian resource, not an IGHW
