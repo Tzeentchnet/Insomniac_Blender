@@ -4030,6 +4030,16 @@ def _level_collision_mesh(
         "insomniac_material_id",
         collision.material_ids,
     )
+    for flag_name, flag_values in sorted(collision.face_flags.items()):
+        attribute = mesh.attributes.new(
+            name=flag_name,
+            type="BOOLEAN",
+            domain="FACE",
+        )
+        attribute.data.foreach_set(
+            "value",
+            np.asarray(flag_values, dtype=bool),
+        )
     return mesh
 
 
@@ -5252,6 +5262,12 @@ def _create_instance_object(
     source_guid = getattr(instance, "source_guid", None)
     if source_guid:
         obj["insomniac_source_guid"] = source_guid
+    class_id = getattr(instance, "class_id", None)
+    if class_id is not None:
+        obj["insomniac_class_id"] = class_id
+    class_name = getattr(instance, "class_name", None)
+    if class_name:
+        obj["insomniac_class_name"] = class_name
     return obj
 
 
@@ -5500,6 +5516,9 @@ def _create_gameplay_marker(
         display_type="CUBE",
     )
     obj["insomniac_marker_class"] = marker.marker_class
+    marker_class_name = getattr(marker, "class_name", None)
+    if marker_class_name:
+        obj["insomniac_class_name"] = marker_class_name
     obj["insomniac_payload_size"] = marker.payload_size
     obj["insomniac_source_scale"] = marker.scale
     return obj

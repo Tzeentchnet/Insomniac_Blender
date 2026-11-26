@@ -58,10 +58,24 @@ class RealRatchetTodIsoTests(unittest.TestCase):
             "area": 0x7940,
             "scent": 0x7980,
         }
+        from insomniac_asset_io.games.class_names import (
+            class_name,
+            parse_tod_class_names,
+            read_class_id,
+        )
+        from insomniac_asset_io.games.ratchet_tod.debug_names import (
+            GAME_DEBUG_DAT_MEMBER,
+        )
+
         adapter = get_game_adapter("RATCHET_TOD")
         levels = list_game_levels(Path(REAL_ISO), game_label=adapter.label)
         totals: Counter[str] = Counter()
         with _Iso9660Image(Path(REAL_ISO)) as image:
+            class_names = parse_tod_class_names(
+                image.read(GAME_DEBUG_DAT_MEMBER, max_size=64 * 1024 * 1024),
+                label="game DEBUG.DAT",
+            )
+            self.assertEqual(len(class_names), 1_754)
             for level in levels:
                 with self.subTest(level=level):
                     names = parse_debug_names(
@@ -114,6 +128,20 @@ class RealRatchetTodIsoTests(unittest.TestCase):
                         len(names.instances["tie"]),
                         main.require_section(0x9240).count,
                     )
+                    mobys = gameplay.section(0x7340)
+                    for index in range(mobys.count if mobys else 0):
+                        class_id = read_class_id(
+                            gameplay,
+                            gameplay.u32(mobys.offset + index * 0x48),
+                            label=level,
+                        )
+                        if class_id is None:
+                            totals["unclassed"] += 1
+                            continue
+                        self.assertIsNotNone(
+                            class_name(class_names, class_id)
+                        )
+                        totals["classed"] += 1
                     self.assertLessEqual(
                         set(names.instances),
                         set(INSTANCE_SECTIONS),
@@ -121,10 +149,13 @@ class RealRatchetTodIsoTests(unittest.TestCase):
         self.assertEqual(totals["moby"], 18_251)
         self.assertEqual(totals["MOBY"], 3_012)
         self.assertEqual(totals["TIE"], 2_048)
+        self.assertEqual(totals["classed"], 17_798)
+        self.assertEqual(totals["unclassed"], 453)
 
     def test_names_kerchu_city_from_debug_dat(self) -> None:
         from insomniac_asset_io.games.ratchet_tod.debug_names import (
             prepare_debug_dat,
+            prepare_game_debug_dat,
         )
 
         adapter = get_game_adapter("RATCHET_TOD")
@@ -142,6 +173,13 @@ class RealRatchetTodIsoTests(unittest.TestCase):
                 game_label=adapter.label,
             )
             self.assertIsNotNone(debug_dat)
+            self.assertIsNotNone(
+                prepare_game_debug_dat(
+                    Path(REAL_ISO),
+                    prepared,
+                    game_label=adapter.label,
+                )
+            )
             with GameSource.open(prepared) as source:
                 reader = RatchetTodReader(source)
                 tie = reader.asset_pointers(AssetKind.TIE)[0].tuid
@@ -166,6 +204,11 @@ class RealRatchetTodIsoTests(unittest.TestCase):
                 self.assertEqual(
                     gameplay.moby_instances[0].name,
                     "gmap_zordoom",
+                )
+                self.assertEqual(gameplay.moby_instances[0].class_id, 1082)
+                self.assertEqual(
+                    gameplay.moby_instances[0].class_name,
+                    "GMapPlanet_CLASS",
                 )
                 self.assertEqual(reader.read_shader(0).lookup_path, "gmp_12_surface")
                 self.assertEqual(reader.consume_import_warnings(), ())

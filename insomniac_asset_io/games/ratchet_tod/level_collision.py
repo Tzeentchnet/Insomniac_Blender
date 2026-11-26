@@ -24,6 +24,12 @@ _PROTOTYPE_VERTEX_OFFSET = 0x70
 _QUANTIZATION_MARKER = 1
 _YARD_TO_METERS = np.float32(0.9144)
 _POSITION_SCALE = np.float32(_YARD_TO_METERS / 1024.0)
+# The face word's top five bits (stored as ``insomniac_surface_id``) are
+# triangle flags. Bit 0 marks a surface the player cannot wall-jump from:
+# ReLunacy traced it to the TOD wall-jump check, from the layout first
+# decoded by @sowelilili. The other four flag bits remain unnamed.
+_SURFACE_FLAG_NO_WALL_JUMP = 0x01
+NO_WALL_JUMP_ATTRIBUTE = "insomniac_no_wall_jump"
 
 
 def decode_level_collision_resource(
@@ -319,6 +325,11 @@ def _decode_prototype(
         positions=positions,
         indices=indices,
         surface_ids=surface_ids,
+        face_flags={
+            NO_WALL_JUMP_ATTRIBUTE: (
+                surface_ids & _SURFACE_FLAG_NO_WALL_JUMP
+            ).astype(np.bool_),
+        },
         source_kind=source_kind,
         source_id=f"{resource_path}@0x{prototype_offset:08X}",
         metadata={

@@ -45,7 +45,7 @@ both fields from `PARAM.SFO`.
 | Blender Asset Browser | Moby, Tie, Shrub, and Foliage Collections plus standalone Material and optional Action assets |
 | Region terrain and Tie placement | Supported |
 | Shrub and foliage level geometry | Supported as linked static meshes and placements; foliage includes branch and sprite geometry |
-| Gameplay groups | Primary Mobys as linked static mesh instances; paths, trigger volumes, effects, typed markers, Moby groups, and named areas as non-rendering context |
+| Gameplay groups | Primary Mobys as linked static mesh instances; paths, trigger volumes, effects, typed markers, Moby groups, and named areas as non-rendering context. Mobys and markers carry their retail gameplay class name |
 | Retail names | Gameplay records named from `ps3debug.dat` on single-group levels; assets keep deterministic `Moby_XXXX`, `Tie_XXXXXXXX`, and `Material_XXXX` names |
 | Level collision | Optional world, Tie, and collision-only placed triangle meshes from `ps3levelcoll.dat`; disabled by default |
 | Lightmaps, lighting, renderable VFX, cubemaps, and embedded gameplay payload semantics | Not yet implemented |
@@ -73,9 +73,9 @@ fields from `PARAM.SFO` before extraction.
 | Blender Asset Browser | Moby, Tie, Shrub, and Foliage Collections plus standalone Material and optional Action assets |
 | Level terrain (`UFrag`) and Tie placement | Supported |
 | Shrub and foliage level geometry | Supported as linked static meshes and placements; foliage includes first-LOD branch and sprite-card geometry |
-| Gameplay Moby placement | Supported as linked static mesh instances |
+| Gameplay Moby placement | Supported as linked static mesh instances, with their retail gameplay class names |
 | Retail names | Prototypes, placements, gameplay Mobys, and shaders named from each level's `DEBUG.DAT`; numeric fallbacks otherwise. The bundled catalog lists the retail prototype and shader names |
-| Level collision | Optional world and Tie triangle collision from the separate raw `collision.dat`; disabled by default |
+| Level collision | Optional world and Tie triangle collision from the separate raw `collision.dat`, with a per-face "no wall jump" flag; disabled by default |
 | Moby collision, lighting, VFX, and cubemaps | Not yet implemented |
 
 See [Tools of Destruction formats](docs/formats/ratchet_tod.md) and

@@ -326,6 +326,9 @@ class PlacedInstance:
     lightmap_index: int | None = None
     lightmap_zone_tuid: int | None = None
     source_guid: str | None = None
+    # Old-engine gameplay class number and its kVTGenEnums name.
+    class_id: int | None = None
+    class_name: str | None = None
 
 
 @dataclass(slots=True)
@@ -393,6 +396,7 @@ class GameplayMarker:
     payload_size: int
     source_name: str | None = None
     source_guid: str | None = None
+    class_name: str | None = None
 
 
 @dataclass(slots=True)

@@ -38,7 +38,14 @@ from ..resistance_2.reader import (
     _matrix_from_zyx,
 )
 from ..resistance_2.textures import decode_texture, texture_mip_size
+from ..class_names import (
+    ClassNames,
+    class_name,
+    parse_tod_class_names,
+    read_class_id,
+)
 from .debug_names import (
+    GAME_DEBUG_CACHE_NAME,
     MAX_DEBUG_DAT_SIZE,
     DebugInstanceName,
     TodDebugNames,
@@ -158,6 +165,8 @@ class RatchetTodReader(Resistance2Reader):
         self._debug_names_loaded = False
         self._debug_names_value: TodDebugNames | None = None
         self._debug_rejected_tables: set[str] = set()
+        self._class_names_loaded = False
+        self._class_names_value: ClassNames | None = None
 
     def _optional_level_resource(self, filename: str) -> str | None:
         try:
@@ -224,6 +233,58 @@ class RatchetTodReader(Resistance2Reader):
                     f"Level DEBUG.DAT names are unavailable: {exc}",
                 )
         return self._debug_names_value
+
+    def _read_game_debug_dat(self) -> tuple[str, bytes] | None:
+        """Return the game-wide ``BUILT/GAME/DEBUG.DAT``, when available.
+
+        Level extraction copies it beside ``level_cached.psarc`` as
+        ``game_debug.dat``; a directory source may hold it at its disc path.
+        """
+
+        matches = [
+            path
+            for path in self.source.paths
+            if path.casefold().endswith("built/game/debug.dat")
+            or path.casefold().endswith("/" + GAME_DEBUG_CACHE_NAME)
+            or path.casefold() == GAME_DEBUG_CACHE_NAME
+        ]
+        if len(matches) == 1:
+            path = matches[0]
+            if self.source.size(path) > MAX_DEBUG_DAT_SIZE:
+                raise FormatError(f"{path}: DEBUG.DAT is unreasonably large")
+            return path, self.source.read(path)
+        if matches:
+            return None
+        selected = self.source.selected_path
+        if selected is None:
+            return None
+        candidate = (
+            selected if selected.is_dir() else selected.parent
+        ) / GAME_DEBUG_CACHE_NAME
+        if not candidate.is_file():
+            return None
+        if candidate.stat().st_size > MAX_DEBUG_DAT_SIZE:
+            raise FormatError(f"{candidate}: DEBUG.DAT is unreasonably large")
+        return str(candidate), candidate.read_bytes()
+
+    @property
+    def class_names(self) -> ClassNames | None:
+        if not self._class_names_loaded:
+            self._class_names_loaded = True
+            try:
+                located = self._read_game_debug_dat()
+                if located is not None:
+                    path, data = located
+                    self._class_names_value = parse_tod_class_names(
+                        data,
+                        label=path,
+                    )
+            except (FormatError, MissingResourceError, OSError) as exc:
+                self._warn_once(
+                    "game debug.dat",
+                    f"Gameplay class names are unavailable: {exc}",
+                )
+        return self._class_names_value
 
     def _warn_once(self, key: str, message: str) -> None:
         if key in self._debug_rejected_tables:
@@ -1623,6 +1684,15 @@ class RatchetTodReader(Resistance2Reader):
         for index in range(section.count):
             base = section.offset + index * GAMEPLAY_MOBY_STRIDE
             moby_index = gameplay.u16(base + 0x3C)
+            try:
+                class_id = read_class_id(
+                    gameplay,
+                    gameplay.u32(base),
+                    label=f"{self.gameplay_path} Moby {index}",
+                )
+            except FormatError as exc:
+                self._warn_once("moby class", f"{exc}; class omitted")
+                class_id = None
             instances.append(
                 PlacedInstance(
                     asset_tuid=moby_index,
@@ -1635,9 +1705,14 @@ class RatchetTodReader(Resistance2Reader):
                         gameplay.vec3(base + 0x24),
                         gameplay.f32(base + 0x30),
                     ),
+                    class_id=class_id,
                 )
             )
         self._apply_instance_names("moby", instances)
+        if any(item.class_id is not None for item in instances):
+            names = self.class_names
+            for item in instances:
+                item.class_name = class_name(names, item.class_id)
         return [GameplayRegion(name="art", moby_instances=instances)]
 
     def consume_import_warnings(self) -> tuple[str, ...]:

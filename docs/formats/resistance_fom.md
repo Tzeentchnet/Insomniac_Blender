@@ -237,7 +237,16 @@ and two zero/reserved words:
 | `0xA0` | named areas | `0x60` |
 
 Primary Moby position, ZYX Euler rotation, and class ID are at record offsets
-`0x10`, `0x1C`, and `0x3C`. Positions are converted from yards to meters and
+`0x10`, `0x1C`, and `0x3C`. (This "class ID" is the render Moby prototype.)
+The first word points to an embedded IGHW 0.2 block whose `0x25200` payload
+starts with the `u32` gameplay class number; zero means no block (1,290 of
+16,422 primary-group retail records). Gameplay class numbers index the
+`kVTGenEnums` row of the game-wide `packed/game/ps3debug.dat` in
+`GAME.PSARC`. Its section `0x25500` is `{u32 rows, u32 row count}`, and
+each `0x10`-byte row is `{u32 string-offset array, u32 count, u32 count,
+u32 flags}`. `kVTGenEnums` has 1,310 entries (38 null), and every classed
+retail record resolves to a name (95 distinct classes). Marker payloads use
+the same class numbers. Positions are converted from yards to meters and
 the records remain the only gameplay family routed through the renderable
 Moby importer.
 

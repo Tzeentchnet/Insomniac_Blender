@@ -22,6 +22,14 @@ shader rendering-mode names, follow research published by ReLunacy
 pairing, GUID encoding, and the RFoM kind-to-family mapping were re-verified
 against our own disc builds before adoption.
 
+The location of the gameplay class number (the `0x25200` payload of a
+record's embedded IGHW block) and the TOD `kVTGenEnums` class-name table
+also follow ReLunacy's research. The RFoM table location and the row layout
+were established and checked on our discs. The Tools of Destruction
+collision face-word layout was first decoded by @sowelilili
+(ReLunacy-ToD-tools); ReLunacy traced its flag bit 0 to the game's
+wall-jump check.
+
 Tools of Destruction animation behavior was additionally checked through
 bounded static control-flow analysis using the MIT-licensed **Qwark's
 Awakening** recompilation framework:

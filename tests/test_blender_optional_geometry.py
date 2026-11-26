@@ -302,6 +302,8 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
         shrub = reader.zones[0].shrub_instances[0]
         shrub.name = "grass_7"
         shrub.source_guid = "48577f73-3e0a-43e8-b5be-5608b1c28779"
+        shrub.class_id = 489
+        shrub.class_name = "BreakableBoltCrate_CLASS"
         import_level(
             bpy.context,
             reader,
@@ -325,6 +327,11 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
                 "48577f73-3e0a-43e8-b5be-5608b1c28779",
             )
             self.assertEqual(obj["insomniac_instance_tuid"], f"0x{10:016X}")
+            self.assertEqual(obj["insomniac_class_id"], 489)
+            self.assertEqual(
+                obj["insomniac_class_name"],
+                "BreakableBoltCrate_CLASS",
+            )
             self.assertEqual(
                 obj.data["insomniac_source_name"],
                 "object/plant/test_shrub",
@@ -335,6 +342,7 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
                 if item.get("insomniac_asset_kind") == "FOLIAGE"
             )
             self.assertNotIn("insomniac_source_guid", foliage)
+            self.assertNotIn("insomniac_class_id", foliage)
             self.assertNotIn("insomniac_source_name", foliage.data)
 
     def test_mesh_preserves_secondary_uvs_and_point_colors(self) -> None:
@@ -605,6 +613,9 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
                     ),
                     surface_ids=np.asarray((7, 8), dtype=np.int32),
                     material_ids=np.asarray((2, 2), dtype=np.int32),
+                    face_flags={
+                        "insomniac_no_wall_jump": np.asarray((True, False)),
+                    },
                     source_kind="TIE",
                     source_id="0x1234",
                     metadata={"prototype_flags": 5},
@@ -692,6 +703,13 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
                 for item in mesh.attributes["insomniac_material_id"].data
             ),
             (2, 2),
+        )
+        self.assertEqual(
+            tuple(
+                item.value
+                for item in mesh.attributes["insomniac_no_wall_jump"].data
+            ),
+            (True, False),
         )
         self.assertEqual(
             json.loads(mesh["insomniac_collision_metadata"]),
@@ -912,6 +930,7 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
                         matrix=marker_matrix,
                         scale=(2.0, 3.0, 4.0),
                         payload_size=80,
+                        class_name="FxController_CLASS",
                     )
                 ],
                 moby_groups=[GameplayMobyGroup(index=0, moby_indices=(0,))],
@@ -981,6 +1000,7 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
         marker = next(iter(region.children["Markers"].objects))
         self.assertIsNone(marker.data)
         self.assertEqual(marker["insomniac_marker_class"], 0x43E)
+        self.assertEqual(marker["insomniac_class_name"], "FxController_CLASS")
         self.assertEqual(marker["insomniac_payload_size"], 80)
 
         group = next(iter(region.children["Moby Groups"].objects))

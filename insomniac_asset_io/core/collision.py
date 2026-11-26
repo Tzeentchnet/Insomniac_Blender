@@ -13,6 +13,7 @@ CollisionMetadataValue: TypeAlias = bool | int | float | str
 CollisionMetadata: TypeAlias = dict[str, CollisionMetadataValue]
 FloatArray: TypeAlias = NDArray[np.float32]
 IntArray: TypeAlias = NDArray[np.int32]
+BoolArray: TypeAlias = NDArray[np.bool_]
 
 
 @dataclass(slots=True)
@@ -23,6 +24,8 @@ class CollisionMesh:
     indices: IntArray
     surface_ids: IntArray | None = None
     material_ids: IntArray | None = None
+    # Derived per-face booleans, keyed by Blender attribute name.
+    face_flags: dict[str, BoolArray] = field(default_factory=dict)
     source_kind: str = ""
     source_id: str | None = None
     metadata: CollisionMetadata = field(default_factory=dict)
@@ -160,6 +163,18 @@ def _validate_mesh(mesh: CollisionMesh, *, label: str) -> None:
         len(indices),
         label=f"{label} collision mesh {mesh.mesh_id!r} material IDs",
     )
+    for flag_name, flag_values in mesh.face_flags.items():
+        if not isinstance(flag_name, str) or not flag_name:
+            raise FormatError(
+                f"{label}: collision mesh {mesh.mesh_id!r} has an empty "
+                "face-flag name"
+            )
+        flags = np.asarray(flag_values)
+        if flags.shape != (len(indices),) or flags.dtype != np.bool_:
+            raise FormatError(
+                f"{label}: collision mesh {mesh.mesh_id!r} face flag "
+                f"{flag_name!r} must be {len(indices)} booleans"
+            )
     _validate_metadata(
         mesh.metadata,
         label=f"{label} collision mesh {mesh.mesh_id!r}",

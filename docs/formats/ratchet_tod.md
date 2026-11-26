@@ -325,6 +325,14 @@ TOD has one logical zone per level.
 - `gameplay.dat:0x7340` contains `0x48`-byte Moby placements. Position,
   ZYX Euler rotation, uniform scale, and local Moby index are at
   `0x18`, `0x24`, `0x30`, and `0x3C`.
+- A placement's first word points to an embedded IGHW 0.2 class block in
+  `gameplay.dat`. Its `0x25200` payload starts with the `u32` gameplay class
+  number. Zero means no class block (453 of 18,251 retail placements).
+- Class numbers index the `kVTGenEnums` row of the game-wide
+  `BUILT/GAME/DEBUG.DAT`. Section `0x25600` holds `0x10`-byte rows of
+  `{u32 string-offset array, u32 count, u32 count, u32 flags}`; row 0 lists
+  the table names. `kVTGenEnums` has 1,754 entries, 166 of them null, and
+  every classed retail placement resolves to a name (254 distinct classes).
 
 ## Level collision
 
@@ -392,7 +400,13 @@ the same compact fields as later PS3 collision:
 - A: `(word >> 18) & 0x1FF`
 - B: `(word >> 9) & 0x1FF`
 - C: `word & 0x1FF`
-- surface: `word >> 27`
+- surface flags: `word >> 27`
+
+The importer keeps the five flag bits as `insomniac_surface_id`. Flag bit 0
+(word bit 27) marks a surface the player cannot wall-jump from and is also
+exposed as the boolean `insomniac_no_wall_jump` attribute. ReLunacy traced
+it to the game's wall-jump check; the face-word layout was first decoded by
+@sowelilili. The other flag bits are unnamed.
 
 The aligned geometry-data length ends after the face words; the larger
 record extent includes trailing runtime acceleration data. Repeated-index,

@@ -20,6 +20,11 @@ from ...core.errors import FormatError
 
 LOGGER = logging.getLogger(__name__)
 
+# The game-wide enum lookup file (gameplay class names), stored beside the
+# level files under its own name so it never matches the level ps3debug.dat.
+GAME_DEBUG_PSARC_MEMBER = "packed/game/ps3debug.dat"
+GAME_DEBUG_CACHE_NAME = "game_ps3debug.dat"
+
 SECT_DEBUG_NAMES = 0x25500
 RECORD_STRIDE = 0x10
 MAX_RECORDS = 1_000_000
@@ -148,5 +153,41 @@ def prepare_debug_dat(
     except (InsomniacError, OSError) as exc:
         target.unlink(missing_ok=True)
         LOGGER.warning("%s: ps3debug.dat names unavailable: %s", level, exc)
+        return None
+    return target
+
+
+def prepare_game_debug_dat(
+    iso_path,
+    cached_level,
+    *,
+    container_member: str,
+    game_label: str,
+) -> Path | None:
+    """Extract the game-wide ``ps3debug.dat`` (class names) for a level."""
+
+    from ...core.errors import InsomniacError
+    from ...core.iso import _extract_psarc_members_from_iso
+    from ..class_names import parse_rfom_class_names
+
+    folder = Path(cached_level)
+    if folder.is_file():
+        folder = folder.parent
+    target = folder / GAME_DEBUG_CACHE_NAME
+    if target.is_file():
+        return target
+    try:
+        _extract_psarc_members_from_iso(
+            Path(iso_path),
+            container_member,
+            {GAME_DEBUG_PSARC_MEMBER: target},
+            game_label=game_label,
+        )
+        if target.stat().st_size > MAX_DEBUG_DAT_SIZE:
+            raise FormatError(f"{target}: ps3debug.dat is unreasonably large")
+        parse_rfom_class_names(target.read_bytes(), label=str(target))
+    except (InsomniacError, OSError) as exc:
+        target.unlink(missing_ok=True)
+        LOGGER.warning("Gameplay class names unavailable: %s", exc)
         return None
     return target

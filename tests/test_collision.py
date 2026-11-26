@@ -20,6 +20,7 @@ class CollisionModelTests(unittest.TestCase):
                 self._mesh(
                     surface_ids=np.asarray((7,), dtype=np.int32),
                     material_ids=np.asarray((3,), dtype=np.int32),
+                    face_flags={"no_wall_jump": np.asarray((True,))},
                     metadata={"flags": 5, "walkable": True},
                 ),
             ),
@@ -97,6 +98,21 @@ class CollisionModelTests(unittest.TestCase):
                     instances=(self._instance(),),
                 )
             )
+
+    def test_rejects_mismatched_face_flags(self) -> None:
+        for flags in (
+            np.asarray((True, False)),
+            np.asarray((1,), dtype=np.int32),
+        ):
+            mesh = self._mesh(face_flags={"no_wall_jump": flags})
+            with self.subTest(flags=flags):
+                with self.assertRaisesRegex(FormatError, "face flag"):
+                    validate_collision_scene(
+                        CollisionScene(
+                            meshes=(mesh,),
+                            instances=(self._instance(),),
+                        )
+                    )
 
     def test_rejects_unknown_instance_mesh(self) -> None:
         instance = self._instance()

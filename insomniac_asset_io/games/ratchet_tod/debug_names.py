@@ -50,6 +50,11 @@ INSTANCE_SECTIONS = {
     "scent": 0x79A0,
 }
 
+# The game-wide enum lookup file (gameplay class names), cached beside the
+# level archives under its own name so it never matches a level DEBUG.DAT.
+GAME_DEBUG_DAT_MEMBER = "PS3_GAME/USRDIR/BUILT/GAME/DEBUG.DAT"
+GAME_DEBUG_CACHE_NAME = "game_debug.dat"
+
 # Shader name records: name pointer at +0x08 and four texture source paths
 # at +0x20.
 SHADER_SECTION = 0x5D00
@@ -215,6 +220,44 @@ def prepare_debug_dat(
         parse_debug_names(data, label=f"{level_name}/DEBUG.DAT")
     except (InsomniacError, OSError) as exc:
         LOGGER.warning("%s: DEBUG.DAT names unavailable: %s", level_name, exc)
+        return None
+    folder.mkdir(parents=True, exist_ok=True)
+    temporary = target.with_name(f".{target.name}.tmp")
+    temporary.write_bytes(data)
+    temporary.replace(target)
+    return target
+
+
+def prepare_game_debug_dat(
+    iso_path,
+    cached_level,
+    *,
+    game_label: str,
+) -> Path | None:
+    """Copy the game-wide DEBUG.DAT (class names) beside the level archive.
+
+    Optional, like the level file: failure leaves class names unset.
+    """
+
+    from ...core.errors import InsomniacError
+    from ...core.iso import read_game_iso_member
+    from ..class_names import parse_tod_class_names
+
+    level_file = Path(cached_level)
+    folder = level_file if level_file.is_dir() else level_file.parent
+    target = folder / GAME_DEBUG_CACHE_NAME
+    if target.is_file():
+        return target
+    try:
+        data = read_game_iso_member(
+            iso_path,
+            GAME_DEBUG_DAT_MEMBER,
+            game_label=game_label,
+            max_size=MAX_DEBUG_DAT_SIZE,
+        )
+        parse_tod_class_names(data, label="BUILT/GAME/DEBUG.DAT")
+    except (InsomniacError, OSError) as exc:
+        LOGGER.warning("Gameplay class names unavailable: %s", exc)
         return None
     folder.mkdir(parents=True, exist_ok=True)
     temporary = target.with_name(f".{target.name}.tmp")

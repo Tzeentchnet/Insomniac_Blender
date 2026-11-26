@@ -231,6 +231,10 @@ class RatchetTodLevelCollisionTests(unittest.TestCase):
             (YARD_TO_METERS, YARD_TO_METERS, 0.0),
         )
         np.testing.assert_array_equal(scene.meshes[0].surface_ids, (7,))
+        np.testing.assert_array_equal(
+            scene.meshes[0].face_flags["insomniac_no_wall_jump"],
+            (True,),
+        )
         self.assertEqual(
             scene.meshes[0].metadata["discarded_degenerate_faces"],
             2,

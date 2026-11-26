@@ -35,7 +35,17 @@ from ..resistance_2.formats import (
 )
 from ..resistance_2.reader import MAX_BONES, MAX_MESHES, _matrix_from_zyx
 from ..resistance_2.textures import texture_mip_size
-from .debug_names import MAX_DEBUG_DAT_SIZE, parse_debug_names
+from ..class_names import (
+    ClassNames,
+    class_name,
+    parse_rfom_class_names,
+    read_class_id,
+)
+from .debug_names import (
+    GAME_DEBUG_CACHE_NAME,
+    MAX_DEBUG_DAT_SIZE,
+    parse_debug_names,
+)
 from .level_collision import decode_level_collision_resource
 
 LOGGER = logging.getLogger(__name__)
@@ -161,6 +171,45 @@ class ResistanceFomReader(RatchetTodReader):
         self._texture_cache: dict[int, DecodedTexture] = {}
         self._animation_offsets: dict[int, tuple[int, ...]] = {}
         self.warnings: list[str] = []
+        self._debug_rejected_tables: set[str] = set()
+        self._class_names_loaded = False
+        self._class_names_value: ClassNames | None = None
+
+    @property
+    def class_names(self) -> ClassNames | None:
+        """Class names from the game-wide ``packed/game/ps3debug.dat``.
+
+        Level extraction stores it beside the level files as
+        ``game_ps3debug.dat``; an extracted ``GAME.PSARC`` tree may also hold
+        it at its archive path.
+        """
+
+        if not self._class_names_loaded:
+            self._class_names_loaded = True
+            matches = [
+                path
+                for path in self.source.paths
+                if path.casefold().endswith("packed/game/ps3debug.dat")
+                or path.casefold().endswith("/" + GAME_DEBUG_CACHE_NAME)
+                or path.casefold() == GAME_DEBUG_CACHE_NAME
+            ]
+            try:
+                if len(matches) == 1:
+                    path = matches[0]
+                    if self.source.size(path) > MAX_DEBUG_DAT_SIZE:
+                        raise FormatError(
+                            f"{path}: ps3debug.dat is unreasonably large"
+                        )
+                    self._class_names_value = parse_rfom_class_names(
+                        self.source.read(path),
+                        label=path,
+                    )
+            except (FormatError, MissingResourceError, OSError) as exc:
+                self._warn_once(
+                    "game ps3debug.dat",
+                    f"Gameplay class names are unavailable: {exc}",
+                )
+        return self._class_names_value
 
     def asset_pointers(
         self,
@@ -1312,6 +1361,15 @@ class ResistanceFomReader(RatchetTodReader):
         for index in range(item_count):
             base = items_offset + index * GAMEPLAY_MOBY_STRIDE
             moby_id = gameplay.u16(base + 0x3C)
+            try:
+                class_id = read_class_id(
+                    gameplay,
+                    gameplay.u32(base),
+                    label=f"{self.gameplay_path} Moby {index}",
+                )
+            except FormatError as exc:
+                self._warn_once("moby class", f"{exc}; class omitted")
+                class_id = None
             position = tuple(
                 value * float(YARD_TO_METERS)
                 for value in gameplay.vec3(base + 0x10)
@@ -1326,6 +1384,7 @@ class ResistanceFomReader(RatchetTodReader):
                         gameplay.vec3(base + 0x1C),
                         1.0,
                     ),
+                    class_id=class_id,
                 )
             )
         paths = self._read_gameplay_paths(gameplay, instances_offset)
@@ -1343,6 +1402,13 @@ class ResistanceFomReader(RatchetTodReader):
             len(paths),
             len(triggers),
         )
+        if instances or markers:
+            names = self.class_names
+            for item in instances:
+                item.class_name = class_name(names, item.class_id)
+            # Marker payloads carry the same gameplay class number.
+            for marker in markers:
+                marker.class_name = class_name(names, marker.marker_class)
         self._apply_debug_names(
             group_count=gameplay.u32(section.offset + 0x24),
             families={

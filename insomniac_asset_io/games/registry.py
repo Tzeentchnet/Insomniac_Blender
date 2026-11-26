@@ -260,11 +260,20 @@ def _prepare_resistance_fom_level_dependencies(
     cached_level: Path,
 ) -> None:
     del cache_directory
-    from .resistance_fom.debug_names import prepare_debug_dat
+    from .resistance_fom.debug_names import (
+        prepare_debug_dat,
+        prepare_game_debug_dat,
+    )
 
     prepare_debug_dat(
         iso_path,
         level_name,
+        cached_level,
+        container_member=adapter.iso_container_member or "",
+        game_label=adapter.label,
+    )
+    prepare_game_debug_dat(
+        iso_path,
         cached_level,
         container_member=adapter.iso_container_member or "",
         game_label=adapter.label,
@@ -308,6 +317,13 @@ def _prepare_ratchet_tod_level_dependencies(
         iso_path,
         level_name,
         cached_level,
+    )
+    from .ratchet_tod.debug_names import prepare_game_debug_dat
+
+    prepare_game_debug_dat(
+        iso_path,
+        cached_level,
+        game_label=adapter.label,
     )
 
 

@@ -111,6 +111,7 @@ class RealResistanceFomDebugNameTests(unittest.TestCase):
                 temporary,
             )
             self.assertTrue((prepared / "ps3debug.dat").is_file())
+            self.assertTrue((prepared / "game_ps3debug.dat").is_file())
             with GameSource.open(prepared) as source:
                 reader = ResistanceFomReader(source)
                 region = reader.read_gameplay_regions()[0]
@@ -121,6 +122,25 @@ class RealResistanceFomDebugNameTests(unittest.TestCase):
                 self.assertEqual(
                     region.moby_instances[0].source_guid,
                     "2ba161ab-87cb-41e5-a591-103772389c54",
+                )
+                self.assertEqual(region.moby_instances[0].class_id, 824)
+                self.assertEqual(
+                    region.moby_instances[0].class_name,
+                    "Bot_MediumAlien_CLASS",
+                )
+                self.assertEqual(
+                    sum(
+                        item.class_name is not None
+                        for item in region.moby_instances
+                    ),
+                    498,
+                )
+                self.assertEqual(
+                    {marker.class_name for marker in region.markers[:3]},
+                    {"FxController_CLASS"},
+                )
+                self.assertTrue(
+                    all(marker.class_name for marker in region.markers)
                 )
                 self.assertEqual(
                     region.paths[0].source_name,

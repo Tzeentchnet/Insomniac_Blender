@@ -14,6 +14,11 @@ and areas take retail names and GUIDs from the level's `ps3debug.dat` on the
 groups (`level200`, `level210`, `level220`, `level230`) share one ambiguous
 table across groups and keep numeric names. No prototype name table is known,
 so Moby, Tie, and Material assets keep deterministic numeric names.
+Gameplay Mobys and markers on every level carry their gameplay class number
+and, from the game-wide `packed/game/ps3debug.dat`, its class name
+(`insomniac_class_id`, `insomniac_class_name`). A gameplay class is not a
+render prototype, so assets are not renamed from it. Only the primary
+gameplay group's Mobys are decoded.
 
 The primary gameplay Moby group is imported as linked static geometry. The
 six following groups are imported as non-rendering paths, trigger volumes,
@@ -50,6 +55,13 @@ identities can collide between levels; catalog identifiers include the owner
 level to keep those assets distinct. Some retail instance names are bare
 numbers such as `1` or `10`; they are imported as authored.
 
+Gameplay Mobys carry their gameplay class number and name
+(`insomniac_class_id`, `insomniac_class_name`) from the game-wide
+`BUILT/GAME/DEBUG.DAT`, which level extraction copies beside the level as
+`game_debug.dat`. 453 of the 18,251 retail gameplay Mobys have no class
+block and carry neither property. Volumes, paths, Clues, controllers, and
+the other gameplay context families are not imported yet.
+
 Inline animations are decoded in both observed forms. Complex clips apply
 the runtime's signed 8-bit delta scaling, while simple clips discard paired
 filler frames and use the effective half frame rate. Gameplay instances in a
@@ -62,7 +74,11 @@ level-collision option imports the separate non-IGHW `collision.dat` for
 verified world and Tie triangle collision. Its packed low-24-bit value
 identifies a collision component, not a unique render-asset owner, so the
 importer preserves that value without guessing an asset identity for
-colocated Tie placements. No primitive prototype family has been observed in
+colocated Tie placements. The face word's top five bits are kept as
+`insomniac_surface_id`; bit 0 of that value is also exposed as the boolean
+`insomniac_no_wall_jump` face attribute. The other four flag bits and the
+collision material IDs remain unnamed. No primitive prototype family has
+been observed in
 the tested TOD files. Foliage branch meshes, sprite cards, and placements are
 imported from the first authored LOD with masked, double-sided materials.
 Shrub meshes and clustered placements are imported from the embedded

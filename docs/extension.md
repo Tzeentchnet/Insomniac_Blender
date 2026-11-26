@@ -36,7 +36,14 @@ Source paths name files in the ReLunacy repository. Paths under `Loading/`,
 | 1 | Done, from `DEBUG.DAT` | All 20 levels have one, so prototypes and shaders are named too, not only instances. |
 | 2 | Done | 37 of 41 levels; the four multi-group levels keep numeric names. |
 | 4 | Done for TOD | The same byte exists in RFoM, R2, and R3, which still use the generic mapping. |
-| 3, 5–13, 15–16 | Not started | |
+| 3 | Done for TOD and RFoM | Gameplay Mobys, and RFoM markers, get `insomniac_class_id` and `insomniac_class_name`. R2/R3 still need the class number located. |
+| 12 | Done | `insomniac_no_wall_jump` boolean face attribute on TOD level collision. |
+| 13 | Corroborated | Our TOD reader already reads the bangle count at `+0x18` and the table at `+0x28`; no change needed. |
+| 5–11, 15–16 | Not started | |
+
+The sections below keep the original review text. Where the work above has
+overtaken it, a **Status** line says so, and the corrections that follow
+take precedence over the review text.
 
 Corrections to the review below, from our `BCUS98127` and `BCUS98107` discs:
 
@@ -64,6 +71,32 @@ Corrections to the review below, from our `BCUS98127` and `BCUS98107` discs:
   glass texel `0x699B` now decodes as grey-blue (153, 153, 187) at alpha 0.4
   instead of opaque-ish teal. Code `2`/`0x82` (GCM A1R5G5B5) occurs in no
   corpus, and its decoder (alpha in bit 0) is unverified.
+- **Item 3, class tables.** TOD's class table is in the game-wide
+  `PS3_GAME/USRDIR/BUILT/GAME/DEBUG.DAT` (loose on the disc), not in
+  `built/game/game.dat`. Section `0x25600` is the row table itself:
+  `{u32 string-offset array, u32 count, u32 count, u32 flags}` per `0x10`
+  row. Row 0 lists the table names; `kVTGenEnums` (row 1) has 1,754
+  entries, 166 of them null. The RFoM file is `packed/game/ps3debug.dat`
+  inside `GAME.PSARC`. There, section `0x25500` is a header
+  `{u32 rows, u32 row count}` that points to the same row layout, and
+  `kVTGenEnums` has 1,310 entries (38 null). A row is dense, and indexed
+  directly by value, only when its flags are 0 and its two counts agree;
+  the class row is dense in both games.
+- **Item 3, class blocks.** A gameplay Moby record's first word points to an
+  IGHW 0.2 block whose `0x25200` payload starts with the class number. A
+  null pointer means no class data (453 of 18,251 TOD Mobys; 1,290 of
+  16,422 primary-group RFoM Mobys). Every other record resolves to a
+  non-null name: 17,798 TOD Mobys over 254 classes and 15,132 RFoM Mobys
+  over 95 classes. Spot checks agree with the retail instance and prototype
+  names: breakable crates are `BreakableBoltCrate_CLASS` and swarmer pods
+  are `Swarmer_Egg_CLASS`. RFoM marker payloads carry the same class
+  number; all 1,123 markers on level20 resolve, mostly to
+  `FxController_CLASS`.
+- **Item 3, further tables.** The same files hold other enum tables,
+  including `kMaterialClass`, `kMaterialSubclass`, and `kMaterialID` (71
+  `COLL_MATERIAL_*` names on TOD). These are leads for naming collision
+  materials. The mapping from collision face data to `kMaterialID` has not
+  been checked.
 
 ### Resistance 2 and Resistance 3 cross-check
 
@@ -105,10 +138,9 @@ Corrections to the review below, from our `BCUS98127` and `BCUS98107` discs:
   - @PredatorCZ (InsomniaToolset)
   - @sowelilili (the Tools of Destruction collision layout, from
     ReLunacy-ToD-tools)
-- [NOTICE.md](../NOTICE.md) currently links ReLunacy to
-  `github.com/Mrroboto9819/ReLunacy`. That is a fork; the upstream is
-  `github.com/VELD-Dev/ReLunacy`. Correct the link when NOTICE.md is next
-  edited.
+- [NOTICE.md](../NOTICE.md) now links the upstream
+  `github.com/VELD-Dev/ReLunacy` rather than the
+  `github.com/Mrroboto9819/ReLunacy` fork.
 - Prefer reimplementing from the documented facts and checking them against
   our own data over translating the C# line by line. This matches how the
   existing adapters were written.
@@ -136,10 +168,10 @@ Corrections to the review below, from our `BCUS98127` and `BCUS98107` discs:
 
 | # | Candidate | Games | Our current state | Effort | Value |
 |---|---|---|---|---|---|
-| 1 | Instance names from `instances.lua` / `debug.dat` | TOD | Numeric fallback names | Low | High |
-| 2 | Instance names from `ps3debug.dat` `0x25500` | RFoM | Numeric fallback names; `ps3debug.dat` never extracted | Low | High |
-| 3 | Gameplay class names (kVTGenEnums) | TOD, RFoM | Not decoded | Low–Med | High |
-| 4 | Complete rendering-mode table | TOD (old engine) | Modes 1/2 (840 of 10,521 shaders) are treated as opaque; 3 is unknown | Low | High |
+| 1 | Instance names from `instances.lua` / `debug.dat` | TOD | **Done**, from `DEBUG.DAT` | Low | High |
+| 2 | Instance names from `ps3debug.dat` `0x25500` | RFoM | **Done** on the 37 single-group levels | Low | High |
+| 3 | Gameplay class names (kVTGenEnums) | TOD, RFoM | **Done** for Mobys and RFoM markers | Low–Med | High |
+| 4 | Complete rendering-mode table | TOD (old engine) | **Done** for TOD; other games use the generic mapping | Low | High |
 | 5 | Gameplay context: volumes, paths, Clues, controllers, areas, pods, scents | TOD | Gameplay Mobys only | Medium | High |
 | 6 | Old-engine baked lightmaps and lightmap UVs | TOD, RFoM | Lightmaps only on R2/R3 | Med–High | High |
 | 7 | Environment cubemaps | TOD, RFoM | Not decoded | Medium | Medium |
@@ -147,18 +179,22 @@ Corrections to the review below, from our `BCUS98127` and `BCUS98107` discs:
 | 9 | UV scroll/rotate animation (`0x5C00`) | TOD?, new engine | Not decoded | Medium | Medium |
 | 10 | Sky definitions and shell mesh | TOD | Not decoded | Medium | Medium |
 | 11 | Tie shader feature bits and material vectors | TOD | Partial | Medium | Medium |
-| 12 | Collision "no wall jump" triangle flag | TOD | Raw flags preserved | Low | Low |
-| 13 | Old-engine Moby bangle header fields | TOD | Semantics unverified | Low | Low |
-| 14 | Old-engine texture format codes 3 and 4 | TOD | Codes 3/4 conflict with ReLunacy's mapping (10 textures) | Low | Medium |
+| 12 | Collision "no wall jump" triangle flag | TOD | **Done** | Low | Low |
+| 13 | Old-engine Moby bangle header fields | TOD | **Corroborated**; offsets already match | Low | Low |
+| 14 | Old-engine texture format codes 3 and 4 | TOD | **Done**; the A4R4G4B4 decoder was fixed instead | Low | Medium |
 | 15 | Quest for Booty adapter | QfB | Unsupported | High | Medium |
 | 16 | Newer-engine Ratchet adapters | ACiT, QForce, A4O, ITN | Unsupported | High | Medium |
 
-Recommended order: 14, 1, 2, 4, 3, 5, 8, 6, 7, 9, 10. Item 14 may be a
-colour bug in the current importer and needs only a visual check. Items 1,
-2, and 4 are small changes with visible results in Blender. Items 5 and 6
-need the most new data.
+The original recommended order was 14, 1, 2, 4, 3, 5, 8, 6, 7, 9, 10.
+With items 1–4 and 12–14 finished, the remaining order is 5, 8, 6, 7, 9,
+10, then 11. Item 4 can also be extended to RFoM, R2, and R3 after a visual
+review, and item 3 to R2/R3 once their class number is located. Items 5 and
+6 need the most new data.
 
 ## 1. Tools of Destruction instance names
+
+**Status:** done, from each level's loose `DEBUG.DAT`. See the item 1
+correction above; `instances.lua` is not used.
 
 ReLunacy sources: `Loading/Readers/OldInstanceNames.cs`,
 `Loading/Readers/DebugReader.cs`, and
@@ -198,6 +234,8 @@ ReLunacy sources: `Loading/Readers/OldInstanceNames.cs`,
 
 ## 2. Resistance: Fall of Man instance names
 
+**Status:** done. See the item 2 correction above.
+
 ReLunacy source: `Loading/Readers/FallOfManGameplayReader.cs` (`ReadNames`)
 and `Loading/IO/FallOfManFiles.cs` (`debug.dat` maps to `ps3debug.dat`).
 
@@ -219,6 +257,10 @@ and `Loading/IO/FallOfManFiles.cs` (`debug.dat` maps to `ps3debug.dat`).
   context objects. Keep the same all-or-nothing completeness rule.
 
 ## 3. Gameplay class names
+
+**Status:** done for TOD and RFoM gameplay Mobys and for RFoM markers. TOD
+controllers and Clues are not imported yet (item 5). See the item 3
+corrections above for the file locations and counts.
 
 ReLunacy sources: `Resources/Classes/*.classes`,
 `Assets/LevelElements/GameClassNames.cs`, and
@@ -243,6 +285,9 @@ ReLunacy sources: `Resources/Classes/*.classes`,
   correspondence between class and model is proven.
 
 ## 4. Rendering modes
+
+**Status:** done for TOD; see the shader table in
+[ratchet_tod.md](formats/ratchet_tod.md).
 
 ReLunacy sources: `Loading/Shaders/RenderingMode.cs` and
 `Loading/Readers/MaterialReader.cs` (`ToRenderMode`).
@@ -458,9 +503,9 @@ ReLunacy source: `Loading/Shaders/TodTieShaders.cs`.
 
 ## 12–14. Small items
 
-Item 14 is listed here because the change is small, but it is the only
-finding that may point to a defect in current output.
-
+**Status:** all three are finished. Item 12 adds the
+`insomniac_no_wall_jump` face attribute, item 13 needed no change, and
+item 14 was fixed in the A4R4G4B4 decoder (see the correction above).
 
 - **Collision flags** (`Docs/reverse/collision.md`): the triangle flags
   are bits 27–31 of the face word, and flag bit 0 (word bit 27) means
