@@ -230,6 +230,10 @@ def _write_fixture(root: Path) -> None:
     )
     for index, xyz in enumerate(((0, 0, 0), (1, 0, 0), (0, 1, 0))):
         _vertex(vertices, 0x100 + index * 0x14, xyz, stride=0x14)
+    # Packed Tie light: opaque full light, then the two retail overlay
+    # coverages (83/128 interior and fully faded edge).
+    for index, packed in enumerate((0x407F, -0x4053, -0x4000)):
+        struct.pack_into(">h", vertices, 0x100 + index * 0x14 + 6, packed)
     for index, xyz in enumerate(((0, 0, 0), (256, 0, 0), (0, 256, 0))):
         _vertex(vertices, 0x13C + index * 0x1A, xyz, stride=0x1A)
     for index, xyz in enumerate(
@@ -390,6 +394,16 @@ class ResistanceFomReaderTests(unittest.TestCase):
                 tie = reader.read_tie(0x2C0)
                 self.assertEqual(len(tie.meshes), 1)
                 self.assertEqual(tie.shader_tuids, (0,))
+                np.testing.assert_allclose(
+                    tie.meshes[0].colors,
+                    (
+                        (1.0, 1.0, 1.0, 127 / 128),
+                        (1.0, 1.0, 1.0, 83 / 128),
+                        (1.0, 1.0, 1.0, 0.0),
+                    ),
+                    rtol=0,
+                    atol=1e-3,
+                )
 
                 shrub = reader.read_shrub(0xA00)
                 self.assertEqual(shrub.shader_tuids, (1,))

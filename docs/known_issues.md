@@ -35,6 +35,16 @@ a World, and environment cubemaps as World images. Directional lightmaps,
 light volumes, VFX, audio payloads, and renderable effect payloads are not
 decoded.
 
+Tie vertices carry a packed per-vertex light and coverage value. Blender
+multiplies albedo by the light and material alpha by the coverage, so
+coplanar blended soot and grime overlays (for example level20 material
+`0x16C`) fade into the wall instead of drawing as hard black bands. Opaque
+materials ignore the coverage. On one alpha-masked level20 primitive
+(material `0x1B3`) the coverage also scales the clipped alpha, giving
+partial transparency rather than a hard cut. Its in-game appearance has not
+been verified. The vertex light has not been compared with the game, because
+RFoM lightmaps are not decoded yet.
+
 Shrub meshes and clustered placements are imported. Foliage branch geometry
 and sprite cards are imported from the first authored LOD. Runtime vegetation
 wind, shrub vertex colors, foliage custom normals, and camera-facing

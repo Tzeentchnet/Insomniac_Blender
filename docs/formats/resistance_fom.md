@@ -146,6 +146,16 @@ offset/count at `0x04`/`0x08`, vertex count at `0x0A`, and the local
 `0x14`-byte vertex index at `0x0C`. Geometry comes from
 `ps3levelverts.dat:0x9000` and `0x9100`.
 
+Tie vertex `i16 +0x06` is the packed per-vertex light value shared with R3,
+using the same `abs(value)` decode: light is `abs / 0x4000` (clamped) and
+coverage is `(abs & 0x7F) / 128`. Opaque primitives carry coverage `127`.
+Blended soot and grime overlays are coplanar with the wall beneath them and
+fade through this coverage: the level20 overlay `0x16C` (blend mode 3, an
+opaque near-black BC1 map) uses `0` on its edges and `83` inside.
+Without the vertex coverage it draws as a hard black band. Blender multiplies
+albedo by the light and material alpha by the coverage, using the
+`InsomniacVertexColor` attribute.
+
 ## Materials and textures
 
 Section `0x5001` contains `0x80`-byte Material V1 records:

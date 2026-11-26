@@ -177,6 +177,7 @@ or evidence-blocked work and are not represented as implemented features.
 - [ ] RFoM sky: its `0x8160`/`0x8170` shell records are `0x10` bytes.
 - [x] TOD Tie shader use bits and constant vectors as material metadata
   (extension.md item 11).
+- [x] RFoM Tie per-vertex light and overlay coverage (vertex `+0x06`).
 - [ ] RFoM baked lightmaps (`0x5500`) and the TOD light-direction pool.
 - [ ] R2/R3 gameplay class names: the `BUILT/GAME/DEBUG.DAT` enum table is
   present, but the class number has not been located in their Moby records.

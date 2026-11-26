@@ -122,6 +122,9 @@ class ResistanceFomReader(RatchetTodReader):
     # RFoM lightmaps (0x5500) are not decoded yet.
     terrain_lightmaps = False
     tie_instance_lightmaps = False
+    # Tie vertex +0x06 packs baked light and the coverage that fades
+    # soot/grime overlay primitives into the surface beneath them.
+    tie_vertex_lighting = True
     cubemap_resident_section = 0x9950
     old_engine_uv_animations = False
 
@@ -588,6 +591,7 @@ class ResistanceFomReader(RatchetTodReader):
                 len(shader_tuids),
                 self.main.endian,
                 f"Tie_{tuid:08X}",
+                decode_vertex_lighting=self.tie_vertex_lighting,
             )
             if shader_index >= self._shader_count:
                 raise FormatError(
