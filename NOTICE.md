@@ -45,7 +45,8 @@ lightmap indices, and the Tie lightmap-UV stream also follow ReLunacy; the
 stream's start offset was corrected on our disc. The old-engine cubemap
 layout (`0x5920` with `0x9650`/`0x9950` payloads) and its HDR alpha encoding
 also follow ReLunacy, as do the TOD animated-UV (`0x5C00`) and sky
-(`0x8150`-`0x8170`) layouts.
+(`0x8150`-`0x8170`) layouts and the meaning of the TOD Tie shader use bits
+and constant vectors.
 
 Tools of Destruction animation behavior was additionally checked through
 bounded static control-flow analysis using the MIT-licensed **Qwark's

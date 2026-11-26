@@ -1294,6 +1294,8 @@ class RatchetTodReader(Resistance2Reader):
             ),
             alpha_mode_override=alpha_mode,
             lookup_path=self._shader_source_name(tuid),
+            # +0x50 holds parallax scale, parallax bias, and detail tiling.
+            detail_uv_scale_index=(3, 2),
         )
         self._shader_cache[tuid] = shader
         return shader

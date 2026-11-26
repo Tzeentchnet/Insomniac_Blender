@@ -675,6 +675,48 @@ class BlenderMaterialTests(unittest.TestCase):
             .node_tree.nodes.get("R3_TIE_Lightmap_Atlas")
         )
 
+    def test_tod_shader_vectors_are_named(self) -> None:
+        shader_tuid = 0x77
+        albedo_id = 0x300
+        shader = ShaderInfo(
+            shader_tuid,
+            albedo_id,
+            None,
+            None,
+            None,
+            material_word=0x19 << 24,
+            material_values=(
+                (0.0, 0.0, 0.0, 0.0),
+                (0.0, 1.0, 1.0, 3.0),
+                (1.0, 1.0, 1.0, 0.4),
+                (0.02, -0.01, 8.0, 0.0),
+                (0.0, 0.0, 99.0, 0.0),
+                (0.0, 0.0, 0.0, 0.0),
+            ),
+            detail_uv_scale_index=(3, 2),
+        )
+        reader = _MaterialReader(
+            "RATCHET_TOD",
+            shader,
+            {albedo_id: self._decoded_texture(albedo_id)},
+        )
+        material = _MaterialFactory(reader, True, []).material(shader_tuid)
+
+        self.assertEqual(material["insomniac_tod_use_bits"], 0x19)
+        self.assertEqual(
+            list(material["insomniac_tod_use_bit_names"]),
+            ["PARALLAX", "NORMAL_MAP", "DETAIL_MAP"],
+        )
+        self.assertAlmostEqual(material["insomniac_tod_parallax_scale"], 0.02)
+        self.assertAlmostEqual(material["insomniac_tod_parallax_bias"], -0.01)
+        self.assertAlmostEqual(material["insomniac_tod_detail_tiling"], 8.0)
+        self.assertAlmostEqual(
+            material["insomniac_tod_reflection_tint"][3],
+            0.4,
+            places=6,
+        )
+        self.assertEqual(shader.detail_uv_scale, 8.0)
+
     def test_tod_tie_lightmap_without_vertex_colors(self) -> None:
         shader_tuid = 0x1234
         albedo_id = 0x200

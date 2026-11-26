@@ -185,6 +185,9 @@ class ShaderInfo:
     material_word: int | None = None
     material_values: tuple[tuple[float, float, float, float], ...] = ()
     material_tail_values: tuple[float, ...] = ()
+    # (vector, component) of the detail-map UV tiling in material_values:
+    # +0x68 on R2/R3; TOD keeps it at +0x58.
+    detail_uv_scale_index: tuple[int, int] = (4, 2)
     effect_family: str | None = None
     normal_texture_encoding: str = "RECONSTRUCTED"
     specular_texture_semantics: str = "PACKED"
@@ -275,9 +278,10 @@ class ShaderInfo:
 
     @property
     def detail_uv_scale(self) -> float | None:
-        if len(self.material_values) <= 4:
+        vector, component = self.detail_uv_scale_index
+        if len(self.material_values) <= vector:
             return None
-        return self.material_values[4][2]
+        return self.material_values[vector][component]
 
     @property
     def detail_uses_signed_remap(self) -> bool:

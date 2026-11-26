@@ -175,10 +175,13 @@ Section `0x5000` contains `0x80`-byte shaders:
 | `0x04` | `u32` | normal texture-record offset |
 | `0x08` | `u32` | packed/expensive texture-record offset |
 | `0x0C` | `u32` | detail texture-record offset |
-| `0x10` | `u8` | surface flags: specular, gloss, normal, and detail |
+| `0x10` | `u8` | Tie use bits: `0x01` parallax, `0x04` cube reflection, `0x08` normal map, `0x10` detail map |
 | `0x11` | `u8` | rendering mode |
 | `0x12` | `u8[2]` | unknown material controls |
 | `0x20` | `vec4[6]` | raw material parameter vectors |
+| `0x30` | `vec4` | Tie shader constant group 1 |
+| `0x40` | `vec4` | reflection tint |
+| `0x50` | `f32[3]` | parallax scale, parallax bias, and detail-map UV tiling |
 
 Rendering modes follow ReLunacy's `RenderingMode` names. Counts are across
 the 10,521 shaders of all 20 levels:
@@ -192,6 +195,20 @@ the 10,521 shaders of all 20 levels:
 | `4` | Cutout | alpha clip | 285 |
 | `5` | SoftEdge | alpha clip (drawn in the opaque pass) | 915 |
 | `6` | Blended | alpha blend | 934 |
+
+The `0x10` byte is the key with which the Tie renderer picks a fragment
+shader. On all 10,521 shaders bit `0x08` is set exactly when a normal
+texture is bound and bit `0x10` exactly when a detail texture is; bit `0x01`
+accompanies a non-zero parallax scale on 1,317 of 1,394 shaders, and bit
+`0x02` occurs only with a bound packed texture. The `0x30`, `0x40`, and
+`0x50` vectors are the constants the game patches into those shaders
+(ReLunacy, `TodTieShaders.cs`, proven against an emulator shader cache).
+Detail tiling is 4 on every shader without a detail texture and varies
+(3 to 20) on bound ones; parallax pairs such as (0.02, -0.01) are typical.
+The importer records the use bits, reflection tint, parallax scale and bias,
+and detail tiling as material properties (`insomniac_tod_*`), and takes the
+detail UV scale from `0x58` rather than R2/R3's `0x68`. None of them is
+composited, because the TOD detail and parallax graphs are not verified.
 
 Additive materials replace the surface output with Transparent plus Emission
 (colour times alpha) and use Blended rendering. Bytes `7` and `8` do not

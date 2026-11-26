@@ -45,7 +45,8 @@ Source paths name files in the ReLunacy repository. Paths under `Loading/`,
 | 7 | Done for TOD and RFoM | Decoded to equirectangular World images; the HDR exponent scale is unknown. |
 | 9 | Done for TOD | All three owner families; frame rate and rotation sign as ReLunacy read them. |
 | 10 | Done for TOD | Shell meshes; clouds, spin, and dome gradient are kept as metadata. RFoM uses `0x10` shell records and is not decoded. |
-| 11, 15–16 | Not started | |
+| 11 | Done as metadata | Use bits and `+0x30`/`+0x40`/`+0x50` vectors are named on TOD materials; the detail UV scale now reads `+0x58`. Nothing is composited. |
+| 15–16 | Not started | Out of reach: no Quest for Booty or newer-engine Ratchet builds to verify against. |
 
 The sections below keep the original review text. Where the work above has
 overtaken it, a **Status** line says so, and the corrections that follow
@@ -196,7 +197,7 @@ Corrections to the review below, from our `BCUS98127` and `BCUS98107` discs:
 | 8 | Level fog, bloom, and lighting environment | TOD, RFoM | **Done**, except light volumes | Low–Med | Medium |
 | 9 | UV scroll/rotate animation (`0x5C00`) | TOD?, new engine | **Done** for TOD | Medium | Medium |
 | 10 | Sky definitions and shell mesh | TOD | **Done** (shells) | Medium | Medium |
-| 11 | Tie shader feature bits and material vectors | TOD | Partial | Medium | Medium |
+| 11 | Tie shader feature bits and material vectors | TOD | **Done** as metadata | Medium | Medium |
 | 12 | Collision "no wall jump" triangle flag | TOD | **Done**, with material names and vertex order | Low | Low |
 | 13 | Old-engine Moby bangle header fields | TOD | **Corroborated**; offsets already match | Low | Low |
 | 14 | Old-engine texture format codes 3 and 4 | TOD | **Done**; the A4R4G4B4 decoder was fixed instead | Low | Medium |
@@ -204,7 +205,9 @@ Corrections to the review below, from our `BCUS98127` and `BCUS98107` discs:
 | 16 | Newer-engine Ratchet adapters | ACiT, QForce, A4O, ITN | Unsupported | High | Medium |
 
 The original recommended order was 14, 1, 2, 4, 3, 5, 8, 6, 7, 9, 10.
-With items 1–10 and 12–14 finished, item 11 remains. Item 4 can also be extended to RFoM, R2, and R3 after a visual
+Items 1–14 are finished. Items 15 and 16 need game builds we do not
+have. Follow-ups: RFoM lightmaps (`0x5500`) and sky (`0x10` shell records),
+the TOD light-direction pool, item 4 for RFoM/R2/R3, and item 3 for R2/R3. Item 4 can also be extended to RFoM, R2, and R3 after a visual
 review, and item 3 to R2/R3 once their class number is located. Item 6
 needs the most new data.
 
@@ -542,6 +545,14 @@ ReLunacy source: `Loading/Readers/SkyReader.cs`.
   shell mesh in its own Collection, and keep the stage records as metadata.
 
 ## 11. TOD Tie shader keys and material vectors
+
+**Status:** done as metadata. The key is the shader record's `+0x10` byte:
+on our disc bit `0x08` matches a bound normal texture and bit `0x10` a
+bound detail texture exactly, and bit `0x01` mostly accompanies a parallax
+scale. Our docs had called these bits specular, gloss, normal, and detail.
+The detail UV scale had been read from R2/R3's `+0x68`; TOD's is `+0x58`.
+Our TOD detail graph stays data-only, so the tiling is recorded, not
+applied.
 
 ReLunacy source: `Loading/Shaders/TodTieShaders.cs`.
 

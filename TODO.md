@@ -175,6 +175,8 @@ or evidence-blocked work and are not represented as implemented features.
 - [x] TOD animated UVs (extension.md item 9).
 - [x] TOD sky shells (extension.md item 10).
 - [ ] RFoM sky: its `0x8160`/`0x8170` shell records are `0x10` bytes.
+- [x] TOD Tie shader use bits and constant vectors as material metadata
+  (extension.md item 11).
 - [ ] RFoM baked lightmaps (`0x5500`) and the TOD light-direction pool.
 - [ ] R2/R3 gameplay class names: the `BUILT/GAME/DEBUG.DAT` enum table is
   present, but the class number has not been located in their Moby records.

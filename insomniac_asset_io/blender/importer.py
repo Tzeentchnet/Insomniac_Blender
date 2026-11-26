@@ -1347,6 +1347,11 @@ class _MaterialFactory:
             material["insomniac_material_tail_values"] = list(
                 shader.material_tail_values
             )
+        if (
+            _reader_game_id(self.reader) == "RATCHET_TOD"
+            and len(shader.material_values) >= 4
+        ):
+            _store_tod_tie_shader_metadata(material, shader)
         if shader.texture_map_indices:
             material["insomniac_texture_map_indices"] = list(
                 shader.texture_map_indices
@@ -4753,6 +4758,46 @@ def _sky_shell_material(
     links.new(emission.outputs["Emission"], mix.inputs[2])
     links.new(mix.outputs["Shader"], output.inputs["Surface"])
     return material
+
+
+# TOD shader +0x10: the Tie renderer's use bits, which pick its fragment
+# shader (ReLunacy, TodTieShaders.cs). On our disc 0x08 is set exactly when a
+# normal texture is bound and 0x10 exactly when a detail texture is.
+_TOD_TIE_USE_BITS = (
+    (0x01, "PARALLAX"),
+    (0x02, "BIT_02"),
+    (0x04, "CUBE_REFLECTION"),
+    (0x08, "NORMAL_MAP"),
+    (0x10, "DETAIL_MAP"),
+)
+
+
+def _store_tod_tie_shader_metadata(
+    material: bpy.types.Material,
+    shader: ShaderInfo,
+) -> None:
+    """Name the TOD shader vectors the Tie fragment shaders consume.
+
+    +0x30, +0x40 (reflection tint), and +0x50 (parallax scale, parallax
+    bias, detail tiling) are the constant groups the game patches into its
+    Tie shaders. They are recorded, not composited.
+    """
+
+    flags = shader.material_flags or 0
+    material["insomniac_tod_use_bits"] = flags & 0x1F
+    material["insomniac_tod_use_bit_names"] = [
+        name for bit, name in _TOD_TIE_USE_BITS if flags & bit
+    ]
+    material["insomniac_tod_material_vector_30"] = list(
+        shader.material_values[1]
+    )
+    material["insomniac_tod_reflection_tint"] = list(
+        shader.material_values[2]
+    )
+    parallax_scale, parallax_bias, detail_tiling, _ = shader.material_values[3]
+    material["insomniac_tod_parallax_scale"] = parallax_scale
+    material["insomniac_tod_parallax_bias"] = parallax_bias
+    material["insomniac_tod_detail_tiling"] = detail_tiling
 
 
 def _equirectangular_cubemap_image(
