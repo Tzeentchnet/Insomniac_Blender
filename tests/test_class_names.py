@@ -9,6 +9,7 @@ from insomniac_asset_io.games.class_names import (
     class_name,
     parse_rfom_class_names,
     parse_tod_class_names,
+    parse_tod_collision_material_names,
     read_class_id,
 )
 
@@ -22,6 +23,7 @@ def _enum_file(
     lookups: list[str] = LOOKUPS,
     classes: list[str | None] = CLASSES,
     class_flags: int = 0,
+    class_head: int | None = None,
 ) -> bytes:
     """Build an IGHW 1.1 enum lookup file in the TOD or RFoM arrangement."""
 
@@ -47,13 +49,14 @@ def _enum_file(
     cursor = arrays_offset
     for index, row in enumerate(rows):
         flags = class_flags if index == 1 else 0
+        head = class_head if index == 1 and class_head is not None else len(row)
         struct.pack_into(
             ">4I",
             data,
             rows_offset + index * 0x10,
             cursor,
             len(row),
-            len(row),
+            head,
             flags,
         )
         for value in row:
@@ -108,6 +111,41 @@ class ClassNameTests(unittest.TestCase):
             with self.subTest(message=message):
                 with self.assertRaisesRegex(FormatError, message):
                     parse_tod_class_names(data, label="fixture")
+
+    def test_parses_tod_collision_material_table_with_head(self) -> None:
+        materials = [
+            "COLL_MATERIAL_INVALID",
+            "COLL_MATERIAL_METAL_MEDIUM",
+            "COLL_MATERIAL_INVALID",
+            "COLL_MATERIAL_METAL_SMALL",
+            "COLL_MATERIAL_METAL_MEDIUM",
+        ]
+        data = _enum_file(
+            rfom=False,
+            lookups=["kEnumLookups", "kMaterialID"],
+            classes=materials,
+            class_flags=0x0100_0000,
+            class_head=2,
+        )
+        self.assertEqual(
+            parse_tod_collision_material_names(data, label="fixture"),
+            tuple(materials),
+        )
+        for head, flags in ((0, 0x0100_0000), (6, 0x0100_0000), (2, 0)):
+            with (
+                self.subTest(head=head, flags=flags),
+                self.assertRaisesRegex(FormatError, "dense"),
+            ):
+                parse_tod_collision_material_names(
+                    _enum_file(
+                        rfom=False,
+                        lookups=["kEnumLookups", "kMaterialID"],
+                        classes=materials,
+                        class_flags=flags,
+                        class_head=head,
+                    ),
+                    label="fixture",
+                )
 
     def test_reads_class_number_from_class_block(self) -> None:
         data = bytes(0x40) + _class_block(0x43A)

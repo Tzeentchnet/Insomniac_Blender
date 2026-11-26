@@ -24,6 +24,11 @@ _PROTOTYPE_VERTEX_OFFSET = 0x70
 _QUANTIZATION_MARKER = 1
 _YARD_TO_METERS = np.float32(0.9144)
 _POSITION_SCALE = np.float32(_YARD_TO_METERS / 1024.0)
+# Each eight-slot X, Y, or Z line stores vertices 0, 4, 1, 5, 2, 6, 3, 7, as
+# ReLunacy documents. Indexing the slots by this table puts them in vertex
+# order: on Metropolis, Kerchu City, and Cobalia it roughly halves the
+# median triangle perimeter compared with plain slot order.
+_VERTEX_SLOTS = np.asarray((0, 2, 4, 6, 1, 3, 5, 7), dtype=np.intp)
 # The face word's top five bits (stored as ``insomniac_surface_id``) are
 # triangle flags. Bit 0 marks a surface the player cannot wall-jump from:
 # ReLunacy traced it to the TOD wall-jump check, from the layout first
@@ -310,6 +315,7 @@ def _decode_prototype(
         positions,
         indices,
         surface_ids,
+        material_ids,
         discarded_degenerate_faces,
         discarded_duplicate_faces,
     ) = _decode_triangle_prototype(view, offset, extent)
@@ -325,6 +331,7 @@ def _decode_prototype(
         positions=positions,
         indices=indices,
         surface_ids=surface_ids,
+        material_ids=material_ids,
         face_flags={
             NO_WALL_JUMP_ATTRIBUTE: (
                 surface_ids & _SURFACE_FLAG_NO_WALL_JUMP
@@ -355,7 +362,7 @@ def _decode_triangle_prototype(
     view: BinaryView,
     offset: int,
     extent: int,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, int, int]:
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, int, int]:
     _require_prototype_range(view, offset, extent, 0, _PROTOTYPE_VERTEX_OFFSET)
     vertex_count = view.u16(offset)
     base_offset = view.u16(offset + 0x02)
@@ -363,7 +370,8 @@ def _decode_triangle_prototype(
     face_count = view.u16(offset + 0x06)
     face_offset = view.u16(offset + 0x08)
     reserved_a = view.u16(offset + 0x0A)
-    total_data_length = view.u16(offset + 0x0C)
+    # One collision-material byte per source face (a kMaterialID value).
+    material_offset = view.u16(offset + 0x0C)
     reserved_b = view.u16(offset + 0x0E)
 
     if not vertex_count or vertex_count > MAX_COLLISION_VERTICES:
@@ -406,18 +414,12 @@ def _decode_triangle_prototype(
             f"{face_offset:#x}, expected {expected_face_offset:#x}"
         )
     face_end = face_offset + face_count * 4
-    expected_total_length = (face_end + 0x0F) & ~0x0F
-    if total_data_length != expected_total_length:
+    expected_material_offset = (face_end + 0x0F) & ~0x0F
+    if material_offset != expected_material_offset:
         raise FormatError(
-            f"{view.label}: collision data length "
-            f"{total_data_length:#x} does not match "
-            f"{expected_total_length:#x}"
-        )
-    if total_data_length > extent:
-        raise FormatError(
-            f"{view.label}: collision data length "
-            f"{total_data_length:#x} exceeds prototype extent "
-            f"{extent:#x}"
+            f"{view.label}: collision material data begins at "
+            f"{material_offset:#x}, expected "
+            f"{expected_material_offset:#x}"
         )
     _require_prototype_range(
         view,
@@ -440,6 +442,13 @@ def _decode_triangle_prototype(
         face_offset,
         face_count * 4,
     )
+    _require_prototype_range(
+        view,
+        offset,
+        extent,
+        material_offset,
+        face_count,
+    )
 
     base_position = np.frombuffer(
         view.data,
@@ -456,7 +465,7 @@ def _decode_triangle_prototype(
             dtype=">u2",
             count=24,
             offset=offset + _PROTOTYPE_VERTEX_OFFSET + group_index * 0x30,
-        ).reshape((3, 8)).T.astype(np.int64)
+        ).reshape((3, 8)).T[_VERTEX_SLOTS].astype(np.int64)
         positions[first : first + group_vertex_count] = (
             base_position + deltas[:group_vertex_count]
         ) * _POSITION_SCALE
@@ -481,6 +490,12 @@ def _decode_triangle_prototype(
             f"{vertex_count} vertices"
         )
     surface_ids = (face_words >> np.uint32(27)).astype(np.int32)
+    material_ids = np.frombuffer(
+        view.data,
+        dtype=np.uint8,
+        count=face_count,
+        offset=offset + material_offset,
+    ).astype(np.int32)
     valid_faces = (
         (indices[:, 0] != indices[:, 1])
         & (indices[:, 1] != indices[:, 2])
@@ -492,6 +507,7 @@ def _decode_triangle_prototype(
     discarded_degenerate_faces = int(np.count_nonzero(~valid_faces))
     indices = indices[valid_faces]
     surface_ids = surface_ids[valid_faces]
+    material_ids = material_ids[valid_faces]
 
     unique_faces: list[int] = []
     seen_faces: set[tuple[int, int, int]] = set()
@@ -504,10 +520,12 @@ def _decode_triangle_prototype(
     discarded_duplicate_faces = len(indices) - len(unique_faces)
     indices = indices[unique_faces]
     surface_ids = surface_ids[unique_faces]
+    material_ids = material_ids[unique_faces]
     return (
         positions,
         indices,
         surface_ids,
+        material_ids,
         discarded_degenerate_faces,
         discarded_duplicate_faces,
     )

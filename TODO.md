@@ -164,6 +164,8 @@ or evidence-blocked work and are not represented as implemented features.
 - [x] Regenerate the bundled TOD catalog with `DEBUG.DAT` prototype names.
 - [x] TOD/RFoM gameplay class names from the game-wide enum tables, and the
   TOD collision "no wall jump" flag (extension.md items 3 and 12).
+- [x] TOD collision material names from `kMaterialID`, and the interleaved
+  collision vertex slot order.
 - [ ] R2/R3 gameplay class names: the `BUILT/GAME/DEBUG.DAT` enum table is
   present, but the class number has not been located in their Moby records.
 - [ ] Global R3 effect-slot wiring: the slots contain unrelated runtime

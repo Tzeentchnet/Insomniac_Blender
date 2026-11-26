@@ -23,7 +23,7 @@ def _face_word(surface: int, a: int, b: int, c: int) -> int:
 
 def _triangle_prototype(*, no_op: bool = False) -> bytes:
     face_offset = 0xA0
-    total_data_length = 0xB0
+    material_offset = 0xB0
     data = bytearray(0xD0)
     struct.pack_into(
         ">8H",
@@ -35,17 +35,19 @@ def _triangle_prototype(*, no_op: bool = False) -> bytes:
         4,
         face_offset,
         0,
-        total_data_length,
+        material_offset,
         0,
     )
     struct.pack_into(">3iI", data, 0x60, 0, 0, 0, 0)
+    # Lines store vertices in slot order 0, 4, 1, 5, 2, 6, 3, 7, so
+    # vertices 1, 2, and 3 sit in slots 2, 4, and 6.
     struct.pack_into(
         ">8H",
         data,
         0x70,
         0,
-        1024,
         0,
+        1024,
         0,
         0,
         0,
@@ -58,11 +60,11 @@ def _triangle_prototype(*, no_op: bool = False) -> bytes:
         0x80,
         0,
         0,
+        0,
+        0,
         1024,
+        0,
         512,
-        0,
-        0,
-        0,
         0,
     )
     faces = (
@@ -81,6 +83,7 @@ def _triangle_prototype(*, no_op: bool = False) -> bytes:
         )
     )
     struct.pack_into(">4I", data, face_offset, *faces)
+    struct.pack_into(">4B", data, material_offset, 10, 27, 44, 59)
     return bytes(data)
 
 
@@ -231,6 +234,14 @@ class RatchetTodLevelCollisionTests(unittest.TestCase):
             (YARD_TO_METERS, YARD_TO_METERS, 0.0),
         )
         np.testing.assert_array_equal(scene.meshes[0].surface_ids, (7,))
+        np.testing.assert_array_equal(scene.meshes[0].material_ids, (10,))
+        np.testing.assert_allclose(
+            scene.meshes[0].positions,
+            np.asarray(
+                ((0, 0, 0), (1, 0, 0), (0, 1, 0), (0, 0.5, 0)),
+            )
+            * YARD_TO_METERS,
+        )
         np.testing.assert_array_equal(
             scene.meshes[0].face_flags["insomniac_no_wall_jump"],
             (True,),
@@ -310,6 +321,21 @@ class RatchetTodLevelCollisionTests(unittest.TestCase):
         )
         cases.append(
             ("marker", bad_marker, "quantization marker")
+        )
+
+        bad_material_offset = bytearray(valid)
+        struct.pack_into(
+            ">H",
+            bad_material_offset,
+            prototypes + prototype_offsets[0] + 0x0C,
+            0xC0,
+        )
+        cases.append(
+            (
+                "material offset",
+                bad_material_offset,
+                "collision material data begins",
+            )
         )
 
         bad_transform = bytearray(valid)
@@ -410,9 +436,17 @@ class RatchetTodLevelCollisionTests(unittest.TestCase):
         reader = object.__new__(RatchetTodReader)
         reader.source = Source()
         reader.warnings = []
+        reader._collision_material_names_loaded = True
+        reader._collision_material_names_value = tuple(
+            f"COLL_MATERIAL_{index}" if index != 27 else None
+            for index in range(60)
+        )
 
         scene = reader.read_level_collision()
 
+        # Only face IDs that survive decoding are named; IDs 27 (no name),
+        # 44, and 59 belong to discarded faces.
+        self.assertEqual(scene.material_names, {10: "COLL_MATERIAL_10"})
         self.assertEqual(len(scene.meshes), 2)
         self.assertEqual(len(scene.instances), 3)
         validate_collision_scene(scene, label="TOD reader fixture")

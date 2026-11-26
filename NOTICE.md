@@ -28,7 +28,10 @@ also follow ReLunacy's research. The RFoM table location and the row layout
 were established and checked on our discs. The Tools of Destruction
 collision face-word layout was first decoded by @sowelilili
 (ReLunacy-ToD-tools); ReLunacy traced its flag bit 0 to the game's
-wall-jump check.
+wall-jump check. ReLunacy also documented the per-face material-byte offset
+and the interleaved vertex slot order of TOD collision. Naming those
+material bytes from the `kMaterialID` enum table was established and
+checked on our disc.
 
 Tools of Destruction animation behavior was additionally checked through
 bounded static control-flow analysis using the MIT-licensed **Qwark's

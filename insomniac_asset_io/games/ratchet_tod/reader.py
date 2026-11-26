@@ -42,6 +42,7 @@ from ..class_names import (
     ClassNames,
     class_name,
     parse_tod_class_names,
+    parse_tod_collision_material_names,
     read_class_id,
 )
 from .debug_names import (
@@ -167,6 +168,8 @@ class RatchetTodReader(Resistance2Reader):
         self._debug_rejected_tables: set[str] = set()
         self._class_names_loaded = False
         self._class_names_value: ClassNames | None = None
+        self._collision_material_names_loaded = False
+        self._collision_material_names_value: ClassNames | None = None
 
     def _optional_level_resource(self, filename: str) -> str | None:
         try:
@@ -285,6 +288,26 @@ class RatchetTodReader(Resistance2Reader):
                     f"Gameplay class names are unavailable: {exc}",
                 )
         return self._class_names_value
+
+    @property
+    def collision_material_names(self) -> ClassNames | None:
+        """``kMaterialID`` names from the game-wide DEBUG.DAT, if present."""
+
+        if not self._collision_material_names_loaded:
+            self._collision_material_names_loaded = True
+            try:
+                located = self._read_game_debug_dat()
+                if located is not None:
+                    path, data = located
+                    self._collision_material_names_value = (
+                        parse_tod_collision_material_names(data, label=path)
+                    )
+            except (FormatError, MissingResourceError, OSError) as exc:
+                self._warn_once(
+                    "game debug.dat collision materials",
+                    f"Collision material names are unavailable: {exc}",
+                )
+        return self._collision_material_names_value
 
     def _warn_once(self, key: str, message: str) -> None:
         if key in self._debug_rejected_tables:
@@ -1321,11 +1344,24 @@ class RatchetTodReader(Resistance2Reader):
 
     def read_level_collision(self) -> LevelCollisionScene:
         path = self._find_level_resource("collision.dat")
-        return decode_level_collision_resource(
+        scene = decode_level_collision_resource(
             self.source.read(path),
             resource_path=path,
             warnings=self.warnings,
         )
+        names = self.collision_material_names
+        if names:
+            used: set[int] = set()
+            for mesh in scene.meshes:
+                if mesh.material_ids is not None:
+                    used.update(np.unique(mesh.material_ids).tolist())
+            scene.material_names = {
+                material_id: name
+                for material_id in sorted(used)
+                if material_id < len(names)
+                and (name := names[material_id]) is not None
+            }
+        return scene
 
     def read_zones(self) -> list[Zone]:
         tie_instances: list[PlacedInstance] = []

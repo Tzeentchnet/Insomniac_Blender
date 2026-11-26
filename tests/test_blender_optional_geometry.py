@@ -612,7 +612,7 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
                         dtype=np.int32,
                     ),
                     surface_ids=np.asarray((7, 8), dtype=np.int32),
-                    material_ids=np.asarray((2, 2), dtype=np.int32),
+                    material_ids=np.asarray((2, 5), dtype=np.int32),
                     face_flags={
                         "insomniac_no_wall_jump": np.asarray((True, False)),
                     },
@@ -639,6 +639,7 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
                     metadata={"zone": "fixture", "group": 3},
                 ),
             ),
+            material_names={2: "COLL_MATERIAL_METAL_SLIDE"},
         )
 
         result = import_level(
@@ -702,7 +703,34 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
                 item.value
                 for item in mesh.attributes["insomniac_material_id"].data
             ),
-            (2, 2),
+            (2, 5),
+        )
+        self.assertEqual(
+            [material.name for material in mesh.materials],
+            [
+                "Collision_02_COLL_MATERIAL_METAL_SLIDE",
+                "Collision_05_Material",
+            ],
+        )
+        self.assertEqual(
+            [polygon.material_index for polygon in mesh.polygons],
+            [0, 1],
+        )
+        self.assertEqual(
+            mesh.materials[0]["insomniac_collision_material_name"],
+            "COLL_MATERIAL_METAL_SLIDE",
+        )
+        self.assertEqual(
+            mesh.materials[1]["insomniac_collision_material_id"],
+            5,
+        )
+        self.assertNotIn(
+            "insomniac_collision_material_name",
+            mesh.materials[1],
+        )
+        self.assertEqual(
+            json.loads(collision["insomniac_collision_material_names"]),
+            {"2": "COLL_MATERIAL_METAL_SLIDE"},
         )
         self.assertEqual(
             tuple(

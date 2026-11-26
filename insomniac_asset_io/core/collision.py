@@ -45,6 +45,9 @@ class CollisionInstance:
 class CollisionScene:
     meshes: tuple[CollisionMesh, ...] = ()
     instances: tuple[CollisionInstance, ...] = ()
+    # Retail names for the per-face ``material_ids``, where the game ships
+    # them. Names may repeat across IDs; the ID stays the stable key.
+    material_names: dict[int, str] = field(default_factory=dict)
 
 
 def validate_collision_scene(
@@ -101,6 +104,20 @@ def validate_collision_scene(
             instance.metadata,
             label=f"{label} instance {instance.name!r}",
         )
+
+    for material_id, material_name in scene.material_names.items():
+        if (
+            not isinstance(material_id, int)
+            or isinstance(material_id, bool)
+            or material_id < 0
+        ):
+            raise FormatError(
+                f"{label}: invalid collision material ID {material_id!r}"
+            )
+        if not isinstance(material_name, str) or not material_name:
+            raise FormatError(
+                f"{label}: collision material {material_id} has no name"
+            )
 
 
 def _validate_mesh(mesh: CollisionMesh, *, label: str) -> None:

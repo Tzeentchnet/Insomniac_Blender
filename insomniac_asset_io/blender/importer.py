@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import colorsys
 import json
 import logging
 import math
@@ -3945,9 +3946,22 @@ def _import_level_collision(
     )
     collision_collection["insomniac_geometry_kind"] = "LEVEL_COLLISION"
     collision_collection.hide_render = True
+    if scene.material_names:
+        collision_collection["insomniac_collision_material_names"] = (
+            json.dumps(
+                {
+                    str(material_id): name
+                    for material_id, name in sorted(
+                        scene.material_names.items()
+                    )
+                },
+                separators=(",", ":"),
+            )
+        )
 
     meshes_by_id = {mesh.mesh_id: mesh for mesh in scene.meshes}
     blender_meshes: dict[str, bpy.types.Mesh] = {}
+    collision_materials: dict[int, bpy.types.Material] = {}
     group_collections: dict[str, bpy.types.Collection] = {}
     instances = sorted(
         scene.instances,
@@ -3974,7 +3988,11 @@ def _import_level_collision(
         mesh = blender_meshes.get(instance.mesh_id)
         if mesh is None:
             source_mesh = meshes_by_id[instance.mesh_id]
-            mesh = _level_collision_mesh(source_mesh)
+            mesh = _level_collision_mesh(
+                source_mesh,
+                scene.material_names,
+                collision_materials,
+            )
             blender_meshes[instance.mesh_id] = mesh
             result.meshes += 1
 
@@ -3998,6 +4016,8 @@ def _import_level_collision(
 
 def _level_collision_mesh(
     collision: LevelCollisionMesh,
+    material_names: dict[int, str],
+    materials: dict[int, bpy.types.Material],
 ) -> bpy.types.Mesh:
     digest = zlib.crc32(collision.mesh_id.encode("utf-8"))
     name = (
@@ -4040,7 +4060,52 @@ def _level_collision_mesh(
             "value",
             np.asarray(flag_values, dtype=bool),
         )
+    if collision.material_ids is not None and len(collision.material_ids):
+        material_ids, slots = np.unique(
+            np.asarray(collision.material_ids, dtype=np.int32),
+            return_inverse=True,
+        )
+        for material_id in material_ids.tolist():
+            mesh.materials.append(
+                _collision_material(
+                    material_id,
+                    material_names.get(material_id),
+                    materials,
+                )
+            )
+        mesh.polygons.foreach_set(
+            "material_index",
+            slots.astype(np.int32).ravel(),
+        )
     return mesh
+
+
+def _collision_material(
+    material_id: int,
+    material_name: str | None,
+    materials: dict[int, bpy.types.Material],
+) -> bpy.types.Material:
+    """Return the viewport material for one collision material ID.
+
+    One material per ID and import, so Solid view colours faces by surface
+    and the material slots carry the retail ``kMaterialID`` name.
+    """
+
+    material = materials.get(material_id)
+    if material is not None:
+        return material
+    label = material_name or "Material"
+    material = bpy.data.materials.new(
+        _safe_name(f"Collision_{material_id:02d}_{label}")
+    )
+    # Golden-ratio hue steps keep neighbouring IDs visually distinct.
+    hue = (material_id * 0.618033988749895) % 1.0
+    material.diffuse_color = (*colorsys.hsv_to_rgb(hue, 0.6, 0.95), 1.0)
+    material["insomniac_collision_material_id"] = material_id
+    if material_name:
+        material["insomniac_collision_material_name"] = material_name
+    materials[material_id] = material
+    return material
 
 
 def _set_collision_face_attribute(

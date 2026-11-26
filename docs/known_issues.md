@@ -76,10 +76,12 @@ identifies a collision component, not a unique render-asset owner, so the
 importer preserves that value without guessing an asset identity for
 colocated Tie placements. The face word's top five bits are kept as
 `insomniac_surface_id`; bit 0 of that value is also exposed as the boolean
-`insomniac_no_wall_jump` face attribute. The other four flag bits and the
-collision material IDs remain unnamed. No primitive prototype family has
-been observed in
-the tested TOD files. Foliage branch meshes, sprite cards, and placements are
+`insomniac_no_wall_jump` face attribute. The other four flag bits remain
+unnamed. Per-face collision material IDs are kept as `insomniac_material_id`
+and named from the game-wide `kMaterialID` table: each ID gets one viewport
+material named after its `COLL_MATERIAL_*` entry. Without `game_debug.dat`
+the materials carry only their numeric IDs. No primitive prototype family
+has been observed in the tested TOD files. Foliage branch meshes, sprite cards, and placements are
 imported from the first authored LOD with masked, double-sided materials.
 Shrub meshes and clustered placements are imported from the embedded
 old-engine layout. Runtime vegetation wind, packed Shrub vertex metadata,

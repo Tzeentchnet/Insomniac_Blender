@@ -390,12 +390,18 @@ files use marker `1` quantized triangles:
 | `0x04` | `u16` | quantization marker, observed `1` |
 | `0x06` | `u16` | source face count |
 | `0x08` | `u16` | face-data offset |
-| `0x0C` | `u16` | aligned geometry-data length |
+| `0x0C` | `u16` | material-byte offset (face end aligned to 16) |
 | `0x60` | `i32[3]` | signed base position |
 | `0x70` | grouped `u16` | eight X, eight Y, and eight Z deltas per group |
 
-Each local coordinate is `(base + delta) * 0.9144 / 1024`. Face words use
-the same compact fields as later PS3 collision:
+Each local coordinate is `(base + delta) * 0.9144 / 1024`. Within each
+eight-slot X, Y, or Z line the slots hold vertices `0, 4, 1, 5, 2, 6, 3, 7`.
+Reading the slots in plain order scrambles each group of eight: on
+Metropolis, Kerchu City, and Cobalia the interleaved order halves the median
+triangle perimeter, and across all 20 levels it leaves no all-degenerate
+prototypes and 36 degenerate faces, where plain order produced 11 no-op
+prototypes and 1,436 degenerate faces on Metropolis and Kerchu City alone.
+Face words use the same compact fields as later PS3 collision:
 
 - A: `(word >> 18) & 0x1FF`
 - B: `(word >> 9) & 0x1FF`
@@ -408,19 +414,34 @@ exposed as the boolean `insomniac_no_wall_jump` attribute. ReLunacy traced
 it to the game's wall-jump check; the face-word layout was first decoded by
 @sowelilili. The other flag bits are unnamed.
 
-The aligned geometry-data length ends after the face words; the larger
-record extent includes trailing runtime acceleration data. Repeated-index,
+One material byte per source face starts at header `+0x0C`. The byte is a
+`kMaterialID` value from the game-wide `BUILT/GAME/DEBUG.DAT` enum table
+(row 5, 71 entries), indexed directly. That row carries flag `0x01000000`
+and a second count of 9: values 1-8 are a hand-written head of special
+surfaces (`METAL_MEDIUM`, `METAL_SLIDE`, `METAL_MAGNET`, `ICE_SLIDE`,
+`WATER_DEFAULT`, `LAVA_DEFAULT`, `QUICKSAND_DEFAULT`,
+`QUICKSAND_GELATONIUM`), and the generated list restarts at value 9, so
+some names occur twice. The mapping was checked on all 20 levels: values
+0-67 occur, all within the table; `LAVA_DEFAULT` faces are 99.7%
+horizontal, `DIRT_GRAVEL` 98.6%, `SNOW_DEFAULT` 94.5%, and `DIRT_DEFAULT`
+86.6%, while `GLASS_UNBREAKABLE_LARGE` and `CLOTH_MEDIUM` are 0% and 1.3%;
+`QUICKSAND_GELATONIUM` occurs on Cobalia. The importer stores the byte as
+the `insomniac_material_id` face attribute and assigns one viewport material
+per ID, named after its `kMaterialID` entry. ReLunacy documented the
+material-byte offset and the vertex slot order; the name table and its
+mapping were verified here.
+
+The material bytes end inside the record extent; the rest of the extent
+holds trailing runtime acceleration data. Repeated-index,
 geometrically zero-area, and duplicate triangles are removed before Blender
 face attributes are assigned. All-degenerate prototypes are treated as
 explicit no-op source data and reported once per resource.
 
-Metropolis contains 15,247 source records and 1,572 prototypes. After seven
-no-op prototypes remove 97 references, it imports 15,150 instances using
-1,565 shared meshes. Kerchu City contains 9,913 source records and 1,058
-prototypes; four no-op prototypes remove 209 references, leaving 9,704
-instances and 1,054 meshes. Together the imported prototypes contain 157,142
-vertices and 221,485 retained faces. The decoder discards 1,436 degenerate
-and 1,573 duplicate source faces.
+Metropolis imports all 15,247 source records over 1,572 shared meshes, and
+Kerchu City all 9,913 records over 1,058 meshes. Together these prototypes
+contain 157,183 vertices and 222,921 retained faces; the decoder discards 3
+degenerate and 1,589 duplicate source faces. No retail prototype is
+all-degenerate.
 
 The current adapter does not decode unverified secondary-bangle/LOD
 semantics or Moby collision. Runtime foliage wind, Shrub wind and packed

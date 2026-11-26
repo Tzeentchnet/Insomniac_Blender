@@ -28,6 +28,7 @@ class CollisionModelTests(unittest.TestCase):
                 self._instance("first"),
                 self._instance("second"),
             ),
+            material_names={3: "COLL_MATERIAL_METAL_MAGNET"},
         )
 
         validate_collision_scene(scene, label="fixture")
@@ -113,6 +114,24 @@ class CollisionModelTests(unittest.TestCase):
                             instances=(self._instance(),),
                         )
                     )
+
+    def test_rejects_malformed_material_names(self) -> None:
+        for names, message in (
+            ({-1: "COLL_MATERIAL_INVALID"}, "invalid collision material"),
+            ({True: "COLL_MATERIAL_INVALID"}, "invalid collision material"),
+            ({3: ""}, "has no name"),
+        ):
+            with (
+                self.subTest(names=names),
+                self.assertRaisesRegex(FormatError, message),
+            ):
+                validate_collision_scene(
+                    CollisionScene(
+                        meshes=(self._mesh(),),
+                        instances=(self._instance(),),
+                        material_names=names,
+                    )
+                )
 
     def test_rejects_unknown_instance_mesh(self) -> None:
         instance = self._instance()

@@ -222,6 +222,17 @@ class RealRatchetTodIsoTests(unittest.TestCase):
                 temporary,
                 validate_iso=False,
             )
+            # Level imports also copy the game-wide DEBUG.DAT, which holds
+            # the collision material names; catalog preparation does not.
+            from insomniac_asset_io.games.ratchet_tod.debug_names import (
+                prepare_game_debug_dat,
+            )
+
+            prepare_game_debug_dat(
+                Path(REAL_ISO),
+                prepared,
+                game_label=adapter.label,
+            )
             with GameSource.open(prepared) as source:
                 reader = RatchetTodReader(source)
                 pointers = reader.asset_pointers(AssetKind.SHRUB)
@@ -294,20 +305,33 @@ class RealRatchetTodIsoTests(unittest.TestCase):
                     collision,
                     label="Kerchu City collision",
                 )
-                self.assertEqual(len(collision.instances), 9704)
-                self.assertEqual(len(collision.meshes), 1054)
+                self.assertEqual(len(collision.instances), 9913)
+                self.assertEqual(len(collision.meshes), 1058)
                 self.assertEqual(
                     Counter(
                         instance.metadata["flags"]
                         for instance in collision.instances
                     ),
-                    {0x20: 9016, 0x00: 688},
+                    {0x20: 9224, 0x00: 689},
                 )
                 self.assertEqual(
                     Counter(
                         mesh.source_kind for mesh in collision.meshes
                     ),
-                    {"TERRAIN": 688, "TIE": 366},
+                    {"TERRAIN": 689, "TIE": 369},
+                )
+                self.assertEqual(
+                    sorted(collision.material_names),
+                    [0, 1, 8, 10, 12, 16, 20, 29, 30, 31, 36, 44, 46, 47,
+                     58, 59],
+                )
+                self.assertEqual(
+                    collision.material_names[8],
+                    "COLL_MATERIAL_QUICKSAND_GELATONIUM",
+                )
+                self.assertEqual(
+                    collision.material_names[44],
+                    "COLL_MATERIAL_GRASS_DEFAULT",
                 )
 
 
@@ -384,26 +408,26 @@ class RealRatchetTodTests(unittest.TestCase):
                 collision,
                 label="Metropolis collision",
             )
-            self.assertEqual(len(collision.instances), 15150)
-            self.assertEqual(len(collision.meshes), 1565)
+            self.assertEqual(len(collision.instances), 15247)
+            self.assertEqual(len(collision.meshes), 1572)
             self.assertEqual(
                 sum(len(mesh.positions) for mesh in collision.meshes),
-                93733,
+                93761,
             )
             self.assertEqual(
                 sum(len(mesh.indices) for mesh in collision.meshes),
-                129382,
+                130230,
             )
             self.assertEqual(
                 Counter(
                     instance.metadata["flags"]
                     for instance in collision.instances
                 ),
-                {0x20: 14709, 0x00: 441},
+                {0x20: 14804, 0x00: 443},
             )
             self.assertEqual(
                 Counter(mesh.source_kind for mesh in collision.meshes),
-                {"TIE": 1124, "TERRAIN": 441},
+                {"TIE": 1129, "TERRAIN": 443},
             )
 
 

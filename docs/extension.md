@@ -10,8 +10,8 @@ working principles in [TODO.md](../TODO.md), every adopted layout must be
 re-proven against our own disc builds before it reaches the importer.
 
 Source paths name files in the ReLunacy repository. Paths under `Loading/`,
-`Assets/`, and `Resources/` are relative to its `ReLunacy.Engine/` project;
-`Docs/` is at the repository root.
+`Assets/`, `Importing/`, and `Resources/` are relative to its
+`ReLunacy.Engine/` project; `docs/` (lower case) is at the repository root.
 
 ## Review checks (2026-11-26)
 
@@ -37,7 +37,7 @@ Source paths name files in the ReLunacy repository. Paths under `Loading/`,
 | 2 | Done | 37 of 41 levels; the four multi-group levels keep numeric names. |
 | 4 | Done for TOD | The same byte exists in RFoM, R2, and R3, which still use the generic mapping. |
 | 3 | Done for TOD and RFoM | Gameplay Mobys, and RFoM markers, get `insomniac_class_id` and `insomniac_class_name`. R2/R3 still need the class number located. |
-| 12 | Done | `insomniac_no_wall_jump` boolean face attribute on TOD level collision. |
+| 12 | Done, and extended | `insomniac_no_wall_jump` boolean face attribute on TOD level collision. Collision material bytes are now named from `kMaterialID`, and the collision vertex slot order was corrected. |
 | 13 | Corroborated | Our TOD reader already reads the bangle count at `+0x18` and the table at `+0x28`; no change needed. |
 | 5–11, 15–16 | Not started | |
 
@@ -94,9 +94,21 @@ Corrections to the review below, from our `BCUS98127` and `BCUS98107` discs:
   `FxController_CLASS`.
 - **Item 3, further tables.** The same files hold other enum tables,
   including `kMaterialClass`, `kMaterialSubclass`, and `kMaterialID` (71
-  `COLL_MATERIAL_*` names on TOD). These are leads for naming collision
-  materials. The mapping from collision face data to `kMaterialID` has not
-  been checked.
+  `COLL_MATERIAL_*` names on TOD). These rows carry flag `0x01000000`; their
+  second count (9 for `kMaterialID`) is a hand-written head of special
+  values, and the row is still indexed directly by value. TOD collision
+  faces store one `kMaterialID` byte each at the triangle-mesh header's
+  `+0x0C` offset. On all 20 levels the IDs are 0-67 and the names fit the
+  geometry: `LAVA_DEFAULT` is 99.7% horizontal, `DIRT_GRAVEL` 98.6%,
+  `SNOW_DEFAULT` 94.5%, `GLASS_UNBREAKABLE_LARGE` 0%, and
+  `QUICKSAND_GELATONIUM` occurs on Cobalia. The importer now names each
+  collision material.
+- **Item 12, vertex order.** ReLunacy's `docs/reverse/collision.md` gives the
+  slot order inside each eight-vertex line as `0, 4, 1, 5, 2, 6, 3, 7`. Our
+  decoder read the slots in plain order, which scrambled each group of eight
+  vertices. The corrected order halves the median triangle perimeter, and
+  removes the 11 "no-op" all-degenerate prototypes and nearly all
+  degenerate faces (36 remain across all 20 levels).
 
 ### Resistance 2 and Resistance 3 cross-check
 
@@ -179,7 +191,7 @@ Corrections to the review below, from our `BCUS98127` and `BCUS98107` discs:
 | 9 | UV scroll/rotate animation (`0x5C00`) | TOD?, new engine | Not decoded | Medium | Medium |
 | 10 | Sky definitions and shell mesh | TOD | Not decoded | Medium | Medium |
 | 11 | Tie shader feature bits and material vectors | TOD | Partial | Medium | Medium |
-| 12 | Collision "no wall jump" triangle flag | TOD | **Done** | Low | Low |
+| 12 | Collision "no wall jump" triangle flag | TOD | **Done**, with material names and vertex order | Low | Low |
 | 13 | Old-engine Moby bangle header fields | TOD | **Corroborated**; offsets already match | Low | Low |
 | 14 | Old-engine texture format codes 3 and 4 | TOD | **Done**; the A4R4G4B4 decoder was fixed instead | Low | Medium |
 | 15 | Quest for Booty adapter | QfB | Unsupported | High | Medium |
@@ -198,7 +210,7 @@ correction above; `instances.lua` is not used.
 
 ReLunacy sources: `Loading/Readers/OldInstanceNames.cs`,
 `Loading/Readers/DebugReader.cs`, and
-`Docs/reverse/tod_volumes_clues_paths.md` §1.
+`docs/reverse/tod_volumes_clues_paths.md` §1.
 
 - Every TOD level has `/built/levels/<level>/instances.lua` inside
   `packed/game/global_cached.psarc`. Lines read
@@ -264,7 +276,7 @@ corrections above for the file locations and counts.
 
 ReLunacy sources: `Resources/Classes/*.classes`,
 `Assets/LevelElements/GameClassNames.cs`, and
-`Docs/reverse/tod_classes.md`.
+`docs/reverse/tod_classes.md`.
 
 - The class names come from each game's own lookup-enum debug file
   (kVTGenEnums). For TOD this is `built/game/game.dat`, section `0x25600`
@@ -335,7 +347,7 @@ disc (10,521 in total).
 
 ## 5. TOD gameplay context families
 
-ReLunacy sources: `Docs/reverse/tod_volumes_clues_paths.md` and
+ReLunacy sources: `docs/reverse/tod_volumes_clues_paths.md` and
 `Loading/Readers/OldGameplayReader.cs`. All values are big-endian; record
 pointers are absolute offsets in `gameplay.dat`.
 
@@ -507,14 +519,15 @@ ReLunacy source: `Loading/Shaders/TodTieShaders.cs`.
 `insomniac_no_wall_jump` face attribute, item 13 needed no change, and
 item 14 was fixed in the A4R4G4B4 decoder (see the correction above).
 
-- **Collision flags** (`Docs/reverse/collision.md`): the triangle flags
+- **Collision flags** (`docs/reverse/collision.md`): the triangle flags
   are bits 27–31 of the face word, and flag bit 0 (word bit 27) means
   *no wall jump*. ReLunacy's fork traced this to the TOD wall-jump entry;
   the layout was first decoded by @sowelilili. TOD and QfB use flag values
   0–7. Our decoder already stores `word >> 27` as the `surface` face
   attribute, so this needs only a derived boolean attribute and a note in
   [ratchet_tod.md](formats/ratchet_tod.md) that this field holds flags.
-  Material IDs 0–67 remain unnamed.
+  Material IDs 0–67 are now named from `kMaterialID` (see the item 3
+  correction above).
 - **Old Moby bangles** (`Loading/Objects/OldMoby.cs`): `u16 bangleCount` is
   at `+0x18` and the bangle array is at `+0x28`. Use this to corroborate
   our unverified TOD bangle semantics.
