@@ -405,6 +405,8 @@ kept as a channel-packed data channel. ReLunacy published this layout.
 - The family-3 `ps3levelcoll.dat` source table has not been correlated with a
   proven gameplay owner.
 - Directional lightmap textures in section `0x5500` are not imported.
+- The sky is not imported: RFoM's `0x8160`/`0x8170` shell records are
+  `0x10` bytes, not Tools of Destruction's `0x20`, and are not decoded.
 - Light volumes, renderable VFX, audio payloads, and the opaque
   bodies of embedded gameplay effect/marker payloads are not decoded.
 - Shrub vertex colors, vegetation wind, foliage custom normals, and

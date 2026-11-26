@@ -49,6 +49,7 @@ from .gameplay_context import read_tod_gameplay_context
 from .uv_animations import TodUvAnimations, parse_uv_animations
 from ..level_environment import LevelEnvironment, parse_tod_environment
 from ..old_engine_cubemaps import EnvironmentCubemap, read_cubemaps
+from ..old_engine_sky import LevelSky, parse_sky
 from .debug_names import (
     GAME_DEBUG_CACHE_NAME,
     MAX_DEBUG_DAT_SIZE,
@@ -1918,6 +1919,25 @@ class RatchetTodReader(Resistance2Reader):
 
     # main.dat section holding MAIN-memory cubemap payloads.
     cubemap_resident_section = 0x9650
+
+    def read_sky(self) -> LevelSky | None:
+        """The ``0x8150`` sky definition and its decoded shell meshes."""
+
+        return parse_sky(
+            self.main,
+            self.vertices,
+            lambda offset, length: self.source.read_slice(
+                self.vertices_path,
+                offset,
+                length,
+            ),
+        )
+
+    def sky_texture_id(self, texture_index: int) -> int:
+        """The texture id of a ``0x5200`` table index."""
+
+        section = self.main.require_section(SECT_TEXTURE)
+        return section.offset + texture_index * TEXTURE_STRIDE
 
     def read_environment_cubemaps(self) -> list[EnvironmentCubemap]:
         """The level's ``0x5920`` environment cubemaps, decoded to RGBA."""

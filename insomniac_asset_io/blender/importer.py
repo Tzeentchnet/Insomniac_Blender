@@ -26,6 +26,7 @@ from ..games.old_engine_cubemaps import (
     EnvironmentCubemap,
     sample_directions,
 )
+from ..games.old_engine_sky import LevelSky, shell_rotation
 from ..games.resistance_2.formats import (
     AssetKind,
     CollisionMesh,
@@ -4496,6 +4497,21 @@ def import_level(
                         ),
                     )
                     result.images += len(cubemaps)
+                read_sky = getattr(reader, "read_sky", None)
+                if callable(read_sky):
+                    try:
+                        sky = read_sky()
+                    except InsomniacError as exc:
+                        warnings.append(f"Sky skipped: {exc}")
+                        sky = None
+                    if sky is not None and sky.shells:
+                        result.objects += _import_level_sky(
+                            collection,
+                            root,
+                            sky,
+                            materials,
+                            f"{_reader_asset_prefix(reader)}_{level_name}",
+                        )
 
     # Level materials are built lazily while terrain, ties and mobys are
     # placed, so release only after the last one.
@@ -4603,6 +4619,140 @@ def _import_level_environment(
     root["insomniac_world"] = world.name
     context.scene.world = world
     return len(environment.lights)
+
+
+# The game draws the sky shells around the camera at infinity; Blender gets
+# them around the level origin, scaled by one parent empty.
+_SKY_DISPLAY_RADIUS = 1000.0
+
+
+def _import_level_sky(
+    collection: bpy.types.Collection,
+    root: bpy.types.Object,
+    sky: LevelSky,
+    materials: "_MaterialFactory",
+    name: str,
+) -> int:
+    sky_collection = _child_collection(collection, "Sky")
+    sky_collection["insomniac_geometry_kind"] = "SKY"
+    bloom_collection = _child_collection(sky_collection, "Bloom Shells")
+    bloom_collection.hide_render = True
+    anchor = bpy.data.objects.new(f"{name}_Sky", None)
+    sky_collection.objects.link(anchor)
+    anchor.parent = root
+    anchor.empty_display_type = "SPHERE"
+    anchor.scale = (_SKY_DISPLAY_RADIUS,) * 3
+    anchor["insomniac_sky_display_radius"] = _SKY_DISPLAY_RADIUS
+    anchor["insomniac_sky_time_scale"] = sky.time_scale
+    anchor["insomniac_sky_cloud_textures"] = json.dumps(
+        list(sky.cloud_texture_indices)
+    )
+    created = 1
+    for shell in sky.shells:
+        label = f"{name}_Sky_{shell.section_id:04X}_{shell.index:02d}"
+        material = _sky_shell_material(materials, shell.texture_index, label)
+        mesh = _build_mesh(
+            label,
+            [
+                MeshGeometry(
+                    shader_index=0,
+                    positions=shell.positions,
+                    uvs=shell.uvs,
+                    indices=shell.indices.ravel(),
+                    colors=shell.colors,
+                )
+            ],
+            [material],
+        ).mesh
+        obj = bpy.data.objects.new(label, mesh)
+        (bloom_collection if shell.bloom else sky_collection).objects.link(obj)
+        obj.parent = anchor
+        rotation = np.identity(4, dtype=np.float64)
+        rotation[:3, :3] = shell_rotation(shell)
+        obj.matrix_local = Matrix(rotation.tolist())
+        # Only the camera sees the sky: it must not shadow or light the
+        # level the way a real enclosing mesh would.
+        for attribute in (
+            "visible_shadow",
+            "visible_diffuse",
+            "visible_glossy",
+            "visible_transmission",
+            "visible_volume_scatter",
+        ):
+            setattr(obj, attribute, False)
+        obj["insomniac_sky_section"] = f"0x{shell.section_id:04X}"
+        obj["insomniac_sky_shell_index"] = shell.index
+        obj["insomniac_sky_draw_order"] = shell.draw_order
+        obj["insomniac_sky_bloom"] = shell.bloom
+        obj["insomniac_sky_spin_rate"] = shell.spin_rate
+        if shell.bloom:
+            obj.hide_set(True)
+        created += 1
+    return created
+
+
+def _sky_shell_material(
+    materials: "_MaterialFactory",
+    texture_index: int,
+    name: str,
+) -> bpy.types.Material:
+    """Unlit sky: texture x vertex colour, alpha-blended."""
+
+    material = bpy.data.materials.new(f"{name}_Material")
+    material.use_nodes = True
+    material["insomniac_sky_material"] = True
+    if hasattr(material, "surface_render_method"):
+        material.surface_render_method = "BLENDED"
+    nodes = material.node_tree.nodes
+    links = material.node_tree.links
+    nodes.clear()
+    output = nodes.new("ShaderNodeOutputMaterial")
+    output.location = (600.0, 0.0)
+    vertex = nodes.new("ShaderNodeVertexColor")
+    vertex.layer_name = "InsomniacVertexColor"
+    vertex.location = (-600.0, -200.0)
+    emission = nodes.new("ShaderNodeEmission")
+    emission.location = (200.0, 50.0)
+    transparent = nodes.new("ShaderNodeBsdfTransparent")
+    transparent.location = (200.0, -100.0)
+    mix = nodes.new("ShaderNodeMixShader")
+    mix.location = (400.0, 0.0)
+    color_out = vertex.outputs["Color"]
+    alpha_out = vertex.outputs["Alpha"]
+    texture_id = None
+    sky_texture_id = getattr(materials.reader, "sky_texture_id", None)
+    if texture_index is not None and texture_index != 0xFFFF_FFFF and callable(
+        sky_texture_id
+    ):
+        texture_id = sky_texture_id(texture_index)
+        try:
+            image = materials.image(texture_id)
+        except InsomniacError as exc:
+            materials.warnings.append(f"{name}: sky texture skipped: {exc}")
+        else:
+            texture = nodes.new("ShaderNodeTexImage")
+            texture.image = image
+            texture.location = (-600.0, 150.0)
+            color = nodes.new("ShaderNodeMixRGB")
+            color.blend_type = "MULTIPLY"
+            color.inputs[0].default_value = 1.0
+            color.location = (-200.0, 100.0)
+            links.new(texture.outputs["Color"], color.inputs[1])
+            links.new(vertex.outputs["Color"], color.inputs[2])
+            alpha = nodes.new("ShaderNodeMath")
+            alpha.operation = "MULTIPLY"
+            alpha.location = (-200.0, -100.0)
+            links.new(texture.outputs["Alpha"], alpha.inputs[0])
+            links.new(vertex.outputs["Alpha"], alpha.inputs[1])
+            color_out = color.outputs["Color"]
+            alpha_out = alpha.outputs["Value"]
+            material["insomniac_sky_texture"] = f"0x{texture_id:08X}"
+    links.new(color_out, emission.inputs["Color"])
+    links.new(alpha_out, mix.inputs["Fac"])
+    links.new(transparent.outputs["BSDF"], mix.inputs[1])
+    links.new(emission.outputs["Emission"], mix.inputs[2])
+    links.new(mix.outputs["Shader"], output.inputs["Surface"])
+    return material
 
 
 def _equirectangular_cubemap_image(

@@ -433,6 +433,21 @@ class RealRatchetTodTests(unittest.TestCase):
             self.assertEqual(len(zone.foliage_instances), 757)
             self.assertEqual(zone.unsupported_foliage_instances, 0)
 
+            sky = reader.read_sky()
+            self.assertEqual(
+                [
+                    (shell.section_id, len(shell.indices), shell.bloom)
+                    for shell in sky.shells
+                ],
+                [
+                    (0x8170, 1280, False),
+                    (0x8170, 2, False),
+                    (0x8170, 1280, True),
+                    (0x8170, 2, True),
+                ],
+            )
+            self.assertEqual(sky.cloud_texture_indices, (1290, 1291, 1292))
+
             cubemaps = reader.read_environment_cubemaps()
             self.assertEqual(len(cubemaps), 1)
             self.assertEqual(cubemaps[0].faces.shape, (6, 32, 32, 4))

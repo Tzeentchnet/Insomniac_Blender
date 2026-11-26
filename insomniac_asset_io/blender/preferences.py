@@ -260,10 +260,11 @@ class InsomniacAddonPreferences(bpy.types.AddonPreferences):
         default=False,
     )
     level_import_environment: bpy.props.BoolProperty(
-        name="Lighting and fog",
+        name="Lighting, fog, and sky",
         description=(
-            "Create the level's directional lights and a World with its "
-            "ambient colour and fog range, and make it the scene World"
+            "Create the level's directional lights, sky shells, and a "
+            "World with its ambient colour, fog range, and environment "
+            "cubemaps, and make it the scene World"
         ),
         default=True,
     )

@@ -44,7 +44,8 @@ discs. The TOD baked-lightmap pools (`0x5400`/`0x5410`), the Tie and UFrag
 lightmap indices, and the Tie lightmap-UV stream also follow ReLunacy; the
 stream's start offset was corrected on our disc. The old-engine cubemap
 layout (`0x5920` with `0x9650`/`0x9950` payloads) and its HDR alpha encoding
-also follow ReLunacy, as does the TOD animated-UV (`0x5C00`) layout.
+also follow ReLunacy, as do the TOD animated-UV (`0x5C00`) and sky
+(`0x8150`-`0x8170`) layouts.
 
 Tools of Destruction animation behavior was additionally checked through
 bounded static control-flow analysis using the MIT-licensed **Qwark's

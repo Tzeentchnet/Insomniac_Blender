@@ -42,6 +42,7 @@ if bpy is not None:
     from insomniac_asset_io.games.old_engine_cubemaps import (
         EnvironmentCubemap,
     )
+    from insomniac_asset_io.games.old_engine_sky import LevelSky, SkyShell
     from insomniac_asset_io.games.level_environment import (
         LevelBloom,
         LevelEnvironment,
@@ -1208,6 +1209,32 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
             EnvironmentCubemap(index=0, size=2, format_code=0x85, faces=faces)
         ]
 
+        def shell(index: int, bloom: bool) -> SkyShell:
+            return SkyShell(
+                section_id=0x8170,
+                index=index,
+                texture_index=0xFFFF_FFFF,
+                draw_order=index,
+                bloom=bloom,
+                rotation_z=0.0,
+                rotation_y=0.0,
+                spin_rate=0.0,
+                phase=0.0,
+                positions=np.asarray(
+                    ((1, 0, 0), (0, 1, 0), (0, 0, 1)),
+                    dtype=np.float32,
+                ),
+                colors=np.ones((3, 4), dtype=np.float32),
+                uvs=np.zeros((3, 2), dtype=np.float32),
+                indices=np.asarray(((0, 1, 2),), dtype=np.int32),
+            )
+
+        reader.read_sky = lambda: LevelSky(
+            shells=(shell(0, False), shell(1, True)),
+            cloud_texture_indices=(None, None, None),
+            time_scale=1.0,
+        )
+
         result = import_level(
             bpy.context,
             reader,
@@ -1221,7 +1248,19 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
             ),
             source_path="fixture",
         )
-        environment = result.root.users_collection[0].children["Environment"]
+        level_collection = result.root.users_collection[0]
+        sky_collection = level_collection.children["Sky"]
+        colour_shells = [
+            obj for obj in sky_collection.objects if obj.type == "MESH"
+        ]
+        self.assertEqual(len(colour_shells), 1)
+        self.assertFalse(colour_shells[0].visible_shadow)
+        self.assertFalse(colour_shells[0].visible_diffuse)
+        self.assertTrue(colour_shells[0].visible_camera)
+        bloom = sky_collection.children["Bloom Shells"]
+        self.assertTrue(bloom.hide_render)
+        self.assertEqual(len(bloom.objects), 1)
+        environment = level_collection.children["Environment"]
         suns = sorted(environment.objects, key=lambda obj: obj.name)
         self.assertEqual([obj.data.type for obj in suns], ["SUN", "SUN"])
         key = suns[0]

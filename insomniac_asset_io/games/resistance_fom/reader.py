@@ -1325,6 +1325,12 @@ class ResistanceFomReader(RatchetTodReader):
 
         return parse_rfom_environment(self.main)
 
+    def read_sky(self) -> None:
+        """RFoM's 0x8160/0x8170 shell records are 0x10 bytes, not TOD's
+        0x20; that layout is not decoded yet."""
+
+        return None
+
     def read_gameplay_regions(self) -> list[GameplayRegion]:
         if self.gameplay_path is None:
             return []

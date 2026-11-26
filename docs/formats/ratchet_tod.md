@@ -471,6 +471,35 @@ properties. How the fog coordinate reaches the GPU is unknown, so the fog is
 an authored setting, not a visual match. The `0x8C00` light volumes and
 `0x8D00` voxel data are not decoded. ReLunacy published these offsets.
 
+### Sky
+
+`main.dat` section `0x8150` is one `0x100`-byte sky definition; its
+`0xF8`/`0xFC` words locate a shared shell vertex stream in `vertices.dat`
+`0x9000` and an index stream in `0x9100`. Sections `0x8160` (drawn before
+the scene) and `0x8170` (after it) hold `0x20`-byte shell records:
+
+| Offset | Type | Meaning |
+|---|---|---|
+| `0x00` | `u32` | first index in the shared `u16` stream |
+| `0x04`, `0x06` | `u16` | index count and draw order |
+| `0x08` | `u32` | `0x5200` texture index |
+| `0x0C` | `u32` | bit 0: bloom (destination-alpha) shell, not colour |
+| `0x10`, `0x14` | `f32` | fixed Z and Y rotations, composed `Ry(phase) Rz(z) Ry(y)` |
+| `0x18`, `0x1C` | `f32` | spin rate and phase |
+
+Shell vertices are 16 bytes: `half4` position (W = 1), RGBA8 colour, and
+`half2` UV. The definition also names three cloud textures at
+`0xE8`/`0xEC`/`0xF0` and a sky time scale at `0x5C`. 19 of 20 levels have a
+sky, with 143 colour and 51 bloom shells; every shell parses, and its
+vertices lie within a radius of about 1 to 3.3.
+
+The importer builds one unlit, alpha-blended mesh per shell (texture ×
+vertex colour) in a Sky collection, parented to one empty scaled to 1,000 m
+because the game draws the sky at infinity around the camera. Shells cast
+no shadows and are visible to the camera only. Bloom shells are kept but
+hidden from render. The cloud layers, the spin animation, and the dome
+gradient parameters are not reproduced. ReLunacy published this layout.
+
 ### Environment cubemaps
 
 Section `0x5920` holds `0x20` texture descriptors with the cube bit set.

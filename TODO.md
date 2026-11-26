@@ -173,6 +173,8 @@ or evidence-blocked work and are not represented as implemented features.
 - [x] TOD baked lightmaps on Ties and UFrags (extension.md item 6).
 - [x] TOD/RFoM environment cubemaps (extension.md item 7).
 - [x] TOD animated UVs (extension.md item 9).
+- [x] TOD sky shells (extension.md item 10).
+- [ ] RFoM sky: its `0x8160`/`0x8170` shell records are `0x10` bytes.
 - [ ] RFoM baked lightmaps (`0x5500`) and the TOD light-direction pool.
 - [ ] R2/R3 gameplay class names: the `BUILT/GAME/DEBUG.DAT` enum table is
   present, but the class number has not been located in their Moby records.
