@@ -168,6 +168,8 @@ or evidence-blocked work and are not represented as implemented features.
   collision vertex slot order.
 - [x] TOD gameplay context: volumes, paths, Clues, controllers, pods, areas,
   and scents (extension.md item 5).
+- [x] TOD/RFoM level lighting and fog: ambient, two directional lights, fog
+  range, and bloom settings (extension.md item 8).
 - [ ] R2/R3 gameplay class names: the `BUILT/GAME/DEBUG.DAT` enum table is
   present, but the class number has not been located in their Moby records.
 - [ ] Global R3 effect-slot wiring: the slots contain unrelated runtime

@@ -20,6 +20,7 @@ except ModuleNotFoundError:
 
 
 if bpy is not None:
+    from mathutils import Vector
     from insomniac_asset_io.blender.importer import (
         AssetImportOptions,
         LevelImportOptions,
@@ -37,6 +38,12 @@ if bpy is not None:
     )
     from insomniac_asset_io.core.collision import (
         CollisionMesh as LevelCollisionMesh,
+    )
+    from insomniac_asset_io.games.level_environment import (
+        LevelBloom,
+        LevelEnvironment,
+        LevelFog,
+        LevelLight,
     )
     from insomniac_asset_io.games.resistance_2.formats import (
         AssetKind,
@@ -254,6 +261,7 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
             self.assertFalse(
                 properties["level_import_collision_geometry"].default
             )
+            self.assertTrue(properties["level_import_environment"].default)
             self.assertTrue(properties["asset_cache_vegetation"].default)
             self.assertTrue(
                 properties[
@@ -1162,6 +1170,87 @@ class BlenderOptionalGeometryTests(unittest.TestCase):
         scent = next(iter(region.children["Scents"].objects))
         self.assertEqual(scent.name, "scent_a")
         self.assertEqual(json.loads(scent["insomniac_clue_indices"]), [0])
+
+    def test_level_environment_creates_suns_and_world(self) -> None:
+        reader = _LevelReader()
+        reader.read_level_environment = lambda: LevelEnvironment(
+            ambient=(0.25, 0.3, 0.35),
+            lights=(
+                LevelLight(colour=(2.0, 1.0, 0.5), direction=(0.0, 1.0, 0.0)),
+                LevelLight(colour=(0.0, 0.0, 0.0), direction=(1.0, 0.0, 0.0)),
+            ),
+            light_volume_count=3,
+            version=2,
+            fog=LevelFog(
+                colour=(0.1, 0.2, 0.3),
+                near=20.0,
+                far=120.0,
+                amount=0.5,
+            ),
+            bloom=LevelBloom(
+                mip_weight=0.4,
+                history=0.3,
+                extract_scale=0.6,
+                extract_exponent=2.2,
+                intensity=0.6,
+                colour_extract=True,
+            ),
+            source="fixture",
+        )
+
+        result = import_level(
+            bpy.context,
+            reader,
+            LevelImportOptions(
+                materials=False,
+                terrain=False,
+                ties=False,
+                vegetation=False,
+                gameplay=False,
+                convert_axes=False,
+            ),
+            source_path="fixture",
+        )
+        environment = result.root.users_collection[0].children["Environment"]
+        suns = sorted(environment.objects, key=lambda obj: obj.name)
+        self.assertEqual([obj.data.type for obj in suns], ["SUN", "SUN"])
+        key = suns[0]
+        self.assertAlmostEqual(key.data.energy, 2.0)
+        np.testing.assert_allclose(tuple(key.data.color), (1.0, 0.5, 0.25))
+        # The Sun's +Z axis points towards the light (source +Y here).
+        z_axis = key.rotation_euler.to_matrix() @ Vector((0.0, 0.0, 1.0))
+        np.testing.assert_allclose(tuple(z_axis), (0.0, 1.0, 0.0), atol=1e-6)
+        self.assertAlmostEqual(suns[1].data.energy, 0.0)
+
+        world = bpy.context.scene.world
+        self.assertEqual(world.name, result.root["insomniac_world"])
+        np.testing.assert_allclose(tuple(world.color), (0.25, 0.3, 0.35))
+        self.assertAlmostEqual(world.mist_settings.start, 20.0)
+        self.assertAlmostEqual(world.mist_settings.depth, 100.0)
+        self.assertAlmostEqual(world["insomniac_fog_amount"], 0.5)
+        self.assertEqual(
+            json.loads(world["insomniac_bloom"])["extract_exponent"],
+            2.2,
+        )
+
+        disabled = import_level(
+            bpy.context,
+            reader,
+            LevelImportOptions(
+                materials=False,
+                terrain=False,
+                ties=False,
+                vegetation=False,
+                gameplay=False,
+                environment=False,
+                convert_axes=False,
+            ),
+            source_path="fixture",
+        )
+        self.assertNotIn(
+            "Environment",
+            disabled.root.users_collection[0].children,
+        )
 
     def test_optional_geometry_uses_dedicated_collections(self) -> None:
         result = import_moby(

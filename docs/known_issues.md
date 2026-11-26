@@ -30,8 +30,9 @@ The default-off level-collision option imports `ps3levelcoll.dat` world, Tie,
 and collision-only placed triangle geometry. The rare placed family does not
 correlate with the proven render placement tables, so its packed source index
 is preserved without assigning an unverified gameplay asset identity.
-Directional lightmaps, lighting, VFX, cubemaps, audio payloads, and renderable
-effect payloads are not decoded.
+The global ambient and two directional lights are imported as Sun lamps and
+a World. Directional lightmaps, light volumes, VFX, cubemaps, audio payloads,
+and renderable effect payloads are not decoded.
 
 Shrub meshes and clustered placements are imported. Foliage branch geometry
 and sprite cards are imported from the first authored LOD. Runtime vegetation
@@ -88,7 +89,10 @@ imported from the first authored LOD with masked, double-sided materials.
 Shrub meshes and clustered placements are imported from the embedded
 old-engine layout. Runtime vegetation wind, packed Shrub vertex metadata,
 Foliage custom normals, and camera-facing billboarding are not reproduced.
-Lighting, VFX, cubemaps, and audio remain outside the current level importer.
+Level fog, bloom, ambient colour, and the two directional lights are imported
+as Sun lamps and a World (the "Lighting and fog" level option, on by
+default); the fog is an authored range, not a visual match. Light volumes,
+VFX, cubemaps, and audio remain outside the current level importer.
 
 ## Resistance: Burning Skies (experimental)
 

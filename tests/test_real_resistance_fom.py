@@ -114,6 +114,16 @@ class RealResistanceFomDebugNameTests(unittest.TestCase):
             self.assertTrue((prepared / "game_ps3debug.dat").is_file())
             with GameSource.open(prepared) as source:
                 reader = ResistanceFomReader(source)
+                environment = reader.read_level_environment()
+                self.assertEqual(environment.version, 1)
+                self.assertEqual(len(environment.lights), 2)
+                self.assertIsNone(environment.fog)
+                for light in environment.lights:
+                    self.assertAlmostEqual(
+                        sum(value * value for value in light.direction),
+                        1.0,
+                        places=3,
+                    )
                 region = reader.read_gameplay_regions()[0]
                 self.assertEqual(
                     region.moby_instances[0].name,

@@ -377,13 +377,23 @@ Level20 contains 13,291 instances and 2,491 meshes: 995 world meshes, 1,491
 Tie meshes, and five collision-only placed meshes. The retained geometry has
 252,515 vertices and 363,870 faces.
 
+## Global lighting
+
+`ps3levelmain.dat` section `0x8A00` is one record: `{u32 light-volume
+offset (0x80), u32 light-volume count, u32 version (1)}`, ambient colour at
+`0x10`, two directional light colours at `0x20`/`0x30`, and unit directions
+towards the lights at `0x40`/`0x50`. Its length is `0x80` plus `0x80` per
+light volume. The importer creates the two Sun lamps and an ambient World,
+as for Tools of Destruction. RFoM has no `0x7100` fog record, and the light
+volumes are not decoded. ReLunacy published this layout.
+
 ## Current limitations
 
 - The family-3 `ps3levelcoll.dat` source table has not been correlated with a
   proven gameplay owner.
 - Directional lightmap textures in section `0x5500` are not imported.
-- Lighting, renderable VFX, cubemaps, audio payloads, and the opaque bodies of
-  embedded gameplay effect/marker payloads are not decoded.
+- Light volumes, renderable VFX, cubemaps, audio payloads, and the opaque
+  bodies of embedded gameplay effect/marker payloads are not decoded.
 - Shrub vertex colors, vegetation wind, foliage custom normals, and
   camera-facing billboard behavior are not reproduced.
 - Prototype assets keep deterministic numeric names; only gameplay records

@@ -259,6 +259,14 @@ class InsomniacAddonPreferences(bpy.types.AddonPreferences):
         ),
         default=False,
     )
+    level_import_environment: bpy.props.BoolProperty(
+        name="Lighting and fog",
+        description=(
+            "Create the level's directional lights and a World with its "
+            "ambient colour and fog range, and make it the scene World"
+        ),
+        default=True,
+    )
     level_convert_axes: bpy.props.BoolProperty(
         name="Y-up to Z-up",
         description="Rotate imported levels into Blender Z-up space",
@@ -310,6 +318,7 @@ class InsomniacAddonPreferences(bpy.types.AddonPreferences):
         level.prop(self, "level_import_vegetation")
         level.prop(self, "level_import_gameplay")
         level.prop(self, "level_import_collision_geometry")
+        level.prop(self, "level_import_environment")
         level.prop(self, "level_convert_axes")
 
         materials = layout.box()

@@ -399,6 +399,30 @@ class RealRatchetTodTests(unittest.TestCase):
             self.assertEqual(len(zone.foliage_instances), 757)
             self.assertEqual(zone.unsupported_foliage_instances, 0)
 
+            environment = reader.read_level_environment()
+            self.assertEqual(environment.version, 2)
+            self.assertEqual(environment.light_volume_count, 19)
+            np.testing.assert_allclose(
+                environment.ambient,
+                (0.49, 0.437, 0.257),
+                atol=1e-3,
+            )
+            self.assertEqual(len(environment.lights), 2)
+            self.assertEqual(
+                (environment.fog.near, environment.fog.far),
+                (80.0, 360.0),
+            )
+            self.assertAlmostEqual(environment.fog.amount, 0.6, places=5)
+            np.testing.assert_allclose(
+                (
+                    environment.bloom.extract_scale,
+                    environment.bloom.extract_exponent,
+                    environment.bloom.intensity,
+                ),
+                (0.6, 2.2, 0.6),
+                atol=1e-5,
+            )
+
             gameplay = reader.read_gameplay_regions()[0]
             self.assertEqual(gameplay.name, "art")
             self.assertTrue(gameplay.moby_instances)

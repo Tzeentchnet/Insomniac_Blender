@@ -46,6 +46,7 @@ from ..class_names import (
     read_class_id,
 )
 from .gameplay_context import read_tod_gameplay_context
+from ..level_environment import LevelEnvironment, parse_tod_environment
 from .debug_names import (
     GAME_DEBUG_CACHE_NAME,
     MAX_DEBUG_DAT_SIZE,
@@ -1711,6 +1712,11 @@ class RatchetTodReader(Resistance2Reader):
                 )
             )
         return terrain
+
+    def read_level_environment(self) -> LevelEnvironment | None:
+        """Level fog, bloom, ambient, and directional lights, if present."""
+
+        return parse_tod_environment(self.main)
 
     def read_gameplay_regions(self) -> list[GameplayRegion]:
         if self.gameplay_path is None:

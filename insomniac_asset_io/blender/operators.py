@@ -1042,6 +1042,7 @@ class INSOMNIAC_OT_import_level(bpy.types.Operator):
                         collision_geometry=(
                             preferences.level_import_collision_geometry
                         ),
+                        environment=preferences.level_import_environment,
                         convert_axes=preferences.level_convert_axes,
                         cycles_materials=cycles_materials_enabled(context),
                     ),

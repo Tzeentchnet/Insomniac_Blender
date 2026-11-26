@@ -35,6 +35,7 @@ from ..resistance_2.formats import (
 )
 from ..resistance_2.reader import MAX_BONES, MAX_MESHES, _matrix_from_zyx
 from ..resistance_2.textures import texture_mip_size
+from ..level_environment import LevelEnvironment, parse_rfom_environment
 from ..class_names import (
     ClassNames,
     class_name,
@@ -1313,6 +1314,11 @@ class ResistanceFomReader(RatchetTodReader):
                 )
             )
         return terrain
+
+    def read_level_environment(self) -> LevelEnvironment | None:
+        """The 0x8A00 ambient and directional lights; RFoM has no fog record."""
+
+        return parse_rfom_environment(self.main)
 
     def read_gameplay_regions(self) -> list[GameplayRegion]:
         if self.gameplay_path is None:

@@ -377,6 +377,36 @@ ReLunacy (`docs/reverse/tod_volumes_clues_paths.md`) published the section
 IDs and most layouts. The Clue and area record layouts, the shape byte, and
 the volume half-extent were corrected or settled on our disc.
 
+## Fog, bloom, and global lighting
+
+`main.dat` holds one `0xF0` fog record in section `0x7100` and one `0x80`
+lighting root in `0x8B00` on all 20 levels.
+
+| Offset | Type | Meaning |
+|---|---|---|
+| `0x7100 + 0x40` | `vec3` | fog colour |
+| `0x7100 + 0x4C` | `f32[3]` | fog near, far, and amount |
+| `0x7100 + 0x70` | `u32` | bloom enabled (1 on every level) |
+| `0x7100 + 0x74`, `0x78` | `f32` | bloom mip weight and history |
+| `0x7100 + 0x80`..`0x88` | `f32[3]` | bloom extract scale, extract exponent, and intensity |
+| `0x7100 + 0x8C` | `u32` | bloom colour extract |
+| `0x8B00 + 0x00` | `u32` | version, `2` on every level |
+| `0x8B00 + 0x08` | `u32` | light-volume count (`0x8C00`) |
+| `0x8B00 + 0x20` | `vec3` | ambient colour |
+| `0x8B00 + 0x30`, `0x40` | `vec3` | directional light colours |
+| `0x8B00 + 0x50`, `0x60` | `vec3` | unit directions towards each light |
+
+Every level has `near < far`, fog colour channels within 0..1, and unit
+light directions; the key light points up (positive Y) on every planet
+level. Metropolis's bloom extract (0.6, 2.2, 0.6) and Meridian City's
+(0.85, 1.8, 0.8) equal the shader constants ReLunacy reported. The importer
+creates two Sun lamps (normalized colour, peak channel as strength) and a
+World with the ambient colour as background and the fog range as mist, and
+makes it the scene World. Fog and bloom values are also kept as World custom
+properties. How the fog coordinate reaches the GPU is unknown, so the fog is
+an authored setting, not a visual match. The `0x8C00` light volumes and
+`0x8D00` voxel data are not decoded. ReLunacy published these offsets.
+
 ## Level collision
 
 `collision.dat` is a separate raw big-endian resource, not an IGHW

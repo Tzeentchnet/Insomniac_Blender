@@ -40,7 +40,8 @@ Source paths name files in the ReLunacy repository. Paths under `Loading/`,
 | 12 | Done, and extended | `insomniac_no_wall_jump` boolean face attribute on TOD level collision. Collision material bytes are now named from `kMaterialID`, and the collision vertex slot order was corrected. |
 | 13 | Corroborated | Our TOD reader already reads the bangle count at `+0x18` and the table at `+0x28`; no change needed. |
 | 5 | Done for TOD | All seven families on all 20 levels. The Clue and area layouts were corrected, and the volume half-extent settled at 1.0 (see below). |
-| 6–11, 15–16 | Not started | |
+| 8 | Done for TOD and RFoM | Fog and bloom (TOD) and the ambient and two directional lights (both). Light volumes are not decoded. |
+| 6–7, 9–11, 15–16 | Not started | |
 
 The sections below keep the original review text. Where the work above has
 overtaken it, a **Status** line says so, and the corrections that follow
@@ -188,7 +189,7 @@ Corrections to the review below, from our `BCUS98127` and `BCUS98107` discs:
 | 5 | Gameplay context: volumes, paths, Clues, controllers, areas, pods, scents | TOD | **Done** | Medium | High |
 | 6 | Old-engine baked lightmaps and lightmap UVs | TOD, RFoM | Lightmaps only on R2/R3 | Med–High | High |
 | 7 | Environment cubemaps | TOD, RFoM | Not decoded | Medium | Medium |
-| 8 | Level fog, bloom, and lighting environment | TOD, RFoM | Not decoded | Low–Med | Medium |
+| 8 | Level fog, bloom, and lighting environment | TOD, RFoM | **Done**, except light volumes | Low–Med | Medium |
 | 9 | UV scroll/rotate animation (`0x5C00`) | TOD?, new engine | Not decoded | Medium | Medium |
 | 10 | Sky definitions and shell mesh | TOD | Not decoded | Medium | Medium |
 | 11 | Tie shader feature bits and material vectors | TOD | Partial | Medium | Medium |
@@ -199,7 +200,7 @@ Corrections to the review below, from our `BCUS98127` and `BCUS98107` discs:
 | 16 | Newer-engine Ratchet adapters | ACiT, QForce, A4O, ITN | Unsupported | High | Medium |
 
 The original recommended order was 14, 1, 2, 4, 3, 5, 8, 6, 7, 9, 10.
-With items 1–5 and 12–14 finished, the remaining order is 8, 6, 7, 9, 10,
+With items 1–5, 8, and 12–14 finished, the remaining order is 6, 7, 9, 10,
 then 11. Item 4 can also be extended to RFoM, R2, and R3 after a visual
 review, and item 3 to R2/R3 once their class number is located. Item 6
 needs the most new data.
@@ -453,6 +454,13 @@ ReLunacy source: `Loading/Readers/CubemapReader.cs`.
   the World background or a reflection probe.
 
 ## 8. Fog, bloom, and lighting environment
+
+**Status:** done for TOD and RFoM; see
+[ratchet_tod.md](formats/ratchet_tod.md) and
+[resistance_fom.md](formats/resistance_fom.md). All offsets below held on
+every TOD level and on the RFoM levels checked. Light directions point
+towards the light. The `0x8C00`/`0x8D00` light volumes and voxel grids are
+not decoded.
 
 ReLunacy sources: `Assets/Lighting/LevelFog.cs`,
 `Loading/Readers/LightingEnvironmentReader.cs`.

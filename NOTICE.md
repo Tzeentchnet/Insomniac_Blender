@@ -38,6 +38,10 @@ The Tools of Destruction gameplay context section IDs and record layouts
 ReLunacy's research. The Clue and area record layouts, the volume shape
 byte, and the volume half-extent were corrected or established on our disc.
 
+The old-engine fog, bloom, and lighting-root offsets (TOD `0x7100` and
+`0x8B00`, RFoM `0x8A00`) follow ReLunacy's research and were checked on our
+discs.
+
 Tools of Destruction animation behavior was additionally checked through
 bounded static control-flow analysis using the MIT-licensed **Qwark's
 Awakening** recompilation framework:

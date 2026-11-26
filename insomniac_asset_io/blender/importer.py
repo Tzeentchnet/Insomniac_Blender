@@ -21,6 +21,7 @@ from ..core.collision import (
     validate_collision_scene,
 )
 from ..core.errors import InsomniacError
+from ..games.level_environment import LevelEnvironment
 from ..games.resistance_2.formats import (
     AssetKind,
     CollisionMesh,
@@ -138,6 +139,7 @@ class LevelImportOptions:
     vegetation: bool = True
     gameplay: bool = True
     collision_geometry: bool = False
+    environment: bool = True
     convert_axes: bool = True
     cycles_materials: bool = False
 
@@ -4433,6 +4435,23 @@ def import_level(
                 result,
             )
 
+    if options.environment:
+        read_environment = getattr(reader, "read_level_environment", None)
+        if callable(read_environment):
+            try:
+                environment = read_environment()
+            except InsomniacError as exc:
+                warnings.append(f"Level lighting and fog skipped: {exc}")
+            else:
+                if environment is not None:
+                    result.objects += _import_level_environment(
+                        context,
+                        collection,
+                        root,
+                        environment,
+                        f"{_reader_asset_prefix(reader)}_{level_name}",
+                    )
+
     # Level materials are built lazily while terrain, ties and mobys are
     # placed, so release only after the last one.
     # See _MaterialFactory.release_decoded_textures.
@@ -4441,6 +4460,89 @@ def import_level(
     result.materials = materials.material_count
     result.images = len(materials.images)
     return result
+
+
+def _import_level_environment(
+    context: bpy.types.Context,
+    collection: bpy.types.Collection,
+    root: bpy.types.Object,
+    environment: LevelEnvironment,
+    name: str,
+) -> int:
+    """Create the level's directional lights and an ambient/fog World.
+
+    Sun lamps take the authored colour, normalized, with its peak channel as
+    the strength. The World background is the ambient colour, and the fog
+    range drives the World mist settings. Bloom and the raw fog values are
+    kept as custom properties: they are authored settings, not a verified
+    visual match.
+    """
+
+    environment_collection = _child_collection(collection, "Environment")
+    environment_collection["insomniac_geometry_kind"] = "ENVIRONMENT"
+    for index, light in enumerate(environment.lights):
+        peak = max(light.colour)
+        lamp = bpy.data.lights.new(f"{name}_Light_{index}", "SUN")
+        lamp.color = (
+            tuple(channel / peak for channel in light.colour)
+            if peak > 0.0
+            else (1.0, 1.0, 1.0)
+        )
+        lamp.energy = max(peak, 0.0)
+        obj = bpy.data.objects.new(lamp.name, lamp)
+        environment_collection.objects.link(obj)
+        obj.parent = root
+        # The stored direction points towards the light; a Sun shines
+        # along its local -Z, so its +Z axis follows the direction.
+        obj.matrix_local = (
+            Vector((0.0, 0.0, 1.0))
+            .rotation_difference(Vector(light.direction))
+            .to_matrix()
+            .to_4x4()
+        )
+        obj["insomniac_light_index"] = index
+        obj["insomniac_light_colour"] = light.colour
+        obj["insomniac_light_direction"] = light.direction
+
+    world = bpy.data.worlds.new(f"{name}_Environment")
+    world.color = environment.ambient
+    if world.node_tree is not None:
+        background = world.node_tree.nodes.get("Background")
+        if background is not None:
+            background.inputs["Color"].default_value = (
+                *environment.ambient,
+                1.0,
+            )
+    world["insomniac_ambient_colour"] = environment.ambient
+    world["insomniac_environment_source"] = environment.source
+    world["insomniac_lighting_version"] = environment.version
+    world["insomniac_light_volume_count"] = environment.light_volume_count
+    if environment.fog is not None:
+        fog = environment.fog
+        world.mist_settings.start = fog.near
+        world.mist_settings.depth = fog.far - fog.near
+        world.mist_settings.falloff = "LINEAR"
+        world["insomniac_fog_colour"] = fog.colour
+        world["insomniac_fog_near"] = fog.near
+        world["insomniac_fog_far"] = fog.far
+        world["insomniac_fog_amount"] = fog.amount
+    if environment.bloom is not None:
+        bloom = environment.bloom
+        world["insomniac_bloom"] = json.dumps(
+            {
+                "mip_weight": bloom.mip_weight,
+                "history": bloom.history,
+                "extract_scale": bloom.extract_scale,
+                "extract_exponent": bloom.extract_exponent,
+                "intensity": bloom.intensity,
+                "colour_extract": bloom.colour_extract,
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    root["insomniac_world"] = world.name
+    context.scene.world = world
+    return len(environment.lights)
 
 
 def _new_collection(
